@@ -1,0 +1,876 @@
+import React, { useState, useEffect, useMemo, useRef } from 'react';
+import { 
+  Menu, Search, Bell, Calendar, User, MapPin, Activity, Wifi, 
+  CheckCircle, AlertCircle, Clock, ChevronDown, LayoutDashboard, 
+  Users, Settings, FileText, LogOut, Briefcase, Phone, MessageCircle, 
+  Mail, Target, Shield, Server, Network, Plus, MoreVertical, Filter, 
+  BarChart3, TrendingUp, AlertTriangle, CheckSquare, X, Paperclip, 
+  File, Download, UploadCloud, BookOpen, Database, Terminal, Key, 
+  Eye, EyeOff, Copy, ChevronRight, ChevronLeft, Hash, ArrowLeft, 
+  Save, StickyNote, Trash2, PieChart, Zap, Lock, List, Flag,
+  DownloadCloud, Sliders, AlertOctagon, ExternalLink, UserCog, UserMinus,
+  ArrowRight, RefreshCw, Power, Edit3, KeyRound, Globe, LayoutTemplate,
+  MessageSquare, UserCheck, LogIn, Moon, Sun, SlidersHorizontal, Link2
+} from 'lucide-react';
+
+const cn = (...classes) => classes.filter(Boolean).join(' ');
+
+const CLIENT_NAME = 'TONYNET';
+const CLIENT_DOC = '16.893.178/0001-49';
+
+const SERVICE_TYPES = [
+  'Rompimento',
+  'Lentidão',
+  'Configuração ONU',
+  'Troca de Senha',
+  'Cancelamento',
+  'Auditoria',
+  'Instalação',
+];
+
+const STATUS_LIST = ['Aberta', 'Em Análise', 'Ag. Campo', 'Ag. Terceiros', 'Fechada'];
+const PRIORITY_LIST = ['Baixa', 'Média', 'Alta', 'Crítica'];
+
+const randomFrom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+const pad = (n) => String(n).padStart(2, '0');
+
+const formatDateTime = (date) =>
+  `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())} ${pad(date.getHours())}:${pad(
+    date.getMinutes()
+  )}`;
+
+const parseDateTime = (value) => new Date(value.replace(' ', 'T'));
+
+const addHours = (date, hours) => new Date(date.getTime() + hours * 60 * 60 * 1000);
+
+const toBrDate = (value) => {
+  if (!value) return '-';
+  const [date, time] = value.split(' ');
+  const [y, m, d] = date.split('-');
+  return `${d}/${m}/${y}${time ? ` ${time}` : ''}`;
+};
+
+const getServiceTypeStyle = (type) => {
+  const styles = [
+    'bg-cyan-950/30 text-cyan-400 border-cyan-800 hover:bg-cyan-900/50',
+    'bg-indigo-950/30 text-indigo-400 border-indigo-800 hover:bg-indigo-900/50',
+    'bg-emerald-950/30 text-emerald-400 border-emerald-800 hover:bg-emerald-900/50',
+    'bg-amber-950/30 text-amber-400 border-amber-800 hover:bg-amber-900/50',
+    'bg-rose-950/30 text-rose-400 border-rose-800 hover:bg-rose-900/50',
+    'bg-violet-950/30 text-violet-400 border-violet-800 hover:bg-violet-900/50',
+  ];
+  let hash = 0;
+  for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
+  return styles[Math.abs(hash) % styles.length];
+};
+
+const getStatusMeta = (status) => {
+  const map = {
+    Aberta: { badge: 'blue', dot: 'bg-blue-400' },
+    'Em Análise': { badge: 'cyan', dot: 'bg-cyan-400' },
+    'Ag. Campo': { badge: 'orange', dot: 'bg-amber-400' },
+    'Ag. Terceiros': { badge: 'purple', dot: 'bg-purple-400' },
+    Fechada: { badge: 'green', dot: 'bg-emerald-400' },
+  };
+  return map[status] || { badge: 'slate', dot: 'bg-slate-400' };
+};
+
+const getPriorityMeta = (priority) => {
+  const map = {
+    Baixa: 'slate',
+    Média: 'blue',
+    Alta: 'orange',
+    Crítica: 'red',
+  };
+  return map[priority] || 'slate';
+};
+
+const generateMockOrders = (count, provider = 'FibraNet Sul') =>
+  Array.from({ length: count }).map((_, idx) => {
+    const createdAt = addHours(new Date(), -(idx * 7 + Math.floor(Math.random() * 8)));
+    const deadlineAt = addHours(createdAt, Math.floor(Math.random() * 36) + 12);
+    const status = randomFrom(STATUS_LIST);
+    const isClosed = status === 'Fechada';
+    const priority = randomFrom(PRIORITY_LIST);
+    const type = randomFrom(SERVICE_TYPES);
+    const created = formatDateTime(createdAt);
+    const deadline = formatDateTime(deadlineAt);
+    const closedAt = isClosed ? formatDateTime(addHours(deadlineAt, -Math.floor(Math.random() * 6))) : null;
+
+    return {
+      id: `OS-${202400 + idx}`,
+      protocol: `${new Date().getFullYear()}${String(100000 + idx * 19).padStart(6, '0')}`,
+      provider,
+      tech: randomFrom(['Carlos Silva', 'Roberto Almeida', 'Fernanda Costa', 'João Pereira', null]),
+      type,
+      priority,
+      status,
+      created_at: created,
+      deadline,
+      closed_at: closedAt,
+      is_overdue: !isClosed && parseDateTime(deadline) < new Date(),
+      description: `Cliente relata ${type.toLowerCase()} com impacto em conexão e estabilidade.`,
+      contract: `CT-${3000 + idx}`,
+      city: randomFrom(['Recife', 'Olinda', 'Jaboatão', 'Paulista']),
+      sector: randomFrom(['NOC', 'SAC', 'Suporte N1']),
+      occurrences: [
+        { date: created, user: 'Sistema', text: 'Abertura automática via integração.' },
+        { date: formatDateTime(addHours(createdAt, 1)), user: 'NOC N1', text: 'Análise inicial realizada.' }
+      ]
+    };
+  });
+
+const Badge = ({ children, color, className }) => {
+  const colors = {
+    green: 'bg-emerald-950/40 text-emerald-400 border-emerald-800/50',
+    blue: 'bg-blue-950/40 text-blue-400 border-blue-800/50',
+    red: 'bg-rose-950/40 text-rose-400 border-rose-800/50',
+    orange: 'bg-amber-950/40 text-amber-400 border-amber-800/50',
+    slate: 'bg-slate-800/50 text-slate-400 border-slate-700',
+    purple: 'bg-purple-950/40 text-purple-400 border-purple-800/50',
+    cyan: 'bg-cyan-950/40 text-cyan-400 border-cyan-800/50',
+  };
+
+  return (
+    <span className={cn('px-2.5 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap', colors[color] || colors.slate, className)}>
+      {children}
+    </span>
+  );
+};
+
+const ServiceTypeBadge = ({ type }) => (
+  <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase tracking-wider whitespace-nowrap', getServiceTypeStyle(type))}>
+    {type}
+  </span>
+);
+
+const SidebarItem = ({ icon: Icon, label, active = false, onClick }) => (
+  <button
+    onClick={onClick}
+    className={cn(
+      'w-full flex items-center space-x-3 px-4 py-3 transition-all border-l-2 text-left',
+      active ? 'border-blue-500 bg-slate-800/50 text-white' : 'border-transparent text-slate-400 hover:text-slate-200 hover:bg-slate-800/30'
+    )}
+  >
+    <Icon size={20} className={active ? 'text-blue-400' : 'text-slate-500'} />
+    <span className="font-medium text-sm">{label}</span>
+  </button>
+);
+
+const KpiCard = ({ title, value, icon: Icon, colorClass = 'text-blue-400', bgClass = 'bg-blue-900/20', subtitle }) => (
+  <div className="bg-[#1e293b] p-5 rounded-xl border border-slate-800 shadow-sm flex items-center justify-between hover:border-slate-700 transition-colors">
+    <div>
+      <p className="text-[11px] font-bold text-slate-400 uppercase tracking-wider mb-1">{title}</p>
+      <h3 className="text-3xl font-bold text-white">{value}</h3>
+      {subtitle && <p className="text-xs text-slate-500 mt-1">{subtitle}</p>}
+    </div>
+    <div className={cn('p-3 rounded-lg', bgClass, colorClass)}>
+      <Icon size={24} />
+    </div>
+  </div>
+);
+
+const Modal = ({ title, children, onClose, actions, maxWidth = 'max-w-xl' }) => (
+  <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-slate-950/80 backdrop-blur-sm" onClick={onClose} />
+    <div className={cn('relative w-full bg-[#1e293b] border border-slate-800 rounded-xl shadow-2xl overflow-hidden', maxWidth)}>
+      <div className="px-6 py-4 border-b border-slate-800 flex justify-between items-center">
+        <h3 className="font-bold text-white">{title}</h3>
+        <button onClick={onClose} className="text-slate-400 hover:text-white">
+          <X size={20} />
+        </button>
+      </div>
+      <div className="p-6">{children}</div>
+      {actions && <div className="px-6 py-4 bg-slate-900 border-t border-slate-800 flex justify-end gap-2">{actions}</div>}
+    </div>
+  </div>
+);
+
+const ClientOSDetailsDrawer = ({ os, onClose, onCopyLink }) => {
+  useEffect(() => {
+    if (!os) return;
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, [os]);
+
+  if (!os) return null;
+
+  const statusMeta = getStatusMeta(os.status);
+
+  return (
+    <div className="fixed inset-0 z-[80] flex items-center justify-center p-0 sm:p-6 animate-in fade-in duration-200">
+      <div className="absolute inset-0 bg-black/80 backdrop-blur-sm transition-opacity" onClick={onClose} />
+      <div className="relative w-full max-w-[920px] h-[90vh] bg-[#1e293b] sm:rounded-xl shadow-2xl border border-slate-700 flex flex-col overflow-hidden animate-in zoom-in-95">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-slate-800 bg-[#1e293b]">
+          <div>
+            <div className="flex items-center gap-3">
+              <span className="text-lg font-bold text-white font-mono">Protocolo #{os.protocol}</span>
+              <Badge color={statusMeta.badge}>{os.status}</Badge>
+              <Badge color={getPriorityMeta(os.priority)}>{os.priority}</Badge>
+            </div>
+            <p className="text-xs text-slate-500 mt-1">Visualização somente leitura</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-slate-800 rounded-full text-slate-400 hover:text-white">
+            <X size={24} />
+          </button>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar bg-[#0f172a] p-6 space-y-6">
+          <div className="bg-[#1e293b] border border-slate-800 rounded-xl p-5">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-3">Dados Gerais</h3>
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4 text-sm">
+              <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+                <span className="text-xs uppercase text-slate-500 block mb-1">Cliente</span>
+                <span className="text-slate-300">{os.provider}</span>
+              </div>
+              <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+                <span className="text-xs uppercase text-slate-500 block mb-1">Tipo</span>
+                <ServiceTypeBadge type={os.type} />
+              </div>
+              <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+                <span className="text-xs uppercase text-slate-500 block mb-1">Setor</span>
+                <span className="text-slate-300">{os.sector}</span>
+              </div>
+              <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+                <span className="text-xs uppercase text-slate-500 block mb-1">Abertura</span>
+                <span className="text-slate-300">{toBrDate(os.created_at)}</span>
+              </div>
+              <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+                <span className="text-xs uppercase text-slate-500 block mb-1">Prazo</span>
+                <span className={cn('font-mono', os.is_overdue && os.status !== 'Fechada' ? 'text-rose-400' : 'text-slate-300')}>
+                  {toBrDate(os.deadline)}
+                </span>
+              </div>
+              <div className="bg-slate-900/50 border border-slate-800 rounded-lg p-3">
+                <span className="text-xs uppercase text-slate-500 block mb-1">Técnico</span>
+                <span className="text-slate-300">{os.tech || 'Aguardando atribuição'}</span>
+              </div>
+            </div>
+          </div>
+
+          <div className="bg-[#1e293b] border border-slate-800 rounded-xl p-5">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-2">Descrição Técnica</h3>
+            <p className="text-slate-300 text-sm leading-relaxed">{os.description}</p>
+          </div>
+          
+           <div>
+                <h3 className="font-bold text-white mb-4 flex items-center"><MessageSquare size={18} className="mr-2 text-blue-500"/> Acompanhamento</h3>
+                <div className="space-y-4">
+                   {(os.occurrences || []).map((occ, idx) => (
+                       <div key={idx} className="flex gap-4">
+                           <div className="w-8 h-8 rounded-full bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-400 font-bold text-xs flex-shrink-0">{occ.user.charAt(0)}</div>
+                           <div className="bg-[#1e293b] p-4 rounded-lg border border-slate-800 shadow-sm flex-1 relative">
+                               <div className="flex justify-between items-center mb-1"><span className="font-bold text-xs text-blue-400">{occ.user}</span><span className="text-[10px] text-slate-500 font-mono">{occ.date}</span></div>
+                               <p className="text-sm text-slate-300">{occ.text}</p>
+                           </div>
+                       </div>
+                   ))}
+                </div>
+            </div>
+
+          <div className="bg-[#1e293b] border border-slate-800 rounded-xl p-5">
+            <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400 mb-3">Acesso por Link</h3>
+            <div className="flex flex-col md:flex-row gap-3">
+              <button
+                onClick={() => onCopyLink(os.protocol)}
+                className="inline-flex items-center justify-center gap-2 px-4 py-2 border border-slate-700 rounded-lg text-sm text-slate-200 hover:bg-slate-800"
+              >
+                <Copy size={15} />
+                Copiar link do protocolo
+              </button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ClientDashboardView = ({ orders, onOpenOrder, onCopyLink }) => {
+  const [searchTerm, setSearchTerm] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Ativas');
+  const [typeFilter, setTypeFilter] = useState('Todos');
+  const [page, setPage] = useState(1);
+  const perPage = 12;
+
+  const kpis = useMemo(() => {
+    const active = orders.filter((o) => o.status !== 'Fechada');
+    const closed = orders.filter((o) => o.status === 'Fechada');
+    const monthKey = new Date().toISOString().slice(0, 7);
+    const openedMonth = orders.filter((o) => o.created_at.slice(0, 7) === monthKey).length;
+    const closedMonth = orders.filter((o) => o.closed_at && o.closed_at.slice(0, 7) === monthKey).length;
+    const overdue = active.filter((o) => parseDateTime(o.deadline) < new Date()).length;
+    return { active, closed, openedMonth, closedMonth, overdue };
+  }, [orders]);
+
+  const filtered = useMemo(() => {
+    const term = searchTerm.trim().toLowerCase();
+
+    const result = orders.filter((os) => {
+      const bySearch =
+        !term ||
+        os.protocol.toLowerCase().includes(term) ||
+        os.description.toLowerCase().includes(term) ||
+        os.type.toLowerCase().includes(term);
+
+      const byStatus =
+        statusFilter === 'Todas'
+          ? true
+          : statusFilter === 'Ativas'
+          ? os.status !== 'Fechada'
+          : statusFilter === 'Fechadas'
+          ? os.status === 'Fechada'
+          : os.status === statusFilter;
+
+      const byType = typeFilter === 'Todos' ? true : os.type === typeFilter;
+      return bySearch && byStatus && byType;
+    });
+
+    return result.sort((a, b) => parseDateTime(b.created_at) - parseDateTime(a.created_at));
+  }, [orders, searchTerm, statusFilter, typeFilter]);
+
+  useEffect(() => {
+    setPage(1);
+  }, [searchTerm, statusFilter, typeFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / perPage));
+  const currentPage = Math.min(page, totalPages);
+  const paginated = filtered.slice((currentPage - 1) * perPage, currentPage * perPage);
+
+  return (
+    <div className="space-y-8">
+      <div>
+        <h2 className="text-2xl font-bold text-white">Painel de Ordens de Serviço</h2>
+        <p className="text-slate-400 text-sm mt-1">Portal cliente com visualização completa das O.S.</p>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-4">
+        <KpiCard title="Em Aberto" value={kpis.active.length} icon={Clock} colorClass="text-blue-400" bgClass="bg-blue-900/20" />
+        <KpiCard title="Total de O.S" value={orders.length} icon={FileText} colorClass="text-indigo-400" bgClass="bg-indigo-900/20" />
+        <KpiCard title="Entradas no Mês" value={kpis.openedMonth} icon={Calendar} colorClass="text-amber-400" bgClass="bg-amber-900/20" />
+        <KpiCard title="Concluídas no Mês" value={kpis.closedMonth} icon={CheckCircle} colorClass="text-emerald-400" bgClass="bg-emerald-900/20" />
+        <KpiCard title="Atrasadas" value={kpis.overdue} icon={AlertTriangle} colorClass="text-rose-400" bgClass="bg-rose-900/20" />
+      </div>
+
+      <div className="bg-[#1e293b] rounded-xl border border-slate-800 p-4">
+        <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+          <div className="lg:col-span-6 relative">
+            <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <input
+              value={searchTerm}
+              onChange={(e) => setSearchTerm(e.target.value)}
+              placeholder="Buscar por protocolo, tipo ou texto..."
+              className="w-full pl-10 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200 placeholder:text-slate-600"
+            />
+          </div>
+
+          <div className="lg:col-span-3 relative">
+            <Filter size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200"
+            >
+              <option>Todas</option>
+              <option>Ativas</option>
+              <option>Fechadas</option>
+              <option>Aberta</option>
+              <option>Em Análise</option>
+              <option>Ag. Campo</option>
+              <option>Ag. Terceiros</option>
+            </select>
+          </div>
+
+          <div className="lg:col-span-3 relative">
+            <SlidersHorizontal size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-500" />
+            <select
+              value={typeFilter}
+              onChange={(e) => setTypeFilter(e.target.value)}
+              className="w-full pl-9 pr-3 py-2 bg-slate-900 border border-slate-700 rounded-lg text-sm text-slate-200"
+            >
+              <option>Todos</option>
+              {SERVICE_TYPES.map((type) => (
+                <option key={type}>{type}</option>
+              ))}
+            </select>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-[#1e293b] rounded-xl border border-slate-800 overflow-hidden min-h-[520px] flex flex-col">
+        <div className="grid grid-cols-12 px-6 py-3 border-b border-slate-800 bg-slate-900/30 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+          <div className="col-span-2">Protocolo</div>
+          <div className="col-span-2">Tipo</div>
+          <div className="col-span-3">Descrição</div>
+          <div className="col-span-1 text-center">Prioridade</div>
+          <div className="col-span-2 text-center">Status</div>
+          <div className="col-span-1 text-right">Prazo</div>
+          <div className="col-span-1 text-right">Ações</div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar">
+          {paginated.length === 0 && (
+            <div className="h-64 flex flex-col items-center justify-center text-slate-500">
+              <AlertCircle size={30} className="mb-2 opacity-60" />
+              Nenhuma O.S encontrada com os filtros selecionados.
+            </div>
+          )}
+
+          {paginated.map((os) => {
+            const statusMeta = getStatusMeta(os.status);
+
+            return (
+              <div key={os.id} className="grid grid-cols-12 px-6 py-3 border-b border-slate-800/60 hover:bg-slate-800/30 items-center">
+                <button onClick={() => onOpenOrder(os)} className="col-span-2 text-left font-mono text-sm text-blue-300 hover:text-blue-200 inline-flex items-center gap-1">
+                  {os.protocol}
+                  <ExternalLink size={13} />
+                </button>
+                <div className="col-span-2">
+                  <ServiceTypeBadge type={os.type} />
+                </div>
+                <div className="col-span-3 text-sm text-slate-400 truncate pr-3">{os.description}</div>
+                <div className="col-span-1 text-center">
+                  <Badge color={getPriorityMeta(os.priority)}>{os.priority}</Badge>
+                </div>
+                <div className="col-span-2 text-center">
+                  <span className="inline-flex items-center gap-2">
+                    <span className={cn('w-2 h-2 rounded-full', statusMeta.dot)} />
+                    <Badge color={statusMeta.badge}>{os.status}</Badge>
+                  </span>
+                </div>
+                <div className={cn('col-span-1 text-right text-xs font-mono', os.is_overdue && os.status !== 'Fechada' ? 'text-rose-400' : 'text-slate-400')}>
+                  {toBrDate(os.deadline).slice(0, 10)}
+                </div>
+                <div className="col-span-1 flex justify-end gap-2">
+                  <button
+                    onClick={() => onCopyLink(os.protocol)}
+                    className="p-1.5 border border-slate-700 rounded hover:bg-slate-800 text-slate-300"
+                    title="Copiar link do protocolo"
+                  >
+                    <Copy size={13} />
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+
+        <div className="px-6 py-3 border-t border-slate-800 bg-slate-900/40 flex items-center justify-between">
+          <span className="text-xs text-slate-500">
+            Página {currentPage} de {totalPages} ({filtered.length} registros)
+          </span>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setPage((p) => Math.max(1, p - 1))}
+              disabled={currentPage === 1}
+              className="px-3 py-1.5 text-xs border border-slate-700 rounded text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+            >
+              Anterior
+            </button>
+            <button
+              onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
+              disabled={currentPage === totalPages}
+              className="px-3 py-1.5 text-xs border border-slate-700 rounded text-slate-300 hover:bg-slate-800 disabled:opacity-40"
+            >
+              Próximo
+            </button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ClientSettingsView = ({ logo, setLogo, users, setUsers, notify }) => {
+  const [showAddUser, setShowAddUser] = useState(false);
+  const [newUser, setNewUser] = useState({ name: '', email: '', role: 'Leitura' });
+  const [error, setError] = useState('');
+
+  const onLogoChange = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    const preview = URL.createObjectURL(file);
+    setLogo({ name: file.name, preview });
+    notify('Logo atualizada no mockup.');
+  };
+
+  const addUser = () => {
+    if (!newUser.name.trim() || !newUser.email.trim()) {
+      setError('Preencha nome e e-mail.');
+      return;
+    }
+
+    setUsers((prev) => [
+      {
+        id: Date.now(),
+        name: newUser.name.trim(),
+        email: newUser.email.trim().toLowerCase(),
+        role: newUser.role,
+        active: true,
+      },
+      ...prev,
+    ]);
+    setNewUser({ name: '', email: '', role: 'Leitura' });
+    setError('');
+    setShowAddUser(false);
+    notify('Usuário adicionado.');
+  };
+
+  const toggleUser = (id) => {
+    setUsers((prev) => prev.map((u) => (u.id === id ? { ...u, active: !u.active } : u)));
+  };
+
+  const removeUser = (id) => {
+    setUsers((prev) => prev.filter((u) => u.id !== id));
+    notify('Usuário removido.');
+  };
+
+  return (
+    <div className="space-y-6">
+      <h2 className="text-2xl font-bold text-white">Configurações do Cliente</h2>
+
+      <div className="bg-[#1e293b] border border-slate-800 rounded-xl p-6 space-y-5">
+        <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Identidade Visual</h3>
+
+        <div className="grid grid-cols-1 md:grid-cols-[220px_1fr] gap-5 items-start">
+          <div className="h-32 rounded-xl border border-slate-700 bg-slate-900/60 flex items-center justify-center overflow-hidden">
+            {logo.preview ? (
+              <img src={logo.preview} alt="Logo cliente" className="max-h-24 object-contain" />
+            ) : (
+              <div className="text-slate-500 text-sm">Sem logo</div>
+            )}
+          </div>
+
+          <div className="space-y-3">
+            <p className="text-sm text-slate-300">Arquivo atual: <span className="text-slate-400">{logo.name || 'não definido'}</span></p>
+            <label className="inline-flex items-center gap-2 px-4 py-2 border border-slate-700 rounded-lg text-sm text-slate-200 hover:bg-slate-800 cursor-pointer">
+              <UploadCloud size={15} />
+              Alterar logo
+              <input type="file" accept="image/*" className="hidden" onChange={onLogoChange} />
+            </label>
+            <p className="text-xs text-slate-500">Apenas mock visual. Integração backend fica para próxima etapa.</p>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-[#1e293b] border border-slate-800 rounded-xl p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-bold uppercase tracking-wider text-slate-400">Usuários do Cliente</h3>
+          <button
+            onClick={() => setShowAddUser(true)}
+            className="inline-flex items-center gap-2 px-3 py-1.5 bg-blue-600 rounded-lg text-xs text-white hover:bg-blue-500"
+          >
+            <Plus size={14} />
+            Adicionar usuário
+          </button>
+        </div>
+
+        <div className="border border-slate-800 rounded-lg overflow-hidden">
+          <div className="grid grid-cols-12 px-4 py-2 bg-slate-900/40 border-b border-slate-800 text-[11px] font-bold text-slate-500 uppercase tracking-wider">
+            <div className="col-span-3">Nome</div>
+            <div className="col-span-4">E-mail</div>
+            <div className="col-span-2 text-center">Perfil</div>
+            <div className="col-span-1 text-center">Status</div>
+            <div className="col-span-2 text-right">Ações</div>
+          </div>
+
+          {users.map((u) => (
+            <div key={u.id} className="grid grid-cols-12 px-4 py-3 border-b last:border-b-0 border-slate-800 items-center">
+              <div className="col-span-3 text-sm text-slate-200">{u.name}</div>
+              <div className="col-span-4 text-sm text-slate-400">{u.email}</div>
+              <div className="col-span-2 text-center">
+                <Badge color="slate">{u.role}</Badge>
+              </div>
+              <div className="col-span-1 text-center">
+                <Badge color={u.active ? 'green' : 'orange'}>{u.active ? 'Ativo' : 'Inativo'}</Badge>
+              </div>
+              <div className="col-span-2 flex justify-end gap-2">
+                <button
+                  onClick={() => toggleUser(u.id)}
+                  className="px-2.5 py-1 text-xs border border-slate-700 rounded text-slate-300 hover:bg-slate-800"
+                >
+                  {u.active ? 'Desativar' : 'Ativar'}
+                </button>
+                <button
+                  onClick={() => removeUser(u.id)}
+                  className="px-2.5 py-1 text-xs border border-rose-900/50 rounded text-rose-300 hover:bg-rose-950/30"
+                >
+                  Remover
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {showAddUser && (
+        <Modal
+          title="Adicionar Usuário"
+          onClose={() => {
+            setShowAddUser(false);
+            setError('');
+          }}
+          actions={
+            <>
+              <button onClick={() => setShowAddUser(false)} className="px-4 py-2 border border-slate-700 rounded-lg text-sm text-slate-300 hover:bg-slate-800">
+                Cancelar
+              </button>
+              <button onClick={addUser} className="px-4 py-2 bg-blue-600 rounded-lg text-sm text-white hover:bg-blue-500">
+                Salvar
+              </button>
+            </>
+          }
+        >
+          <div className="space-y-4">
+            <div>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-1 block">Nome</label>
+              <input
+                value={newUser.name}
+                onChange={(e) => setNewUser((prev) => ({ ...prev, name: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200"
+                placeholder="Nome do usuário"
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-1 block">E-mail</label>
+              <input
+                value={newUser.email}
+                onChange={(e) => setNewUser((prev) => ({ ...prev, email: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200"
+                placeholder="usuario@cliente.com.br"
+              />
+            </div>
+            <div>
+              <label className="text-xs uppercase tracking-wider text-slate-500 font-bold mb-1 block">Perfil</label>
+              <select
+                value={newUser.role}
+                onChange={(e) => setNewUser((prev) => ({ ...prev, role: e.target.value }))}
+                className="w-full bg-slate-950 border border-slate-700 rounded-lg p-2.5 text-sm text-slate-200"
+              >
+                <option>Leitura</option>
+                <option>Operador</option>
+                <option>Administrador</option>
+              </select>
+            </div>
+
+            {error && <div className="text-sm text-rose-400 bg-rose-950/30 border border-rose-900/40 rounded-lg px-3 py-2">{error}</div>}
+          </div>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+export default function App() {
+  const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [currentView, setCurrentView] = useState('client_dashboard');
+  const [orders] = useState(() => generateMockOrders(54));
+  const [selectedOS, setSelectedOS] = useState(null);
+  const [userRole, setUserRole] = useState('client'); // Manter 'client' como padrão para visualização
+
+  const [logo, setLogo] = useState({
+    name: 'logo-tonynet.png',
+    preview: '',
+  });
+
+  const [users, setUsers] = useState([
+    { id: 1, name: 'Renata Menezes', email: 'renata@tonynet.com.br', role: 'Administrador', active: true },
+    { id: 2, name: 'Lucas NOC', email: 'lucas.noc@tonynet.com.br', role: 'Operador', active: true },
+    { id: 3, name: 'Financeiro', email: 'financeiro@tonynet.com.br', role: 'Leitura', active: false },
+  ]);
+
+  const [protocolInput, setProtocolInput] = useState('');
+  const [toast, setToast] = useState('');
+
+  const buildProtocolLink = (protocol) =>
+    `${window.location.origin}${window.location.pathname}?protocol=${encodeURIComponent(protocol)}`;
+
+  const notify = (text) => setToast(text);
+
+  useEffect(() => {
+    if (!toast) return;
+    const timer = setTimeout(() => setToast(''), 2300);
+    return () => clearTimeout(timer);
+  }, [toast]);
+
+  const openOrder = (order) => {
+    setSelectedOS(order);
+    const url = new URL(window.location.href);
+    url.searchParams.set('protocol', order.protocol);
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  const closeOrder = () => {
+    setSelectedOS(null);
+    const url = new URL(window.location.href);
+    url.searchParams.delete('protocol');
+    window.history.replaceState({}, '', url.toString());
+  };
+
+  const openByProtocol = (protocolRaw) => {
+    const protocol = protocolRaw.trim();
+    if (!protocol) {
+      notify('Informe um protocolo.');
+      return;
+    }
+
+    const found = orders.find((o) => o.protocol.toLowerCase() === protocol.toLowerCase());
+    if (!found) {
+      notify('Protocolo não encontrado.');
+      return;
+    }
+
+    openOrder(found);
+    notify(`Protocolo ${found.protocol} aberto.`);
+  };
+
+  const copyLink = async (protocol) => {
+    try {
+      await navigator.clipboard.writeText(buildProtocolLink(protocol));
+      notify(`Link do protocolo ${protocol} copiado.`);
+    } catch {
+      notify('Não foi possível copiar o link.');
+    }
+  };
+
+  useEffect(() => {
+    const url = new URL(window.location.href);
+    const protocol = url.searchParams.get('protocol');
+    if (!protocol) return;
+
+    const found = orders.find((o) => o.protocol.toLowerCase() === protocol.toLowerCase());
+    if (found) setSelectedOS(found);
+  }, [orders]);
+
+  const renderView = () => {
+    // Placeholder para views de Gerente/Analista
+    if (userRole === 'manager' || userRole === 'analyst') {
+        return (
+            <div className="flex flex-col items-center justify-center h-[500px] text-slate-500">
+                <Activity size={64} className="mb-4 opacity-50" />
+                <h3 className="text-xl font-bold text-white mb-2">Painel do {userRole === 'manager' ? 'Gerente' : 'Analista'}</h3>
+                <p>Mude para o perfil de <strong>Cliente</strong> para ver o dashboard.</p>
+            </div>
+        );
+    }
+
+    if (currentView === 'client_settings') {
+      return <ClientSettingsView logo={logo} setLogo={setLogo} users={users} setUsers={setUsers} notify={notify} />;
+    }
+
+    return <ClientDashboardView orders={orders} onOpenOrder={openOrder} onCopyLink={copyLink} />;
+  };
+
+  return (
+    <div className="flex h-screen bg-[#0f172a] font-sans text-slate-200">
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 6px; height: 6px; }
+        .custom-scrollbar::-webkit-scrollbar-track { background: #0f172a; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #475569; }
+      `}</style>
+
+      <aside className={cn('bg-[#1e293b] border-r border-slate-800 flex flex-col transition-all duration-300 shadow-2xl z-20', sidebarOpen ? 'w-64' : 'w-20')}>
+        <div className="h-20 flex items-center justify-center border-b border-slate-800 px-4">
+          <div className="flex items-center gap-2">
+            <div className="bg-blue-600 p-2 rounded-lg shadow-lg shadow-blue-500/20">
+              <Activity className="text-white" size={20} />
+            </div>
+            {sidebarOpen && (
+              <div className="flex flex-col">
+                <span className="font-bold text-lg text-white leading-tight">AjustNOC</span>
+                <span className="text-[10px] text-slate-400 uppercase tracking-widest">Portal Cliente</span>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <nav className="flex-1 py-6 space-y-1 overflow-y-auto custom-scrollbar px-3">
+          <SidebarItem icon={LayoutTemplate} label={sidebarOpen ? 'Visão Geral' : ''} active={currentView === 'client_dashboard'} onClick={() => setCurrentView('client_dashboard')} />
+          {/* Aba Meus Chamados REMOVIDA */}
+          <div className="my-4 border-t border-slate-800 mx-2"></div>
+          <SidebarItem icon={UserCog} label={sidebarOpen ? 'Perfil' : ''} active={currentView === 'client_settings'} onClick={() => setCurrentView('client_settings')} />
+        </nav>
+
+        <div className="p-4 border-t border-slate-800">
+          {sidebarOpen ? (
+            <div className="flex items-center gap-3 p-2 rounded-lg bg-slate-900 border border-slate-800">
+              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">TN</div>
+              <div className="overflow-hidden">
+                <p className="text-xs font-bold text-white truncate">{CLIENT_NAME}</p>
+                <p className="text-[10px] text-slate-500 truncate">{CLIENT_DOC}</p>
+              </div>
+              <LogOut size={16} className="ml-auto text-slate-500 hover:text-rose-500 cursor-pointer" />
+            </div>
+          ) : (
+            <div className="flex justify-center">
+              <div className="w-8 h-8 rounded-full bg-slate-700 flex items-center justify-center text-xs font-bold text-slate-300">TN</div>
+            </div>
+          )}
+        </div>
+      </aside>
+
+      <div className="flex-1 flex flex-col overflow-hidden relative bg-[#0f172a]">
+        <header className="h-16 border-b border-slate-800 flex items-center justify-between px-6 md:px-8 bg-[#0f172a]/80 backdrop-blur-md">
+          <div className="flex items-center text-slate-400">
+            <button onClick={() => setSidebarOpen(!sidebarOpen)} className="p-2 hover:bg-slate-800 rounded-md mr-3 transition-colors">
+              <Menu size={20} />
+            </button>
+            <div className="flex items-center text-sm">
+              <span className="hover:text-white cursor-pointer transition-colors">Portal</span>
+              <ChevronRight size={14} className="mx-2 opacity-50" />
+              <span className="font-medium text-white capitalize">{currentView.replace(/_/g, ' ')}</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <div className="hidden md:flex items-center gap-2 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1.5">
+              <Search size={15} className="text-slate-500" />
+              <input
+                value={protocolInput}
+                onChange={(e) => setProtocolInput(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && openByProtocol(protocolInput)}
+                placeholder="Abrir por protocolo"
+                className="bg-transparent outline-none text-sm text-slate-200 placeholder:text-slate-600 w-52"
+              />
+              <button onClick={() => openByProtocol(protocolInput)} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">
+                Abrir
+              </button>
+            </div>
+
+             <div 
+                className="flex items-center px-3 py-1 bg-slate-900 border border-slate-800 rounded-full cursor-pointer hover:border-slate-700 ml-4"
+                onClick={() => setUserRole(prev => {
+                   if (prev === 'client') return 'manager';
+                   if (prev === 'manager') return 'analyst';
+                   return 'client';
+                })}
+             >
+                <UserCheck size={14} className="text-slate-500 mr-2"/> 
+                <span className="text-xs font-medium text-slate-400 uppercase">{userRole}</span>
+             </div>
+
+            <button className="relative p-2 hover:bg-slate-800 rounded-md transition-colors">
+              <Bell size={19} className="text-slate-400" />
+              <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-blue-500 rounded-full" />
+            </button>
+          </div>
+        </header>
+
+        <main className="flex-1 overflow-y-auto p-6 md:p-8 custom-scrollbar">
+          <div className="max-w-7xl mx-auto">{renderView()}</div>
+        </main>
+      </div>
+
+      <ClientOSDetailsDrawer os={selectedOS} onClose={closeOrder} onCopyLink={copyLink} />
+
+      {toast && (
+        <div className="fixed bottom-5 right-5 z-[95] px-4 py-2 rounded-lg text-sm bg-slate-900 border border-slate-700 text-slate-200 shadow-xl">
+          {toast}
+        </div>
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,13 @@
+node_modules
+.pnpm-store
+.next
+dist
+coverage
+.env
+*.log
+
+# local build/runtime artifacts
+apps/web/.next*
+apps/api/uploads/
+uploads/
+*.tsbuildinfo

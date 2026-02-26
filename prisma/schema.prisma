@@ -1,0 +1,508 @@
+generator client {
+  provider      = "prisma-client-js"
+  binaryTargets = ["native", "debian-openssl-3.0.x", "linux-musl-openssl-3.0.x"]
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum TenantStatus {
+  ACTIVE
+  INACTIVE
+  SUSPENDED
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+  BLOCKED
+}
+
+enum Priority {
+  BAIXA
+  NORMAL
+  ALTA
+  CRITICA
+}
+
+enum ServiceOrderType {
+  ROMPIMENTO
+  LENTIDAO
+  CONFIGURACAO_ONU
+  TROCA_SENHA
+  CANCELAMENTO
+  AUDITORIA
+  INSTALACAO
+  BGP
+}
+
+enum ServiceOrderStatus {
+  ABERTA
+  EM_ANALISE
+  AG_CAMPO
+  AG_TERCEIROS
+  RESOLVIDA
+  FECHADA
+  CANCELADA
+}
+
+enum OccurrenceStatus {
+  ABERTA
+  EM_EXECUCAO
+  PENDENTE
+  ENCERRADA
+}
+
+enum ApprovalStatus {
+  PENDING
+  APPROVED
+  REJECTED
+}
+
+enum SourceSystem {
+  ERP
+  SGP
+  WEBHOOK
+  POLLING
+}
+
+enum SyncStatus {
+  RECEIVED
+  PROCESSED
+  CONFLICT
+  FAILED
+}
+
+enum AuditAction {
+  LOGIN
+  LOGOUT
+  LOGIN_FAILED
+  OS_CREATE
+  OS_UPDATE
+  OS_CLOSE
+  OS_REOPEN
+  OS_CANCEL
+  SLA_CHANGE
+  ROLE_CHANGE
+  CREDENTIAL_ACCESS
+  EXPORT
+  SYNC
+}
+
+model Tenant {
+  id               String       @id @default(uuid())
+  legalName        String
+  tradeName        String
+  taxId            String       @unique
+  slug             String       @unique
+  domain           String       @unique
+  timezone         String       @default("America/Sao_Paulo")
+  techContactName  String
+  techContactEmail String
+  techContactPhone String
+  status           TenantStatus @default(ACTIVE)
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+  deletedAt        DateTime?
+
+  users             UserTenant[]
+  serviceOrders     ServiceOrder[]
+  occurrences       Occurrence[]
+  integrations      ProviderIntegration[]
+  slaPolicies       SlaPolicy[]
+  reportExports     ReportExport[]
+  knowledgeArticles KnowledgeArticle[]
+  knowledgeCredentials KnowledgeCredential[]
+  notes             Note[]
+  auditLogs         AuditLog[]
+  syncEvents        SyncEvent[]
+  occurrenceAnnotations OccurrenceAnnotation[]
+
+  @@index([status])
+}
+
+model User {
+  id                 String     @id @default(uuid())
+  name               String
+  email              String     @unique
+  passwordHash       String
+  status             UserStatus @default(ACTIVE)
+  twoFactorEnabled   Boolean    @default(false)
+  twoFactorSecretEnc String?
+  lastLoginAt        DateTime?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
+  deletedAt          DateTime?
+
+  tenants            UserTenant[]
+  sessions           Session[]
+  ownedOrders        ServiceOrder[]           @relation("OwnerOrders")
+  assignedOrders     ServiceOrder[]           @relation("AssigneeOrders")
+  occurrences        ServiceOrderOccurrence[]
+  approvalsRequested ServiceOrderApproval[]   @relation("ApprovalRequester")
+  approvalsReviewed  ServiceOrderApproval[]   @relation("ApprovalReviewer")
+  createdCredentials KnowledgeCredential[]    @relation("CredentialCreator")
+  auditLogs          AuditLog[]
+  reportExports      ReportExport[]
+  notes              Note[]
+  knowledgeArticles  KnowledgeArticle[]
+  occurrenceAnnotations OccurrenceAnnotation[]
+}
+
+model Occurrence {
+  id                  String           @id @default(uuid())
+  tenantId            String
+  number              String
+  provider            String
+  type                String
+  status              OccurrenceStatus @default(ABERTA)
+  sector              String
+  origin              String
+  openedByName        String
+  analystResponsible  String
+  description         String
+  createdAt           DateTime         @default(now())
+  updatedAt           DateTime         @updatedAt
+  deletedAt           DateTime?
+
+  tenant       Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  serviceOrders ServiceOrder[]
+  annotations  OccurrenceAnnotation[]
+
+  @@unique([tenantId, number])
+  @@index([tenantId, provider, createdAt(sort: Desc)])
+  @@index([tenantId, status, createdAt(sort: Desc)])
+}
+
+model Role {
+  id        String   @id @default(uuid())
+  code      String   @unique
+  name      String
+  isGlobal  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  userTenants UserTenant[]
+}
+
+model UserTenant {
+  id        String   @id @default(uuid())
+  userId    String
+  tenantId  String
+  roleId    String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role   Role   @relation(fields: [roleId], references: [id])
+
+  @@unique([userId, tenantId])
+  @@index([tenantId, roleId])
+}
+
+model Session {
+  id               String    @id @default(uuid())
+  userId           String
+  tenantId         String?
+  refreshTokenHash String
+  device           String?
+  ip               String?
+  userAgent        String?
+  expiresAt        DateTime
+  revokedAt        DateTime?
+  createdAt        DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+}
+
+model ServiceOrder {
+  id                String             @id @default(uuid())
+  tenantId          String
+  occurrenceId      String?
+  protocol          String
+  externalProtocol  String?
+  sourceSystem      SourceSystem       @default(ERP)
+  type              ServiceOrderType
+  priority          Priority
+  status            ServiceOrderStatus @default(ABERTA)
+  title             String
+  description       String
+  ownerUserId       String?
+  ownerName         String?
+  assigneeUserId    String?
+  analystName       String?
+  requester         String?
+  sector            String?
+  origin            String?
+  deadlineAt        DateTime
+  resolvedAt        DateTime?
+  closedAt          DateTime?
+  canceledAt        DateTime?
+  reopenedCount     Int                @default(0)
+  requiresApproval  Boolean            @default(false)
+  approvalCompleted Boolean            @default(false)
+  tags              String[]           @default([])
+  internalNotes     String?
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+  deletedAt         DateTime?
+
+  tenant      Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  occurrence  Occurrence?              @relation(fields: [occurrenceId], references: [id], onDelete: SetNull)
+  owner       User?                    @relation("OwnerOrders", fields: [ownerUserId], references: [id])
+  assignee    User?                    @relation("AssigneeOrders", fields: [assigneeUserId], references: [id])
+  occurrences ServiceOrderOccurrence[]
+  attachments ServiceOrderAttachment[]
+  approvals   ServiceOrderApproval[]
+  slaEvents   SlaEvent[]
+
+  @@unique([tenantId, protocol])
+  @@index([tenantId, status, priority, deadlineAt])
+  @@index([tenantId, type, createdAt])
+  @@index([tenantId, occurrenceId, createdAt(sort: Desc)])
+}
+
+model ServiceOrderOccurrence {
+  id             String       @id @default(uuid())
+  serviceOrderId String
+  actorUserId    String?
+  sourceSystem   SourceSystem @default(ERP)
+  message        String
+  createdAt      DateTime     @default(now())
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  actorUser    User?        @relation(fields: [actorUserId], references: [id])
+
+  @@index([serviceOrderId, createdAt(sort: Desc)])
+}
+
+model ServiceOrderAttachment {
+  id             String   @id @default(uuid())
+  serviceOrderId String
+  fileName       String
+  mimeType       String
+  sizeBytes      Int
+  storageKey     String
+  isInternal     Boolean  @default(true)
+  uploadedAt     DateTime @default(now())
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([serviceOrderId, uploadedAt(sort: Desc)])
+}
+
+model ServiceOrderApproval {
+  id             String         @id @default(uuid())
+  serviceOrderId String
+  requestedById  String
+  reviewedById   String?
+  status         ApprovalStatus @default(PENDING)
+  reason         String?
+  createdAt      DateTime       @default(now())
+  reviewedAt     DateTime?
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+  requestedBy  User         @relation("ApprovalRequester", fields: [requestedById], references: [id])
+  reviewedBy   User?        @relation("ApprovalReviewer", fields: [reviewedById], references: [id])
+
+  @@index([serviceOrderId, status])
+}
+
+model SlaPolicy {
+  id               String            @id @default(uuid())
+  tenantId         String
+  priority         Priority
+  serviceOrderType ServiceOrderType?
+  hours            Int
+  isOverride       Boolean           @default(false)
+  active           Boolean           @default(true)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, priority, active])
+  @@index([tenantId, serviceOrderType, active])
+}
+
+model SlaEvent {
+  id             String             @id @default(uuid())
+  tenantId       String
+  serviceOrderId String
+  deadlineAt     DateTime
+  breachedAt     DateTime?
+  delayMinutes   Int                @default(0)
+  snapshotStatus ServiceOrderStatus
+  createdAt      DateTime           @default(now())
+
+  serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([serviceOrderId, createdAt(sort: Desc)])
+}
+
+model ProviderIntegration {
+  id               String    @id @default(uuid())
+  tenantId         String
+  provider         String    @default("IXC")
+  baseUrl          String
+  webhookSecretEnc String?
+  apiTokenEnc      String?
+  status           String
+  lastSyncAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, status])
+}
+
+model SyncEvent {
+  id            String       @id @default(uuid())
+  tenantId      String
+  integrationId String?
+  source        SourceSystem
+  eventType     String
+  payloadHash   String?
+  status        SyncStatus   @default(RECEIVED)
+  errorMessage  String?
+  receivedAt    DateTime     @default(now())
+  processedAt   DateTime?
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, source, receivedAt(sort: Desc)])
+  @@index([status, receivedAt(sort: Desc)])
+}
+
+model AuditLog {
+  id           String      @id @default(uuid())
+  tenantId     String?
+  actorUserId  String?
+  action       AuditAction
+  resourceType String
+  resourceId   String?
+  metadata     Json?
+  ip           String?
+  userAgent    String?
+  createdAt    DateTime    @default(now())
+
+  tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actorUser User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, createdAt(sort: Desc)])
+  @@index([actorUserId, createdAt(sort: Desc)])
+  @@index([action, createdAt(sort: Desc)])
+}
+
+model ReportExport {
+  id          String   @id @default(uuid())
+  tenantId    String?
+  actorUserId String?
+  reportType  String
+  filters     Json?
+  fileUrl     String?
+  status      String
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  actorUser User?   @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([createdAt(sort: Desc)])
+}
+
+model KnowledgeArticle {
+  id           String   @id @default(uuid())
+  tenantId     String?
+  authorUserId String?
+  title        String
+  slug         String
+  content      String
+  isPublished  Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant?               @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  author User?                 @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+  tags   KnowledgeArticleTag[]
+
+  @@unique([tenantId, slug])
+  @@index([tenantId, isPublished])
+}
+
+model KnowledgeTag {
+  id        String   @id @default(uuid())
+  name      String   @unique
+  createdAt DateTime @default(now())
+
+  articles KnowledgeArticleTag[]
+}
+
+model KnowledgeArticleTag {
+  articleId String
+  tagId     String
+
+  article KnowledgeArticle @relation(fields: [articleId], references: [id], onDelete: Cascade)
+  tag     KnowledgeTag     @relation(fields: [tagId], references: [id], onDelete: Cascade)
+
+  @@id([articleId, tagId])
+}
+
+model KnowledgeCredential {
+  id            String   @id @default(uuid())
+  tenantId      String
+  createdById   String?
+  provider      String
+  equipmentType String   @default("OUTROS")
+  equipmentName String   @default("")
+  environment   String
+  host          String
+  username      String
+  secretEnc     String
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  tenant     Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy  User?  @relation("CredentialCreator", fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, provider, createdAt(sort: Desc)])
+  @@index([tenantId, provider, equipmentType, environment])
+}
+
+model Note {
+  id           String   @id @default(uuid())
+  tenantId     String?
+  authorUserId String?
+  title        String
+  content      String
+  pinned       Boolean  @default(false)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  tenant Tenant? @relation(fields: [tenantId], references: [id], onDelete: SetNull)
+  author User?   @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, updatedAt(sort: Desc)])
+}
+
+model OccurrenceAnnotation {
+  id           String   @id @default(uuid())
+  tenantId     String
+  occurrenceId String
+  actorUserId  String?
+  message      String
+  createdAt    DateTime @default(now())
+
+  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  occurrence Occurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  actorUser  User?      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, occurrenceId, createdAt(sort: Desc)])
+}

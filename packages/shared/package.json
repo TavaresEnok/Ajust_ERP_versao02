@@ -1,0 +1,26 @@
+{
+  "name": "@ajust/shared",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "echo 'lint pending'",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "db:generate": "prisma generate --schema ../../prisma/schema.prisma",
+    "db:migrate": "prisma migrate dev --schema ../../prisma/schema.prisma",
+    "db:seed:roles": "tsx scripts/seed-roles.ts",
+    "db:seed:dev-admin": "tsx scripts/seed-dev-admin.ts",
+    "db:seed:demo-users": "tsx scripts/seed-demo-users.ts"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.2.1",
+    "zod": "^3.24.1"
+  },
+  "devDependencies": {
+    "prisma": "^6.2.1",
+    "tsx": "^4.19.2",
+    "typescript": "^5.7.3"
+  }
+}

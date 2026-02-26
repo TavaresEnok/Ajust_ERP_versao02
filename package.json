@@ -1,0 +1,30 @@
+{
+  "name": "ajust-erp",
+  "version": "0.1.0",
+  "private": true,
+  "packageManager": "pnpm@9.12.0",
+  "engines": {
+    "node": ">=20.0.0"
+  },
+  "scripts": {
+    "dev": "corepack pnpm -r --parallel dev",
+    "build": "corepack pnpm -r build",
+    "lint": "corepack pnpm -r lint",
+    "typecheck": "corepack pnpm -r typecheck",
+    "test:e2e": "corepack pnpm --filter @ajust/api test:e2e",
+    "test:web": "bash scripts/web-smoke.sh",
+    "db:generate": "corepack pnpm exec prisma generate --schema prisma/schema.prisma",
+    "db:migrate": "corepack pnpm exec prisma migrate dev --schema prisma/schema.prisma",
+    "db:import:hub:pilot": "corepack pnpm exec node scripts/import-hub-real-pilot.cjs",
+    "db:seed:roles": "corepack pnpm --filter @ajust/shared db:seed:roles",
+    "db:seed:dev-admin": "corepack pnpm --filter @ajust/shared db:seed:dev-admin",
+    "db:seed:demo-users": "corepack pnpm --filter @ajust/shared db:seed:demo-users"
+  },
+  "devDependencies": {
+    "prisma": "^6.19.2",
+    "typescript": "^5.7.3"
+  },
+  "dependencies": {
+    "@prisma/client": "^6.19.2"
+  }
+}

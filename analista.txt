@@ -1,0 +1,2430 @@
+import React, { useEffect, useMemo, useState } from 'react';
+import {
+  Activity,
+  AlertTriangle,
+  Bell,
+  BookOpen,
+  Briefcase,
+  Calendar,
+  CheckCircle,
+  ChevronDown,
+  ChevronLeft,
+  ChevronRight,
+  ChevronUp,
+  Clock,
+  Copy,
+  Eye,
+  EyeOff,
+  FileText,
+  Filter,
+  LayoutDashboard,
+  List,
+  Loader2,
+  Menu,
+  Plus,
+  RefreshCw,
+  Save,
+  Search,
+  Settings,
+  Sparkles,
+  StickyNote,
+  Terminal,
+  User,
+  Users,
+  X,
+} from 'lucide-react';
+
+const cn = (...classes) => classes.filter(Boolean).join(' ');
+const DAY_MS = 24 * 60 * 60 * 1000;
+const HOUR_MS = 60 * 60 * 1000;
+
+const PERIODS = ['Hoje', '7d', '15d', '30d', 'Tudo'];
+const STATUS_FLOW = ['Aberta', 'Em Analise', 'Ag. Campo', 'Ag. Terceiros', 'Fechada'];
+const PRIORITIES = ['Baixa', 'Normal', 'Alta', 'Critica'];
+
+const PROVIDERS = [
+  'FibraNet Sul',
+  'Velox Conectividade',
+  'Nordeste Link',
+  'Amazonia Telecom',
+  'Minas Fibra',
+  'PrimeNet Telecom',
+];
+
+const PROVIDER_CITY = {
+  'FibraNet Sul': 'Porto Alegre - RS',
+  'Velox Conectividade': 'Sao Paulo - SP',
+  'Nordeste Link': 'Recife - PE',
+  'Amazonia Telecom': 'Manaus - AM',
+  'Minas Fibra': 'Belo Horizonte - MG',
+  'PrimeNet Telecom': 'Curitiba - PR',
+};
+
+const TECHS = [
+  { name: 'Carlos Silva', specialization: 'Rede Externa' },
+  { name: 'Roberto Almeida', specialization: 'Configuracao Logica' },
+  { name: 'Fernanda Costa', specialization: 'NOC N2' },
+  { name: 'Joao Pereira', specialization: 'Infraestrutura' },
+  { name: 'Lucas Oliveira', specialization: 'Provisionamento' },
+];
+
+const SERVICE_TYPES = [
+  'Rompimento',
+  'Lentidao',
+  'Configuracao ONU',
+  'Troca de Senha',
+  'Cancelamento',
+  'Auditoria',
+  'Instalacao',
+  'BGP',
+];
+
+const CREDENTIALS_MOCK = [
+  {
+    id: 1,
+    provider: 'FibraNet Sul',
+    env: 'OLT Principal',
+    host: '10.10.0.2',
+    user: 'admin_fibra',
+    secret: '************',
+    notes: 'Troca trimestral de senha.',
+  },
+  {
+    id: 2,
+    provider: 'Nordeste Link',
+    env: 'Mikrotik Borda',
+    host: '172.16.20.1',
+    user: 'noc_n2',
+    secret: '************',
+    notes: 'Ativar modo seguro antes de alteracoes.',
+  },
+  {
+    id: 3,
+    provider: 'PrimeNet Telecom',
+    env: 'Servidor Radius',
+    host: '192.168.88.10',
+    user: 'radius_ops',
+    secret: '************',
+    notes: 'Verificar backup diario.',
+  },
+];
+
+const KB_INITIAL = [
+  {
+    id: 1,
+    title: 'Autorizar ONU Huawei (Provisionamento via CLI)',
+    tags: ['Huawei', 'GPON', 'Provisionamento'],
+    author: 'Carlos Silva',
+    date: '10/08/2023',
+    description: 'Comandos padrao para autorizar nova ONU em bridge na OLT Huawei MA5600/5800.',
+    command: `interface gpon 0/1
+ont add 1 10 sn-auth 4857544300E1C998 omci ont-lineprofile-id 10 ont-srvprofile-id 10 desc "Cliente_X"
+quit
+interface gpon 0/1
+ont port native-vlan 1 10 eth 1 vlan 100 priority 0
+quit`,
+  },
+  {
+    id: 2,
+    title: 'Resetar processo PPPoE travado no Mikrotik',
+    tags: ['Mikrotik', 'PPPoE', 'Troubleshooting'],
+    author: 'Roberto Almeida',
+    date: '15/09/2023',
+    description: 'Passos para derrubar e restabelecer sessoes PPPoE sem reboot total.',
+    command: `/ppp active remove [find where service=pppoe]
+/interface pppoe-server server print
+/log print where message~"pppoe"`,
+  },
+  {
+    id: 3,
+    title: 'Verificar logs de autenticacao Radius (Linux)',
+    tags: ['Linux', 'Radius', 'Logs'],
+    author: 'Voce',
+    date: '20/09/2023',
+    description: 'Checklist rapido para falhas de autenticacao Radius.',
+    command: `tail -f /var/log/freeradius/radius.log
+grep -i "Login incorrect" /var/log/freeradius/radius.log | tail -n 50
+journalctl -u freeradius -n 100 --no-pager`,
+  },
+];
+
+const NAV_ITEMS = [
+  { group: 'OPERACIONAL', id: 'dashboard', label: 'Meu Painel', icon: LayoutDashboard },
+  { group: 'OPERACIONAL', id: 'os_list', label: 'Ordens de Servico', icon: FileText },
+  { group: 'OPERACIONAL', id: 'os_create', label: 'Nova O.S', icon: Plus },
+  { group: 'OPERACIONAL', id: 'technicians', label: 'Tecnicos', icon: Users },
+  { group: 'RECURSOS', id: 'knowledge', label: 'Base de Conhecimento', icon: BookOpen },
+  { group: 'RECURSOS', id: 'notes', label: 'Minhas Notas', icon: StickyNote },
+  { group: 'RECURSOS', id: 'calendar', label: 'Calendario', icon: Calendar },
+  { group: 'RECURSOS', id: 'reports', label: 'Relatorios', icon: List },
+  { group: 'RECURSOS', id: 'settings', label: 'Configuracoes', icon: Settings },
+];
+
+const VIEW_TITLE = {
+  dashboard: 'Meu Painel',
+  os_list: 'Ordens de Servico',
+  os_create: 'Nova O.S',
+  technicians: 'Tecnicos',
+  knowledge: 'Base de Conhecimento',
+  notes: 'Minhas Notas',
+  calendar: 'Calendario',
+  reports: 'Relatorios',
+  settings: 'Configuracoes',
+};
+
+const pad = (n) => String(n).padStart(2, '0');
+const randomFrom = (arr) => arr[Math.floor(Math.random() * arr.length)];
+
+const formatDate = (ts) => {
+  const d = new Date(ts);
+  return `${pad(d.getDate())}/${pad(d.getMonth() + 1)}/${d.getFullYear()}`;
+};
+
+const formatDateTime = (ts) => {
+  const d = new Date(ts);
+  return `${formatDate(ts)} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+};
+
+const startOfDay = (ts) => {
+  const d = new Date(ts);
+  d.setHours(0, 0, 0, 0);
+  return d.getTime();
+};
+
+const endOfDay = (ts) => startOfDay(ts) + DAY_MS - 1;
+
+const slugify = (s) =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s+/g, '-');
+
+const isClosed = (o) => o.status === 'Fechada';
+const isActive = (o) => !isClosed(o);
+
+const getDelayHours = (order, now = Date.now()) => {
+  const ref = order.closedAt || now;
+  return Math.max(0, (ref - order.deadlineAt) / HOUR_MS);
+};
+
+const getStatusColor = (status) => {
+  if (status === 'Fechada') return 'green';
+  if (status === 'Aberta') return 'blue';
+  if (status === 'Em Analise') return 'cyan';
+  if (status === 'Ag. Campo') return 'orange';
+  if (status === 'Ag. Terceiros') return 'purple';
+  return 'slate';
+};
+
+const getPriorityColor = (p) => {
+  if (p === 'Critica') return 'red';
+  if (p === 'Alta') return 'orange';
+  if (p === 'Normal') return 'blue';
+  return 'green';
+};
+
+const getServiceTypeStyle = (type) => {
+  const styles = [
+    'bg-cyan-50 text-cyan-700 border-cyan-200',
+    'bg-indigo-50 text-indigo-700 border-indigo-200',
+    'bg-emerald-50 text-emerald-700 border-emerald-200',
+    'bg-amber-50 text-amber-700 border-amber-200',
+    'bg-rose-50 text-rose-700 border-rose-200',
+    'bg-violet-50 text-violet-700 border-violet-200',
+  ];
+  let hash = 0;
+  for (let i = 0; i < type.length; i++) hash = type.charCodeAt(i) + ((hash << 5) - hash);
+  return styles[Math.abs(hash) % styles.length];
+};
+
+const nextStatus = (status) => {
+  if (status === 'Aberta') return 'Em Analise';
+  if (status === 'Em Analise') return 'Ag. Campo';
+  if (status === 'Ag. Campo') return 'Ag. Terceiros';
+  if (status === 'Ag. Terceiros') return 'Fechada';
+  return 'Fechada';
+};
+
+const periodStart = (period, now = Date.now()) => {
+  if (period === 'Tudo') return null;
+  if (period === 'Hoje') return startOfDay(now);
+  if (period === '7d') return now - 7 * DAY_MS;
+  if (period === '15d') return now - 15 * DAY_MS;
+  if (period === '30d') return now - 30 * DAY_MS;
+  return null;
+};
+
+const filterByPeriod = (orders, period) => {
+  const start = periodStart(period);
+  if (!start) return orders;
+  return orders.filter((o) => o.createdAt >= start);
+};
+
+const buildTimeline = (orders, period) => {
+  const now = Date.now();
+  let days = 8;
+  if (period === 'Hoje') days = 1;
+  if (period === '7d') days = 7;
+  if (period === '15d') days = 15;
+  if (period === '30d') days = 30;
+  if (period === 'Tudo') days = 14;
+
+  const end = startOfDay(now);
+  const arr = [];
+
+  for (let i = days - 1; i >= 0; i--) {
+    const dayStart = end - i * DAY_MS;
+    const dayEnd = dayStart + DAY_MS - 1;
+    const created = orders.filter((o) => o.createdAt >= dayStart && o.createdAt <= dayEnd).length;
+    const closed = orders.filter((o) => o.closedAt && o.closedAt >= dayStart && o.closedAt <= dayEnd).length;
+    arr.push({
+      label: `${pad(new Date(dayStart).getDate())}/${pad(new Date(dayStart).getMonth() + 1)}`,
+      created,
+      closed,
+    });
+  }
+
+  return arr;
+};
+
+const buildProviderRows = (orders, now = Date.now()) => {
+  const map = new Map();
+
+  orders.forEach((o) => {
+    if (!map.has(o.provider)) {
+      map.set(o.provider, {
+        name: o.provider,
+        slug: slugify(o.provider),
+        city: PROVIDER_CITY[o.provider] || '-',
+        total: 0,
+        active: 0,
+        closed: 0,
+        delayed: 0,
+        dueToday: 0,
+        orders: [],
+      });
+    }
+
+    const item = map.get(o.provider);
+    item.total += 1;
+    if (isActive(o)) item.active += 1;
+    if (isClosed(o)) item.closed += 1;
+    if (isActive(o) && getDelayHours(o, now) > 0) item.delayed += 1;
+    if (isActive(o) && o.deadlineAt >= startOfDay(now) && o.deadlineAt <= endOfDay(now)) item.dueToday += 1;
+    item.orders.push(o);
+  });
+
+  return Array.from(map.values()).sort((a, b) => b.total - a.total);
+};
+
+const buildTechRows = (orders, now = Date.now()) =>
+  TECHS.map((t) => {
+    const own = orders.filter((o) => o.tech === t.name);
+    const active = own.filter(isActive);
+    const closed = own.filter(isClosed);
+    const delayed = own.filter((o) => getDelayHours(o, now) > 0);
+    const onTime = closed.filter((o) => getDelayHours(o, now) <= 0);
+    const onTimePct = closed.length ? Math.round((onTime.length / closed.length) * 100) : 0;
+
+    const avgDuration = closed.length
+      ? closed.reduce((acc, o) => acc + (o.closedAt - o.createdAt) / HOUR_MS, 0) / closed.length
+      : 0;
+
+    return {
+      ...t,
+      created: own.length,
+      active: active.length,
+      delayed: delayed.length,
+      onTimePct,
+      avgDuration: `${Math.floor(avgDuration)}h ${pad(Math.floor((avgDuration % 1) * 60))}m`,
+      status: active.length > 8 ? 'busy' : 'available',
+    };
+  });
+
+const generateMockOrders = (count = 260) => {
+  const now = Date.now();
+
+  return Array.from({ length: count }).map((_, i) => {
+    const createdAt = now - Math.floor(Math.random() * 80 * DAY_MS);
+    const deadlineAt = createdAt + (8 + Math.floor(Math.random() * 72)) * HOUR_MS;
+    const status = randomFrom(STATUS_FLOW);
+    const priority = randomFrom(PRIORITIES);
+    const provider = randomFrom(PROVIDERS);
+    const type = randomFrom(SERVICE_TYPES);
+
+    const owner = Math.random() > 0.68 ? 'Voce' : randomFrom(TECHS).name;
+    const tech = Math.random() > 0.2 ? randomFrom(TECHS).name : null;
+
+    let closedAt = null;
+    if (status === 'Fechada') {
+      const jitter = (Math.floor(Math.random() * 18) - 5) * HOUR_MS;
+      closedAt = Math.max(createdAt + 2 * HOUR_MS, deadlineAt + jitter);
+    }
+
+    const protocol = `${new Date(createdAt).getFullYear()}${String(100000 + i * 13).padStart(6, '0')}`;
+
+    return {
+      id: `OS-${202400 + i}`,
+      protocol,
+      provider,
+      tech,
+      owner,
+      type,
+      priority,
+      status,
+      createdAt,
+      deadlineAt,
+      closedAt,
+      sector: randomFrom(['NOC', 'SAC', 'Suporte N1', 'Suporte N2']),
+      origin: randomFrom(['WhatsApp', 'Ligacao', 'Ticket', 'Email']),
+      description: `Cliente relata ${type.toLowerCase()} com oscilacao e impacto no servico.`,
+      isInconsistent: Math.random() > 0.98,
+      attachments: [
+        { id: `a-${i}-1`, name: 'print_cliente.png' },
+        { id: `a-${i}-2`, name: 'log_olt.txt' },
+      ],
+      occurrences: [
+        { at: createdAt, user: 'Sistema', text: 'OS criada via integracao API.' },
+        { at: createdAt + 90 * 60 * 1000, user: 'NOC N1', text: 'Triagem inicial concluida.' },
+        ...(closedAt ? [{ at: closedAt, user: tech || 'NOC N2', text: 'Normalizacao confirmada.' }] : []),
+      ],
+    };
+  });
+};
+
+const useLocalStorageState = (key, initialValue) => {
+  const getInitial = () => {
+    if (typeof window === 'undefined') return typeof initialValue === 'function' ? initialValue() : initialValue;
+    try {
+      const raw = window.localStorage.getItem(key);
+      if (raw !== null) return JSON.parse(raw);
+    } catch {}
+    return typeof initialValue === 'function' ? initialValue() : initialValue;
+  };
+
+  const [state, setState] = useState(getInitial);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      window.localStorage.setItem(key, JSON.stringify(state));
+    } catch {}
+  }, [key, state]);
+
+  return [state, setState];
+};
+
+const Badge = ({ children, color = 'slate', className }) => {
+  const colors = {
+    green: 'bg-emerald-100 text-emerald-700 border-emerald-200',
+    blue: 'bg-blue-100 text-blue-700 border-blue-200',
+    red: 'bg-rose-100 text-rose-700 border-rose-200',
+    orange: 'bg-amber-100 text-amber-700 border-amber-200',
+    slate: 'bg-slate-100 text-slate-700 border-slate-200',
+    purple: 'bg-purple-100 text-purple-700 border-purple-200',
+    cyan: 'bg-cyan-100 text-cyan-700 border-cyan-200',
+  };
+
+  return <span className={cn('px-2.5 py-0.5 rounded-full text-xs font-semibold border whitespace-nowrap', colors[color], className)}>{children}</span>;
+};
+
+const ServiceTypeBadge = ({ type }) => (
+  <span className={cn('px-2 py-0.5 rounded-md text-[10px] font-bold border uppercase tracking-wider whitespace-nowrap', getServiceTypeStyle(type))}>{type}</span>
+);
+
+const SidebarItem = ({ icon: Icon, label, compact = false, active = false, onClick }) => (
+  <button
+    onClick={onClick}
+    className={cn(
+      'w-full flex items-center gap-3 px-4 py-2.5 rounded-lg text-left transition',
+      active ? 'bg-blue-50 text-blue-700 border border-blue-200' : 'text-slate-600 hover:bg-slate-100'
+    )}
+  >
+    <Icon size={18} />
+    {!compact && <span className="text-sm font-medium">{label}</span>}
+  </button>
+);
+
+const PeriodTabs = ({ value, onChange }) => (
+  <div className="flex items-center bg-white border border-slate-200 rounded-lg p-1 gap-1 overflow-x-auto no-scrollbar">
+    {PERIODS.map((p) => (
+      <button key={p} onClick={() => onChange(p)} className={cn('px-3 py-1.5 text-xs rounded font-semibold whitespace-nowrap', value === p ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-slate-100')}>
+        {p}
+      </button>
+    ))}
+  </div>
+);
+
+const ToastMessage = ({ message, onDone }) => {
+  useEffect(() => {
+    const t = setTimeout(onDone, 1800);
+    return () => clearTimeout(t);
+  }, [onDone]);
+
+  return <div className="fixed bottom-4 right-4 z-[90] bg-slate-900 text-white px-4 py-2 rounded-lg text-sm shadow-xl">{message}</div>;
+};
+
+const Modal = ({ title, onClose, children, maxWidth = 'max-w-4xl' }) => (
+  <div className="fixed inset-0 z-[70] flex items-center justify-center p-4">
+    <div className="absolute inset-0 bg-slate-900/50 backdrop-blur-sm" onClick={onClose} />
+    <div className={cn('relative w-full bg-white rounded-xl border border-slate-200 shadow-2xl overflow-hidden', maxWidth)}>
+      <div className="px-5 py-3 border-b border-slate-100 flex items-center justify-between">
+        <h3 className="font-bold text-slate-800">{title}</h3>
+        <button onClick={onClose} className="p-1.5 rounded hover:bg-slate-100">
+          <X size={18} />
+        </button>
+      </div>
+      <div className="p-5">{children}</div>
+    </div>
+  </div>
+);
+
+const CommandPalette = ({ open, onClose, views, orders, onNavigate, onOpenOrder }) => {
+  const [query, setQuery] = useState('');
+
+  useEffect(() => {
+    if (!open) setQuery('');
+  }, [open]);
+
+  if (!open) return null;
+
+  const q = query.trim().toLowerCase();
+
+  const filteredViews = views.filter((v) => !q || v.label.toLowerCase().includes(q));
+  const filteredOrders = orders
+    .filter((o) => {
+      if (!q) return false;
+      return (
+        o.protocol.toLowerCase().includes(q) ||
+        o.provider.toLowerCase().includes(q) ||
+        (o.tech || '').toLowerCase().includes(q) ||
+        (o.owner || '').toLowerCase().includes(q)
+      );
+    })
+    .slice(0, 8);
+
+  return (
+    <div className="fixed inset-0 z-[85] flex items-start justify-center p-4 md:p-12">
+      <div className="absolute inset-0 bg-slate-900/40" onClick={onClose} />
+      <div className="relative w-full max-w-2xl bg-white border border-slate-200 rounded-xl shadow-2xl overflow-hidden">
+        <div className="p-3 border-b border-slate-100">
+          <input autoFocus value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar tela ou protocolo..." className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+        </div>
+
+        <div className="max-h-[60vh] overflow-y-auto custom-scrollbar">
+          <div className="px-3 pt-3 text-[11px] uppercase text-slate-400 font-bold">Telas</div>
+          <div className="p-2 space-y-1">
+            {filteredViews.map((v) => (
+              <button
+                key={v.id}
+                onClick={() => {
+                  onNavigate(v.id);
+                  onClose();
+                }}
+                className="w-full text-left px-3 py-2 rounded hover:bg-slate-100 text-sm"
+              >
+                {v.label}
+              </button>
+            ))}
+            {filteredViews.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">Nenhuma tela encontrada.</div>}
+          </div>
+
+          <div className="px-3 pt-2 text-[11px] uppercase text-slate-400 font-bold">Ordens</div>
+          <div className="p-2 space-y-1">
+            {filteredOrders.map((o) => (
+              <button
+                key={o.id}
+                onClick={() => {
+                  onOpenOrder(o);
+                  onClose();
+                }}
+                className="w-full text-left px-3 py-2 rounded hover:bg-slate-100 text-sm flex justify-between"
+              >
+                <span className="font-mono">{o.protocol}</span>
+                <span className="text-slate-500">{o.provider}</span>
+              </button>
+            ))}
+            {filteredOrders.length === 0 && <div className="px-3 py-2 text-sm text-slate-400">Digite para buscar OS.</div>}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const OSDetailsDrawer = ({ order, onClose, onAdvanceStatus, onAssignToMe }) => {
+  useEffect(() => {
+    document.body.style.overflow = 'hidden';
+    return () => {
+      document.body.style.overflow = 'unset';
+    };
+  }, []);
+
+  if (!order) return null;
+
+  return (
+    <div className="fixed inset-0 z-[80] flex justify-end">
+      <div className="absolute inset-0 bg-slate-900/35 backdrop-blur-sm" onClick={onClose} />
+      <div className="relative w-full max-w-[480px] h-full bg-white border-l border-slate-200 shadow-2xl flex flex-col">
+        <div className="h-16 border-b border-slate-100 px-5 flex items-center justify-between bg-slate-50/60">
+          <div>
+            <div className="text-[11px] uppercase text-slate-400 font-bold">Detalhes da OS</div>
+            <div className="font-mono font-bold text-slate-800">{order.protocol}</div>
+          </div>
+          <button onClick={onClose} className="p-2 rounded-full hover:bg-slate-200">
+            <X size={18} />
+          </button>
+        </div>
+
+        <div className="flex-1 p-5 overflow-y-auto custom-scrollbar space-y-4">
+          <div className="flex items-center gap-2">
+            <Badge color={getStatusColor(order.status)}>{order.status}</Badge>
+            <Badge color={getPriorityColor(order.priority)}>{order.priority}</Badge>
+            {order.isInconsistent && <Badge color="orange">Inconsistente</Badge>}
+          </div>
+
+          <div>
+            <div className="text-[11px] uppercase text-slate-400 font-bold">Provedor</div>
+            <div className="text-sm font-semibold text-slate-800">{order.provider}</div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <div className="text-[11px] uppercase text-slate-400 font-bold">Tecnico</div>
+              <div className="text-sm text-slate-700">{order.tech || '-'}</div>
+            </div>
+            <div>
+              <div className="text-[11px] uppercase text-slate-400 font-bold">Owner</div>
+              <div className="text-sm text-slate-700">{order.owner || '-'}</div>
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] uppercase text-slate-400 font-bold">Tipo</div>
+            <div className="mt-1">
+              <ServiceTypeBadge type={order.type} />
+            </div>
+          </div>
+
+          <div className="bg-slate-50 border border-slate-200 rounded-lg p-3">
+            <div className="text-[11px] uppercase text-slate-400 font-bold">Descricao</div>
+            <p className="text-sm text-slate-700 mt-1">{order.description}</p>
+          </div>
+
+          <div className="grid grid-cols-2 gap-3">
+            <div className="border border-slate-200 rounded-lg p-3">
+              <div className="text-[11px] uppercase text-slate-400 font-bold">Abertura</div>
+              <div className="text-xs font-mono text-slate-700 mt-1">{formatDateTime(order.createdAt)}</div>
+            </div>
+            <div className="border border-slate-200 rounded-lg p-3">
+              <div className="text-[11px] uppercase text-slate-400 font-bold">Prazo</div>
+              <div className="text-xs font-mono text-slate-700 mt-1">{formatDateTime(order.deadlineAt)}</div>
+            </div>
+          </div>
+
+          <div className="border border-slate-200 rounded-lg p-3">
+            <div className="text-[11px] uppercase text-slate-400 font-bold">Delay</div>
+            <div className={cn('text-sm font-bold mt-1', getDelayHours(order) > 0 ? 'text-rose-600' : 'text-emerald-600')}>
+              {getDelayHours(order) > 0 ? `+${getDelayHours(order).toFixed(2)}h` : 'Sem atraso'}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] uppercase text-slate-400 font-bold mb-2">Anexos</div>
+            <div className="space-y-2">
+              {order.attachments.map((a) => (
+                <div key={a.id} className="p-2 rounded border border-slate-200 text-sm text-slate-700 bg-slate-50">
+                  {a.name}
+                </div>
+              ))}
+            </div>
+          </div>
+
+          <div>
+            <div className="text-[11px] uppercase text-slate-400 font-bold mb-2">Historico</div>
+            <div className="space-y-2">
+              {order.occurrences.map((o, idx) => (
+                <div key={`${order.id}-${idx}`} className="border border-slate-200 rounded-lg p-3">
+                  <div className="flex items-center justify-between text-xs mb-1">
+                    <span className="font-bold text-slate-700">{o.user}</span>
+                    <span className="font-mono text-slate-400">{formatDateTime(o.at)}</span>
+                  </div>
+                  <p className="text-sm text-slate-600">{o.text}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+
+        <div className="p-4 border-t border-slate-100 bg-slate-50 grid grid-cols-3 gap-2">
+          <button onClick={() => navigator.clipboard.writeText(order.protocol)} className="py-2 border border-slate-300 bg-white rounded-lg text-xs font-semibold hover:bg-slate-100 flex items-center justify-center gap-1">
+            <Copy size={13} />
+            Copiar
+          </button>
+          <button onClick={() => onAssignToMe(order.id)} className="py-2 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-semibold">
+            Assumir
+          </button>
+          <button onClick={() => onAdvanceStatus(order.id)} disabled={order.status === 'Fechada'} className="py-2 border border-cyan-200 bg-cyan-50 text-cyan-700 rounded-lg text-xs font-semibold disabled:opacity-40">
+            Avancar
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const DashboardView = ({ orders, onSelectOrder, onGoToCreate }) => {
+  const [period, setPeriod] = useState('7d');
+
+  const scoped = useMemo(() => filterByPeriod(orders, period), [orders, period]);
+  const active = scoped.filter(isActive);
+  const closed = scoped.filter(isClosed);
+  const delayed = active.filter((o) => getDelayHours(o) > 0).length;
+  const mine = active.filter((o) => o.owner === 'Voce');
+  const dueToday = active.filter((o) => o.deadlineAt >= startOfDay(Date.now()) && o.deadlineAt <= endOfDay(Date.now()));
+  const timeline = useMemo(() => buildTimeline(scoped, period), [scoped, period]);
+  const maxTimeline = Math.max(1, ...timeline.map((d) => Math.max(d.created, d.closed)));
+
+  return (
+    <div className="space-y-6">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Meu Painel</h2>
+          <p className="text-sm text-slate-500">Visao de operacao para tecnico/analista.</p>
+        </div>
+        <PeriodTabs value={period} onChange={setPeriod} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs uppercase font-bold text-slate-400">Ativas</div>
+          <div className="text-3xl font-bold text-slate-800 mt-2">{active.length}</div>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs uppercase font-bold text-slate-400">Minhas</div>
+          <div className="text-3xl font-bold text-indigo-700 mt-2">{mine.length}</div>
+        </div>
+        <div className="bg-white border border-rose-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs uppercase font-bold text-rose-500">Atrasadas</div>
+          <div className="text-3xl font-bold text-rose-600 mt-2">{delayed}</div>
+        </div>
+        <div className="bg-white border border-amber-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs uppercase font-bold text-amber-600">Vencem Hoje</div>
+          <div className="text-3xl font-bold text-amber-600 mt-2">{dueToday.length}</div>
+        </div>
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <div className="text-xs uppercase font-bold text-slate-400">Fechadas</div>
+          <div className="text-3xl font-bold text-emerald-600 mt-2">{closed.length}</div>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 xl:grid-cols-3 gap-5">
+        <div className="xl:col-span-2 bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+          <h3 className="font-bold text-slate-800 mb-4">Fluxo Diario</h3>
+          <div className="h-56 flex items-end gap-2">
+            {timeline.map((d) => (
+              <div key={d.label} className="flex-1 min-w-[24px]">
+                <div className="h-44 flex items-end gap-1">
+                  <div className="w-1/2 bg-cyan-400/75 rounded-t" style={{ height: `${(d.created / maxTimeline) * 100}%` }} />
+                  <div className="w-1/2 bg-emerald-400/75 rounded-t" style={{ height: `${(d.closed / maxTimeline) * 100}%` }} />
+                </div>
+                <div className="text-[10px] text-slate-400 text-center mt-2 font-mono">{d.label}</div>
+              </div>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm">
+          <h3 className="font-bold text-slate-800 mb-3">Acoes Rapidas</h3>
+          <div className="space-y-2">
+            <button onClick={onGoToCreate} className="w-full text-left px-3 py-2 rounded-lg border border-blue-200 bg-blue-50 text-blue-700 font-semibold text-sm hover:bg-blue-100">
+              + Nova O.S
+            </button>
+            <button className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm">Abrir Painel de Tecnicos</button>
+            <button className="w-full text-left px-3 py-2 rounded-lg border border-slate-200 bg-white text-slate-700 text-sm">Ver Base de Conhecimento</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+        <div className="px-5 py-3 border-b border-slate-100 font-bold text-sm text-slate-700">Proximas a vencer</div>
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-5 py-3 text-left">Protocolo</th>
+                <th className="px-5 py-3 text-left">Provedor</th>
+                <th className="px-5 py-3 text-left">Tipo</th>
+                <th className="px-5 py-3 text-left">Status</th>
+                <th className="px-5 py-3 text-right">Prazo</th>
+                <th className="px-5 py-3 text-center">Acao</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {[...active].sort((a, b) => a.deadlineAt - b.deadlineAt).slice(0, 8).map((o) => (
+                <tr key={o.id} className="hover:bg-slate-50">
+                  <td className="px-5 py-3 font-mono">{o.protocol}</td>
+                  <td className="px-5 py-3">{o.provider}</td>
+                  <td className="px-5 py-3"><ServiceTypeBadge type={o.type} /></td>
+                  <td className="px-5 py-3"><Badge color={getStatusColor(o.status)}>{o.status}</Badge></td>
+                  <td className={cn('px-5 py-3 text-right font-mono text-xs', getDelayHours(o) > 0 ? 'text-rose-600 font-bold' : 'text-slate-500')}>{formatDateTime(o.deadlineAt)}</td>
+                  <td className="px-5 py-3 text-center">
+                    <button onClick={() => onSelectOrder(o)} className="px-3 py-1 rounded border border-cyan-200 bg-cyan-50 text-cyan-700 text-[10px] font-bold hover:bg-cyan-100">Ver</button>
+                  </td>
+                </tr>
+              ))}
+              {active.length === 0 && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Sem OS ativas.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const OSListView = ({
+  orders,
+  onSelectOrder,
+  onAdvanceStatus,
+  onBulkStatusUpdate,
+  onBulkAssignTech,
+  onToast,
+}) => {
+  const [period, setPeriod] = useState('7d');
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todas');
+  const [providerFilter, setProviderFilter] = useState('Todos');
+  const [priorityFilter, setPriorityFilter] = useState('Todas');
+  const [selected, setSelected] = useState({});
+  const [bulkStatus, setBulkStatus] = useState('Em Analise');
+  const [bulkTech, setBulkTech] = useState('');
+  const [page, setPage] = useState(1);
+
+  const PAGE_SIZE = 25;
+  const scoped = useMemo(() => filterByPeriod(orders, period), [orders, period]);
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+
+    return scoped.filter((o) => {
+      const matchQ =
+        !q ||
+        o.protocol.toLowerCase().includes(q) ||
+        o.provider.toLowerCase().includes(q) ||
+        (o.tech || '').toLowerCase().includes(q) ||
+        (o.owner || '').toLowerCase().includes(q) ||
+        o.type.toLowerCase().includes(q);
+
+      const matchStatus = statusFilter === 'Todas' ? true : o.status === statusFilter;
+      const matchProvider = providerFilter === 'Todos' ? true : o.provider === providerFilter;
+      const matchPriority = priorityFilter === 'Todas' ? true : o.priority === priorityFilter;
+
+      return matchQ && matchStatus && matchProvider && matchPriority;
+    });
+  }, [scoped, search, statusFilter, providerFilter, priorityFilter]);
+
+  useEffect(() => {
+    setPage(1);
+    setSelected({});
+  }, [period, search, statusFilter, providerFilter, priorityFilter]);
+
+  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE));
+  const currentPage = Math.min(page, totalPages);
+  const rows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
+  const selectedIds = rows.filter((r) => selected[r.id]).map((r) => r.id);
+  const allVisibleSelected = rows.length > 0 && rows.every((r) => selected[r.id]);
+
+  const toggleSelectAllVisible = () => {
+    if (allVisibleSelected) {
+      const next = { ...selected };
+      rows.forEach((r) => delete next[r.id]);
+      setSelected(next);
+      return;
+    }
+    const next = { ...selected };
+    rows.forEach((r) => {
+      next[r.id] = true;
+    });
+    setSelected(next);
+  };
+
+  const runBulkStatus = () => {
+    if (!selectedIds.length) return;
+    onBulkStatusUpdate(selectedIds, bulkStatus);
+    setSelected({});
+    onToast(`${selectedIds.length} OS atualizadas para ${bulkStatus}.`);
+  };
+
+  const runBulkTech = () => {
+    if (!selectedIds.length || !bulkTech) return;
+    onBulkAssignTech(selectedIds, bulkTech);
+    setSelected({});
+    onToast(`${selectedIds.length} OS atribuidas para ${bulkTech}.`);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Ordens de Servico</h2>
+          <p className="text-sm text-slate-500">Busca completa, filtros e acoes em lote.</p>
+        </div>
+        <PeriodTabs value={period} onChange={setPeriod} />
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4 grid grid-cols-1 md:grid-cols-12 gap-3">
+        <div className="md:col-span-4 relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Pesquisar protocolo, provedor, tecnico..." className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm" />
+        </div>
+
+        <div className="md:col-span-2">
+          <select value={statusFilter} onChange={(e) => setStatusFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            <option>Todas</option>
+            {STATUS_FLOW.map((s) => <option key={s}>{s}</option>)}
+          </select>
+        </div>
+
+        <div className="md:col-span-3">
+          <select value={providerFilter} onChange={(e) => setProviderFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            <option>Todos</option>
+            {PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+
+        <div className="md:col-span-3">
+          <select value={priorityFilter} onChange={(e) => setPriorityFilter(e.target.value)} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm">
+            <option>Todas</option>
+            {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+          </select>
+        </div>
+
+        <div className="md:col-span-12 border-t border-slate-100 pt-3 grid grid-cols-1 lg:grid-cols-2 gap-2">
+          <div className="flex gap-2">
+            <select value={bulkStatus} onChange={(e) => setBulkStatus(e.target.value)} className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              {STATUS_FLOW.map((s) => <option key={s}>{s}</option>)}
+            </select>
+            <button onClick={runBulkStatus} className="px-3 py-2 text-xs rounded-lg border border-cyan-200 bg-cyan-50 text-cyan-700 font-bold">Status em lote</button>
+          </div>
+
+          <div className="flex gap-2">
+            <select value={bulkTech} onChange={(e) => setBulkTech(e.target.value)} className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              <option value="">Selecione tecnico</option>
+              {TECHS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+            <button onClick={runBulkTech} className="px-3 py-2 text-xs rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-700 font-bold">Atribuir em lote</button>
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-4 py-3 text-left">
+                  <input type="checkbox" checked={allVisibleSelected} onChange={toggleSelectAllVisible} />
+                </th>
+                <th className="px-5 py-3 text-left">Protocolo</th>
+                <th className="px-5 py-3 text-left">Provedor</th>
+                <th className="px-5 py-3 text-left">Tecnico</th>
+                <th className="px-5 py-3 text-left">Owner</th>
+                <th className="px-5 py-3 text-left">Tipo</th>
+                <th className="px-5 py-3 text-left">Prioridade</th>
+                <th className="px-5 py-3 text-left">Status</th>
+                <th className="px-5 py-3 text-right">Prazo</th>
+                <th className="px-5 py-3 text-center">Acao</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {rows.map((o) => (
+                <tr key={o.id} className="hover:bg-slate-50">
+                  <td className="px-4 py-3">
+                    <input type="checkbox" checked={!!selected[o.id]} onChange={() => setSelected((p) => ({ ...p, [o.id]: !p[o.id] }))} />
+                  </td>
+                  <td className="px-5 py-3 font-mono">{o.protocol}</td>
+                  <td className="px-5 py-3">{o.provider}</td>
+                  <td className="px-5 py-3">{o.tech || '-'}</td>
+                  <td className="px-5 py-3">{o.owner || '-'}</td>
+                  <td className="px-5 py-3"><ServiceTypeBadge type={o.type} /></td>
+                  <td className="px-5 py-3"><Badge color={getPriorityColor(o.priority)}>{o.priority}</Badge></td>
+                  <td className="px-5 py-3"><Badge color={getStatusColor(o.status)}>{o.status}</Badge></td>
+                  <td className={cn('px-5 py-3 text-right font-mono text-xs', getDelayHours(o) > 0 && isActive(o) ? 'text-rose-600 font-bold' : 'text-slate-500')}>{formatDateTime(o.deadlineAt)}</td>
+                  <td className="px-5 py-3 text-center flex justify-center gap-1">
+                    <button onClick={() => onSelectOrder(o)} className="px-2 py-1 rounded border border-cyan-200 bg-cyan-50 text-cyan-700 text-[10px] font-bold">Abrir</button>
+                    {o.status !== 'Fechada' && (
+                      <button onClick={() => onAdvanceStatus(o.id)} className="px-2 py-1 rounded border border-slate-300 bg-white text-[10px]">Avancar</button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+
+              {rows.length === 0 && <tr><td colSpan={10} className="px-5 py-10 text-center text-slate-400">Nenhuma OS encontrada.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+
+        <div className="px-5 py-3 bg-slate-50 border-t border-slate-200 flex justify-between items-center text-xs">
+          <span className="text-slate-500">
+            Pagina <strong>{currentPage}</strong> de <strong>{totalPages}</strong> ({filtered.length} registros)
+          </span>
+          <div className="flex gap-2">
+            <button onClick={() => setPage((p) => Math.max(1, p - 1))} disabled={currentPage === 1} className="px-3 py-1.5 bg-white border border-slate-300 rounded text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">Anterior</button>
+            <button onClick={() => setPage((p) => Math.min(totalPages, p + 1))} disabled={currentPage === totalPages} className="px-3 py-1.5 bg-white border border-slate-300 rounded text-xs font-medium text-slate-600 hover:bg-slate-50 disabled:opacity-40">Proximo</button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const OSCreateView = ({ onCreateOrder, onCancel, onToast }) => {
+  const now = new Date();
+  const plusOneDay = new Date(now.getTime() + 24 * HOUR_MS);
+
+  const [loading, setLoading] = useState(false);
+  const [enhancing, setEnhancing] = useState(false);
+
+  const [form, setForm] = useState({
+    provider: PROVIDERS[0],
+    type: SERVICE_TYPES[0],
+    priority: 'Normal',
+    tech: '',
+    owner: 'Voce',
+    origin: 'WhatsApp',
+    sector: 'NOC',
+    solicitant: '',
+    deadlineDate: `${plusOneDay.getFullYear()}-${pad(plusOneDay.getMonth() + 1)}-${pad(plusOneDay.getDate())}`,
+    deadlineTime: `${pad(plusOneDay.getHours())}:${pad(plusOneDay.getMinutes())}`,
+    description: '',
+    internalNotes: '',
+  });
+
+  const setField = (name, value) => setForm((prev) => ({ ...prev, [name]: value }));
+
+  const enhanceDescription = () => {
+    if (!form.description.trim()) return;
+    setEnhancing(true);
+    setTimeout(() => {
+      const improved = `Resumo tecnico:
+- Sintoma: ${form.description.trim()}
+- Impacto: degradacao no servico ao cliente
+- Validacoes iniciais: ping, perda de pacote, nivel de sinal
+- Acao sugerida: triagem N1 e encaminhamento para tecnico de campo se necessario`;
+      setField('description', improved);
+      setEnhancing(false);
+      onToast('Descricao aprimorada (mock IA).');
+    }, 900);
+  };
+
+  const submit = (e) => {
+    e.preventDefault();
+
+    if (!form.description.trim()) {
+      onToast('Preencha a descricao.');
+      return;
+    }
+
+    setLoading(true);
+    setTimeout(() => {
+      const createdAt = Date.now();
+      const parsed = new Date(`${form.deadlineDate}T${form.deadlineTime}`).getTime();
+      const deadlineAt = Number.isFinite(parsed) ? parsed : createdAt + 24 * HOUR_MS;
+
+      onCreateOrder({
+        id: `OS-${Date.now()}`,
+        protocol: `${new Date().getFullYear()}${String(Date.now()).slice(-6)}`,
+        provider: form.provider,
+        tech: form.tech || null,
+        owner: form.owner || 'Voce',
+        type: form.type,
+        priority: form.priority,
+        status: 'Aberta',
+        createdAt,
+        deadlineAt,
+        closedAt: null,
+        sector: form.sector,
+        origin: form.origin,
+        description: form.description,
+        internalNotes: form.internalNotes,
+        isInconsistent: false,
+        attachments: [{ id: `n-${Date.now()}`, name: 'evidencia_upload_mock.txt' }],
+        occurrences: [
+          { at: createdAt, user: 'Voce', text: 'OS criada manualmente no mockup.' },
+        ],
+      });
+
+      setLoading(false);
+      onToast('OS criada com sucesso.');
+    }, 850);
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-center justify-between">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Nova Ordem de Servico</h2>
+          <p className="text-sm text-slate-500">Formulario completo de abertura para analista/tecnico.</p>
+        </div>
+        <button onClick={onCancel} className="px-3 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
+          Voltar para lista
+        </button>
+      </div>
+
+      <form onSubmit={submit} className="space-y-5">
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Briefcase size={16} className="text-blue-600" />
+            Contexto da OS
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <select value={form.provider} onChange={(e) => setField('provider', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              {PROVIDERS.map((p) => <option key={p}>{p}</option>)}
+            </select>
+
+            <select value={form.type} onChange={(e) => setField('type', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              {SERVICE_TYPES.map((t) => <option key={t}>{t}</option>)}
+            </select>
+
+            <select value={form.priority} onChange={(e) => setField('priority', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              {PRIORITIES.map((p) => <option key={p}>{p}</option>)}
+            </select>
+
+            <select value={form.tech} onChange={(e) => setField('tech', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              <option value="">Sem tecnico</option>
+              {TECHS.map((t) => <option key={t.name} value={t.name}>{t.name}</option>)}
+            </select>
+
+            <input value={form.owner} onChange={(e) => setField('owner', e.target.value)} placeholder="Owner (ex: Voce)" className="px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            <input value={form.solicitant} onChange={(e) => setField('solicitant', e.target.value)} placeholder="Solicitante" className="px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+
+            <select value={form.origin} onChange={(e) => setField('origin', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              {['WhatsApp', 'Ligacao', 'Ticket', 'Email'].map((o) => <option key={o}>{o}</option>)}
+            </select>
+
+            <select value={form.sector} onChange={(e) => setField('sector', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">
+              {['NOC', 'SAC', 'Suporte N1', 'Suporte N2'].map((s) => <option key={s}>{s}</option>)}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-4">
+          <h3 className="font-bold text-slate-800 flex items-center gap-2">
+            <Clock size={16} className="text-amber-600" />
+            SLA e descricao
+          </h3>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <input type="date" value={form.deadlineDate} onChange={(e) => setField('deadlineDate', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            <input type="time" value={form.deadlineTime} onChange={(e) => setField('deadlineTime', e.target.value)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          </div>
+
+          <div>
+            <label className="text-sm font-semibold text-slate-700">Descricao tecnica</label>
+            <textarea rows={5} value={form.description} onChange={(e) => setField('description', e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" placeholder="Descreva o problema com detalhes tecnicos..." />
+            <button type="button" onClick={enhanceDescription} disabled={enhancing} className="mt-2 px-3 py-1.5 border border-indigo-200 bg-indigo-50 text-indigo-700 rounded-lg text-xs font-bold flex items-center gap-1 disabled:opacity-40">
+              {enhancing ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />}
+              Melhorar descricao
+            </button>
+          </div>
+
+          <div>
+            <label className="text-sm font-semibold text-slate-700">Observacoes internas</label>
+            <textarea rows={3} value={form.internalNotes} onChange={(e) => setField('internalNotes', e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-amber-50" placeholder="Notas para a equipe..." />
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-2">
+          <button type="button" onClick={onCancel} className="px-4 py-2 border border-slate-300 rounded-lg text-sm hover:bg-slate-50">
+            Cancelar
+          </button>
+          <button type="submit" disabled={loading} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 disabled:opacity-50 flex items-center gap-2">
+            {loading ? <Loader2 size={14} className="animate-spin" /> : <CheckCircle size={14} />}
+            {loading ? 'Criando...' : 'Criar OS'}
+          </button>
+        </div>
+      </form>
+    </div>
+  );
+};
+
+const TechnicianDelayModal = ({ techName, orders, onClose, onSelectOrder }) => {
+  const list = useMemo(
+    () =>
+      orders
+        .filter((o) => o.tech === techName && getDelayHours(o) > 0)
+        .sort((a, b) => getDelayHours(b) - getDelayHours(a)),
+    [orders, techName]
+  );
+
+  return (
+    <Modal title={`Atrasos - ${techName}`} onClose={onClose} maxWidth="max-w-6xl">
+      <div className="overflow-x-auto custom-scrollbar max-h-[70vh]">
+        <table className="w-full text-sm">
+          <thead className="bg-slate-50 text-slate-500 sticky top-0">
+            <tr>
+              <th className="px-4 py-2 text-left">Protocolo</th>
+              <th className="px-4 py-2 text-left">Provedor</th>
+              <th className="px-4 py-2 text-left">Tipo</th>
+              <th className="px-4 py-2 text-left">Status</th>
+              <th className="px-4 py-2 text-right">Delay (h)</th>
+              <th className="px-4 py-2 text-center">Acao</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-slate-100">
+            {list.map((o) => (
+              <tr key={o.id}>
+                <td className="px-4 py-2 font-mono">{o.protocol}</td>
+                <td className="px-4 py-2">{o.provider}</td>
+                <td className="px-4 py-2"><ServiceTypeBadge type={o.type} /></td>
+                <td className="px-4 py-2"><Badge color={getStatusColor(o.status)}>{o.status}</Badge></td>
+                <td className="px-4 py-2 text-right font-mono font-bold text-rose-600">{getDelayHours(o).toFixed(2)}</td>
+                <td className="px-4 py-2 text-center">
+                  <button onClick={() => onSelectOrder(o)} className="px-3 py-1 border border-cyan-200 bg-cyan-50 text-cyan-700 rounded text-xs font-bold">
+                    Abrir
+                  </button>
+                </td>
+              </tr>
+            ))}
+            {list.length === 0 && <tr><td colSpan={6} className="px-4 py-10 text-center text-slate-400">Sem atrasos para este tecnico.</td></tr>}
+          </tbody>
+        </table>
+      </div>
+    </Modal>
+  );
+};
+
+const TechniciansView = ({ orders, onSelectOrder }) => {
+  const [period, setPeriod] = useState('7d');
+  const [tab, setTab] = useState('performance');
+  const [search, setSearch] = useState('');
+  const [selectedTech, setSelectedTech] = useState(null);
+
+  const scoped = useMemo(() => filterByPeriod(orders, period), [orders, period]);
+  const rows = useMemo(() => buildTechRows(scoped), [scoped]);
+
+  const filteredRows = useMemo(() => rows.filter((r) => r.name.toLowerCase().includes(search.toLowerCase())), [rows, search]);
+
+  const overdueOrders = useMemo(
+    () => scoped.filter((o) => isActive(o) && getDelayHours(o) > 0).sort((a, b) => getDelayHours(b) - getDelayHours(a)),
+    [scoped]
+  );
+
+  const dueTodayOrders = useMemo(
+    () => scoped.filter((o) => isActive(o) && o.deadlineAt >= startOfDay(Date.now()) && o.deadlineAt <= endOfDay(Date.now())).sort((a, b) => a.deadlineAt - b.deadlineAt),
+    [scoped]
+  );
+
+  const coverageRows = useMemo(() => {
+    const map = new Map();
+    SERVICE_TYPES.forEach((t) => map.set(t, { type: t, total: 0, techSet: new Set() }));
+    scoped.forEach((o) => {
+      const row = map.get(o.type);
+      if (!row) return;
+      row.total += 1;
+      if (o.tech) row.techSet.add(o.tech);
+    });
+    return Array.from(map.values()).map((r) => ({
+      type: r.type,
+      total: r.total,
+      techs: r.techSet.size,
+      ratio: r.techSet.size ? (r.total / r.techSet.size).toFixed(1) : '0.0',
+    })).sort((a, b) => b.total - a.total);
+  }, [scoped]);
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Tecnicos</h2>
+          <p className="text-sm text-slate-500">Performance, atrasos, agenda e cobertura por tipo.</p>
+        </div>
+        <PeriodTabs value={period} onChange={setPeriod} />
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl p-4 flex flex-col md:flex-row gap-3 md:items-center justify-between">
+        <div className="flex gap-2 flex-wrap">
+          {[
+            { id: 'performance', label: 'Performance' },
+            { id: 'delays', label: 'OS Atrasadas' },
+            { id: 'agenda', label: 'Agenda Hoje' },
+            { id: 'coverage', label: 'Cobertura' },
+          ].map((t) => (
+            <button key={t.id} onClick={() => setTab(t.id)} className={cn('px-3 py-1.5 rounded-full text-xs font-bold border', tab === t.id ? 'bg-cyan-50 border-cyan-200 text-cyan-700' : 'bg-white border-slate-200 text-slate-500')}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+
+        <div className="relative w-full md:w-64">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar tecnico..." className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm" />
+        </div>
+      </div>
+
+      {tab === 'performance' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-5 py-3 text-left">Tecnico</th>
+                  <th className="px-5 py-3 text-right">Criadas</th>
+                  <th className="px-5 py-3 text-right">Ativas</th>
+                  <th className="px-5 py-3 text-right">On-time %</th>
+                  <th className="px-5 py-3 text-right">Atrasadas</th>
+                  <th className="px-5 py-3 text-right">TMA</th>
+                  <th className="px-5 py-3 text-right">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredRows.map((r) => (
+                  <tr key={r.name}>
+                    <td className="px-5 py-3">
+                      <div className="font-bold text-slate-800">{r.name}</div>
+                      <div className="text-xs text-slate-500">{r.specialization}</div>
+                    </td>
+                    <td className="px-5 py-3 text-right font-mono">{r.created}</td>
+                    <td className="px-5 py-3 text-right font-mono">{r.active}</td>
+                    <td className="px-5 py-3 text-right font-mono text-emerald-600 font-bold">{r.onTimePct}%</td>
+                    <td className={cn('px-5 py-3 text-right font-mono font-bold', r.delayed > 0 ? 'text-rose-600' : 'text-slate-300')}>{r.delayed}</td>
+                    <td className="px-5 py-3 text-right font-mono text-slate-700">{r.avgDuration}</td>
+                    <td className="px-5 py-3 text-right">
+                      <Badge color={r.status === 'busy' ? 'orange' : 'green'}>{r.status === 'busy' ? 'Ocupado' : 'Disponivel'}</Badge>
+                    </td>
+                  </tr>
+                ))}
+                {filteredRows.length === 0 && <tr><td colSpan={7} className="px-5 py-10 text-center text-slate-400">Nenhum tecnico encontrado.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'delays' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-5 py-3 text-left">Protocolo</th>
+                  <th className="px-5 py-3 text-left">Tecnico</th>
+                  <th className="px-5 py-3 text-left">Provedor</th>
+                  <th className="px-5 py-3 text-left">Tipo</th>
+                  <th className="px-5 py-3 text-right">Delay (h)</th>
+                  <th className="px-5 py-3 text-center">Acao</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {overdueOrders.map((o) => (
+                  <tr key={o.id}>
+                    <td className="px-5 py-3 font-mono">{o.protocol}</td>
+                    <td className="px-5 py-3">
+                      <button onClick={() => setSelectedTech(o.tech)} className="text-cyan-700 font-semibold hover:underline">
+                        {o.tech || '-'}
+                      </button>
+                    </td>
+                    <td className="px-5 py-3">{o.provider}</td>
+                    <td className="px-5 py-3"><ServiceTypeBadge type={o.type} /></td>
+                    <td className="px-5 py-3 text-right font-mono font-bold text-rose-600">{getDelayHours(o).toFixed(2)}</td>
+                    <td className="px-5 py-3 text-center">
+                      <button onClick={() => onSelectOrder(o)} className="px-3 py-1 border border-cyan-200 bg-cyan-50 text-cyan-700 rounded text-xs font-bold">Abrir</button>
+                    </td>
+                  </tr>
+                ))}
+                {overdueOrders.length === 0 && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Nenhum atraso na janela.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'agenda' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-5 py-3 text-left">Protocolo</th>
+                  <th className="px-5 py-3 text-left">Tecnico</th>
+                  <th className="px-5 py-3 text-left">Provedor</th>
+                  <th className="px-5 py-3 text-left">Tipo</th>
+                  <th className="px-5 py-3 text-right">Prazo</th>
+                  <th className="px-5 py-3 text-center">Acao</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {dueTodayOrders.map((o) => (
+                  <tr key={o.id}>
+                    <td className="px-5 py-3 font-mono">{o.protocol}</td>
+                    <td className="px-5 py-3">{o.tech || '-'}</td>
+                    <td className="px-5 py-3">{o.provider}</td>
+                    <td className="px-5 py-3"><ServiceTypeBadge type={o.type} /></td>
+                    <td className="px-5 py-3 text-right font-mono text-amber-700 font-bold">{formatDateTime(o.deadlineAt)}</td>
+                    <td className="px-5 py-3 text-center">
+                      <button onClick={() => onSelectOrder(o)} className="px-3 py-1 border border-cyan-200 bg-cyan-50 text-cyan-700 rounded text-xs font-bold">Abrir</button>
+                    </td>
+                  </tr>
+                ))}
+                {dueTodayOrders.length === 0 && <tr><td colSpan={6} className="px-5 py-10 text-center text-slate-400">Sem atividades para hoje.</td></tr>}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {tab === 'coverage' && (
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+          <div className="overflow-x-auto custom-scrollbar">
+            <table className="w-full text-sm">
+              <thead className="bg-slate-50 text-slate-500">
+                <tr>
+                  <th className="px-5 py-3 text-left">Tipo</th>
+                  <th className="px-5 py-3 text-right">Total</th>
+                  <th className="px-5 py-3 text-right">Tecnicos</th>
+                  <th className="px-5 py-3 text-right">Ratio</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {coverageRows.map((r) => (
+                  <tr key={r.type}>
+                    <td className="px-5 py-3"><ServiceTypeBadge type={r.type} /></td>
+                    <td className="px-5 py-3 text-right font-mono">{r.total}</td>
+                    <td className="px-5 py-3 text-right font-mono">{r.techs}</td>
+                    <td className="px-5 py-3 text-right font-mono">{r.ratio}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {selectedTech && <TechnicianDelayModal techName={selectedTech} orders={scoped} onClose={() => setSelectedTech(null)} onSelectOrder={onSelectOrder} />}
+    </div>
+  );
+};
+
+const KnowledgeBaseView = ({ onToast }) => {
+  const [tab, setTab] = useState('ajustpedia');
+  const [search, setSearch] = useState('');
+  const [tag, setTag] = useState('Todos');
+  const [author, setAuthor] = useState('Todos');
+  const [expandedId, setExpandedId] = useState(1);
+  const [onlyFav, setOnlyFav] = useState(false);
+  const [favorites, setFavorites] = useLocalStorageState('kb_favorites_v2', []);
+  const [recent, setRecent] = useLocalStorageState('kb_recent_v2', []);
+  const [entries, setEntries] = useLocalStorageState('kb_entries_v2', KB_INITIAL);
+  const [showContrib, setShowContrib] = useState(false);
+  const [visibleSecrets, setVisibleSecrets] = useState({});
+  const [prompt, setPrompt] = useState('');
+  const [aiOutput, setAiOutput] = useState('');
+
+  const [newEntry, setNewEntry] = useState({
+    title: '',
+    description: '',
+    command: '',
+    tags: '',
+  });
+
+  const tags = useMemo(() => ['Todos', ...new Set(entries.flatMap((e) => e.tags))], [entries]);
+  const authors = useMemo(() => ['Todos', ...new Set(entries.map((e) => e.author))], [entries]);
+
+  const toggleFavorite = (id) => {
+    setFavorites((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [id, ...prev]));
+  };
+
+  const touchRecent = (id) => {
+    setRecent((prev) => [id, ...prev.filter((x) => x !== id)].slice(0, 8));
+  };
+
+  const filteredEntries = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return entries.filter((e) => {
+      const bySearch = !q || `${e.title} ${e.description} ${e.tags.join(' ')} ${e.author} ${e.command}`.toLowerCase().includes(q);
+      const byTag = tag === 'Todos' || e.tags.includes(tag);
+      const byAuthor = author === 'Todos' || e.author === author;
+      const byFav = !onlyFav || favorites.includes(e.id);
+      return bySearch && byTag && byAuthor && byFav;
+    });
+  }, [entries, search, tag, author, onlyFav, favorites]);
+
+  const copyText = async (text) => {
+    try {
+      await navigator.clipboard.writeText(text);
+      onToast('Copiado para area de transferencia.');
+    } catch {}
+  };
+
+  const submitContrib = (e) => {
+    e.preventDefault();
+    if (!newEntry.title.trim() || !newEntry.command.trim()) return;
+
+    const item = {
+      id: Date.now(),
+      title: newEntry.title.trim(),
+      description: newEntry.description.trim() || 'Sem descricao.',
+      command: newEntry.command.trim(),
+      tags: newEntry.tags.split(',').map((t) => t.trim()).filter(Boolean),
+      author: 'Voce',
+      date: formatDate(Date.now()),
+    };
+
+    setEntries((prev) => [item, ...prev]);
+    setShowContrib(false);
+    setNewEntry({ title: '', description: '', command: '', tags: '' });
+    onToast('Contribuicao salva (mock).');
+  };
+
+  const runAi = () => {
+    if (!prompt.trim()) return;
+    setAiOutput(
+      `Plano tecnico sugerido:\n1) Validar conectividade ponta a ponta (ping/mtr).\n2) Confirmar status de ONU/porta/PPPoE.\n3) Verificar saturacao no horario.\n4) Registrar evidencias e retorno ao cliente.\n\nEntrada: "${prompt.trim()}"`
+    );
+    onToast('Analise IA gerada (mock).');
+  };
+
+  const credsFiltered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return CREDENTIALS_MOCK.filter((c) => !q || `${c.provider} ${c.env} ${c.host} ${c.user} ${c.notes}`.toLowerCase().includes(q));
+  }, [search]);
+
+  return (
+    <div className="space-y-5">
+      <div>
+        <h2 className="text-2xl font-bold text-slate-900">Base de Conhecimento</h2>
+        <p className="text-sm text-slate-500">Credenciais e procedimentos tecnicos.</p>
+      </div>
+
+      <div className="bg-slate-100 p-1 rounded-xl inline-flex gap-1">
+        {[
+          { id: 'credenciais', label: 'Credenciais', icon: User },
+          { id: 'ajustpedia', label: 'Ajustpedia', icon: Terminal },
+          { id: 'ia', label: 'IA Especialista', icon: Sparkles },
+        ].map((t) => {
+          const Icon = t.icon;
+          return (
+            <button key={t.id} onClick={() => setTab(t.id)} className={cn('px-3 py-2 rounded-lg text-sm font-medium flex items-center gap-1', tab === t.id ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500')}>
+              <Icon size={14} />
+              {t.label}
+            </button>
+          );
+        })}
+      </div>
+
+      <div className="flex flex-col md:flex-row gap-3">
+        <div className="relative flex-1">
+          <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar..." className="w-full pl-9 pr-3 py-2.5 border border-slate-300 rounded-lg text-sm bg-white" />
+        </div>
+        {tab === 'ajustpedia' && (
+          <button onClick={() => setShowContrib(true)} className="px-5 py-2.5 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 flex items-center gap-2">
+            <Plus size={14} />
+            Contribuir
+          </button>
+        )}
+      </div>
+
+      {tab === 'ajustpedia' && (
+        <>
+          <div className="flex flex-wrap gap-2">
+            <select value={author} onChange={(e) => setAuthor(e.target.value)} className="px-3 py-1.5 border border-slate-300 rounded-lg text-xs bg-white">
+              {authors.map((a) => <option key={a}>{a}</option>)}
+            </select>
+            {tags.map((t) => (
+              <button key={t} onClick={() => setTag(t)} className={cn('px-3 py-1.5 rounded-full border text-xs font-semibold', tag === t ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-white border-slate-200 text-slate-500')}>
+                {t}
+              </button>
+            ))}
+            <button onClick={() => setOnlyFav((v) => !v)} className={cn('px-3 py-1.5 rounded-full border text-xs font-semibold', onlyFav ? 'bg-amber-50 border-amber-200 text-amber-700' : 'bg-white border-slate-200 text-slate-500')}>
+              Favoritos
+            </button>
+          </div>
+
+          {recent.length > 0 && (
+            <div className="bg-white border border-slate-200 rounded-xl p-3">
+              <div className="text-xs uppercase font-bold text-slate-400 mb-2">Recentes</div>
+              <div className="flex flex-wrap gap-2">
+                {recent.map((id) => {
+                  const entry = entries.find((e) => e.id === id);
+                  if (!entry) return null;
+                  return (
+                    <button key={id} onClick={() => setExpandedId(id)} className="px-2 py-1 text-xs border border-slate-200 rounded bg-slate-50 hover:bg-slate-100">
+                      {entry.title}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+
+          <div className="space-y-3">
+            {filteredEntries.map((entry) => {
+              const expanded = expandedId === entry.id;
+              const fav = favorites.includes(entry.id);
+
+              return (
+                <div key={entry.id} className="bg-white border border-slate-200 rounded-xl shadow-sm overflow-hidden">
+                  <div className="px-4 py-4 flex items-start justify-between gap-3">
+                    <button
+                      onClick={() => {
+                        setExpandedId(expanded ? null : entry.id);
+                        touchRecent(entry.id);
+                      }}
+                      className="text-left flex-1"
+                    >
+                      <h3 className="font-bold text-slate-800">{entry.title}</h3>
+                      <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                        {entry.tags.map((tg) => (
+                          <span key={tg} className="px-2 py-0.5 rounded-full bg-slate-100 border border-slate-200">
+                            {tg}
+                          </span>
+                        ))}
+                        <span>• Por {entry.author} em {entry.date}</span>
+                      </div>
+                    </button>
+
+                    <div className="flex items-center gap-1">
+                      <button onClick={() => toggleFavorite(entry.id)} className="px-2 py-1 text-xs border rounded hover:bg-slate-50">
+                        {fav ? 'Desfavoritar' : 'Favoritar'}
+                      </button>
+                      <button onClick={() => setExpandedId(expanded ? null : entry.id)} className="p-1 rounded hover:bg-slate-100">
+                        {expanded ? <ChevronUp size={16} /> : <ChevronDown size={16} />}
+                      </button>
+                    </div>
+                  </div>
+
+                  {expanded && (
+                    <div className="px-4 pb-4 border-t border-slate-100">
+                      <p className="text-sm text-slate-600 mt-3 mb-3">{entry.description}</p>
+                      <div className="relative">
+                        <button onClick={() => copyText(entry.command)} className="absolute right-2 top-2 px-2 py-1 bg-slate-800 text-slate-100 rounded text-xs flex items-center gap-1">
+                          <Copy size={11} />
+                          Copiar
+                        </button>
+                        <pre className="bg-slate-950 text-slate-100 rounded-lg p-4 text-xs overflow-x-auto border border-slate-800">
+                          <code>{entry.command}</code>
+                        </pre>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+
+            {filteredEntries.length === 0 && <div className="bg-white border border-slate-200 rounded-xl p-10 text-center text-sm text-slate-400">Nenhum artigo encontrado.</div>}
+          </div>
+        </>
+      )}
+
+      {tab === 'credenciais' && (
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+          {credsFiltered.map((c) => {
+            const visible = !!visibleSecrets[c.id];
+            return (
+              <div key={c.id} className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+                <div className="font-bold text-slate-800">{c.provider}</div>
+                <div className="text-xs text-slate-500">{c.env}</div>
+
+                <div className="mt-3 space-y-1 text-sm">
+                  <div className="flex justify-between"><span className="text-slate-500">Host</span><span className="font-mono">{c.host}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Usuario</span><span className="font-mono">{c.user}</span></div>
+                  <div className="flex justify-between"><span className="text-slate-500">Senha</span><span className="font-mono">{visible ? 'NOC@2026#Secure!' : c.secret}</span></div>
+                </div>
+
+                <p className="text-xs text-slate-500 mt-3 bg-slate-50 border border-slate-200 rounded p-2">{c.notes}</p>
+
+                <div className="mt-3 flex gap-2">
+                  <button onClick={() => setVisibleSecrets((p) => ({ ...p, [c.id]: !p[c.id] }))} className="flex-1 py-2 text-xs border border-slate-300 rounded flex items-center justify-center gap-1 hover:bg-slate-50">
+                    {visible ? <EyeOff size={13} /> : <Eye size={13} />}
+                    {visible ? 'Ocultar' : 'Exibir'}
+                  </button>
+                  <button onClick={() => copyText(`${c.provider} | ${c.env} | ${c.host} | ${c.user}`)} className="flex-1 py-2 text-xs border border-blue-200 bg-blue-50 text-blue-700 rounded hover:bg-blue-100">
+                    Copiar
+                  </button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      {tab === 'ia' && (
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <Sparkles size={15} className="text-blue-600" />
+              IA Especialista (Mock)
+            </h3>
+            <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={6} className="mt-3 w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" placeholder="Descreva o problema..." />
+            <button onClick={runAi} className="mt-3 px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700">
+              Gerar Analise
+            </button>
+          </div>
+
+          <div className="bg-white border border-slate-200 rounded-xl p-4">
+            <h3 className="font-bold text-slate-800">Saida</h3>
+            <pre className="mt-3 whitespace-pre-wrap text-sm text-slate-700 bg-slate-50 border border-slate-200 rounded-lg p-3 min-h-[220px]">
+              {aiOutput || 'Aguardando solicitacao...'}
+            </pre>
+          </div>
+        </div>
+      )}
+
+      {showContrib && (
+        <Modal title="Contribuir na Ajustpedia" onClose={() => setShowContrib(false)} maxWidth="max-w-2xl">
+          <form onSubmit={submitContrib} className="space-y-3">
+            <input value={newEntry.title} onChange={(e) => setNewEntry((p) => ({ ...p, title: e.target.value }))} placeholder="Titulo" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            <input value={newEntry.tags} onChange={(e) => setNewEntry((p) => ({ ...p, tags: e.target.value }))} placeholder="Tags separadas por virgula" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            <textarea rows={2} value={newEntry.description} onChange={(e) => setNewEntry((p) => ({ ...p, description: e.target.value }))} placeholder="Descricao" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+            <textarea rows={6} value={newEntry.command} onChange={(e) => setNewEntry((p) => ({ ...p, command: e.target.value }))} placeholder="Comando/script" className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm font-mono bg-slate-950 text-slate-100" />
+            <div className="flex justify-end gap-2">
+              <button type="button" onClick={() => setShowContrib(false)} className="px-3 py-2 border border-slate-300 rounded-lg text-sm">Cancelar</button>
+              <button type="submit" className="px-3 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold">Salvar</button>
+            </div>
+          </form>
+        </Modal>
+      )}
+    </div>
+  );
+};
+
+const NotesView = ({ onToast }) => {
+  const [notes, setNotes] = useLocalStorageState('notes_v2', [
+    {
+      id: 1,
+      title: 'Checklist NOC',
+      content: '- Validar latencia\n- Conferir PPPoE\n- Registrar no historico',
+      date: formatDate(Date.now()),
+    },
+    {
+      id: 2,
+      title: 'Pendencias da semana',
+      content: '- Atualizar docs de OLT\n- Revisar relatorio de SLA',
+      date: formatDate(Date.now()),
+    },
+  ]);
+
+  const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState(notes[0]?.id || null);
+
+  const selected = notes.find((n) => n.id === selectedId) || null;
+
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return notes.filter((n) => !q || `${n.title} ${n.content}`.toLowerCase().includes(q));
+  }, [notes, search]);
+
+  const addNote = () => {
+    const id = Date.now();
+    const note = { id, title: 'Sem titulo', content: '', date: formatDate(Date.now()) };
+    setNotes((prev) => [note, ...prev]);
+    setSelectedId(id);
+  };
+
+  const removeNote = (id) => {
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+    if (selectedId === id) {
+      const remaining = notes.filter((n) => n.id !== id);
+      setSelectedId(remaining[0]?.id || null);
+    }
+    onToast('Nota removida.');
+  };
+
+  const updateSelected = (field, value) => {
+    if (!selected) return;
+    setNotes((prev) => prev.map((n) => (n.id === selected.id ? { ...n, [field]: value } : n)));
+  };
+
+  return (
+    <div className="h-[calc(100vh-10rem)] bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm flex">
+      <aside className="w-80 border-r border-slate-200 bg-slate-50 hidden md:flex flex-col">
+        <div className="p-4 border-b border-slate-200">
+          <div className="flex items-center justify-between">
+            <h3 className="font-bold text-slate-800 flex items-center gap-2">
+              <StickyNote size={16} className="text-blue-600" />
+              Notas
+            </h3>
+            <button onClick={addNote} className="p-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700">
+              <Plus size={14} />
+            </button>
+          </div>
+
+          <div className="relative mt-3">
+            <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" />
+            <input value={search} onChange={(e) => setSearch(e.target.value)} placeholder="Buscar nota..." className="w-full pl-9 pr-3 py-2 border border-slate-300 rounded-lg text-sm bg-white" />
+          </div>
+        </div>
+
+        <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+          {filtered.map((n) => (
+            <div key={n.id} className={cn('p-3 rounded-lg border cursor-pointer group', selectedId === n.id ? 'bg-white border-blue-200 shadow-sm' : 'bg-slate-100 border-slate-200 hover:bg-slate-200')}>
+              <div onClick={() => setSelectedId(n.id)}>
+                <div className="font-semibold text-sm text-slate-800 truncate">{n.title}</div>
+                <div className="text-xs text-slate-500 truncate mt-1">{n.content || 'Sem conteudo'}</div>
+              </div>
+              <div className="mt-2 flex items-center justify-between">
+                <span className="text-[10px] text-slate-400">{n.date}</span>
+                <button onClick={() => removeNote(n.id)} className="text-[10px] text-rose-600 opacity-0 group-hover:opacity-100">
+                  Remover
+                </button>
+              </div>
+            </div>
+          ))}
+        </div>
+      </aside>
+
+      <div className="flex-1 p-6">
+        {selected ? (
+          <div className="h-full flex flex-col">
+            <input value={selected.title} onChange={(e) => updateSelected('title', e.target.value)} className="text-3xl font-bold text-slate-800 border-none outline-none bg-transparent" />
+            <div className="text-xs text-slate-400 mt-1">Salvamento automatico (mock)</div>
+            <textarea value={selected.content} onChange={(e) => updateSelected('content', e.target.value)} className="mt-4 flex-1 resize-none border border-slate-200 rounded-lg p-4 text-sm text-slate-700" placeholder="Digite sua nota..." />
+          </div>
+        ) : (
+          <div className="h-full flex items-center justify-center text-slate-400">Selecione ou crie uma nota.</div>
+        )}
+      </div>
+    </div>
+  );
+};
+
+const CalendarView = ({ orders, onSelectOrder }) => {
+  const [monthDate, setMonthDate] = useState(() => {
+    const d = new Date();
+    d.setDate(1);
+    return d;
+  });
+
+  const [selectedDay, setSelectedDay] = useState(null);
+
+  const year = monthDate.getFullYear();
+  const month = monthDate.getMonth();
+  const daysInMonth = new Date(year, month + 1, 0).getDate();
+  const firstWeekDay = new Date(year, month, 1).getDay();
+
+  const grid = [];
+  for (let i = 0; i < firstWeekDay; i++) grid.push(null);
+  for (let d = 1; d <= daysInMonth; d++) grid.push(d);
+
+  const getEventsForDay = (day) => {
+    if (!day) return [];
+    const start = new Date(year, month, day, 0, 0, 0, 0).getTime();
+    const end = start + DAY_MS - 1;
+    return orders
+      .filter((o) => {
+        const dueInDay = o.deadlineAt >= start && o.deadlineAt <= end;
+        const createdInDay = o.createdAt >= start && o.createdAt <= end;
+        return dueInDay || createdInDay;
+      })
+      .slice(0, 20);
+  };
+
+  const selectedEvents = selectedDay ? getEventsForDay(selectedDay) : [];
+
+  return (
+    <div className="space-y-5 h-full flex flex-col">
+      <div className="flex items-center justify-between">
+        <h2 className="text-2xl font-bold text-slate-900">Calendario Operacional</h2>
+        <div className="flex items-center gap-2 bg-white border border-slate-200 rounded-lg p-1">
+          <button onClick={() => setMonthDate(new Date(year, month - 1, 1))} className="p-2 rounded hover:bg-slate-100">
+            <ChevronLeft size={16} />
+          </button>
+          <div className="text-sm font-semibold text-slate-700 min-w-[150px] text-center">
+            {monthDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}
+          </div>
+          <button onClick={() => setMonthDate(new Date(year, month + 1, 1))} className="p-2 rounded hover:bg-slate-100">
+            <ChevronRight size={16} />
+          </button>
+        </div>
+      </div>
+
+      <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
+        <div className="lg:col-span-2 bg-white border border-slate-200 rounded-xl p-4 overflow-y-auto custom-scrollbar">
+          <div className="grid grid-cols-7 gap-2 mb-2">
+            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'].map((d) => (
+              <div key={d} className="text-[11px] font-bold uppercase text-slate-400 text-center py-1">{d}</div>
+            ))}
+          </div>
+
+          <div className="grid grid-cols-7 gap-2">
+            {grid.map((day, idx) => {
+              const events = getEventsForDay(day);
+              const selected = selectedDay === day;
+
+              return (
+                <button
+                  key={idx}
+                  disabled={!day}
+                  onClick={() => day && setSelectedDay(day)}
+                  className={cn(
+                    'min-h-[95px] rounded-lg border p-2 text-left',
+                    !day ? 'border-transparent bg-transparent cursor-default' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/30',
+                    selected && 'ring-2 ring-blue-500 bg-blue-50'
+                  )}
+                >
+                  {day && (
+                    <>
+                      <div className="text-sm font-semibold text-slate-700">{day}</div>
+                      <div className="mt-1 space-y-1">
+                        {events.slice(0, 3).map((e) => (
+                          <div key={e.id} className="text-[10px] px-1.5 py-0.5 rounded bg-slate-100 border border-slate-200 truncate">
+                            {e.protocol}
+                          </div>
+                        ))}
+                        {events.length > 3 && <div className="text-[10px] text-slate-400">+{events.length - 3} mais</div>}
+                      </div>
+                    </>
+                  )}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl overflow-hidden flex flex-col">
+          <div className="px-4 py-3 border-b border-slate-100 bg-slate-50">
+            <h3 className="font-bold text-slate-700">{selectedDay ? `Eventos do dia ${selectedDay}` : 'Selecione um dia'}</h3>
+          </div>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
+            {selectedDay ? (
+              selectedEvents.length > 0 ? (
+                selectedEvents.map((e) => (
+                  <div key={e.id} className="p-3 border border-slate-200 rounded-lg bg-slate-50">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="font-mono text-xs text-slate-700">{e.protocol}</span>
+                      <Badge color={getStatusColor(e.status)}>{e.status}</Badge>
+                    </div>
+                    <div className="text-xs text-slate-600">{e.provider}</div>
+                    <div className="text-xs text-slate-500 mt-1">{formatDateTime(e.deadlineAt)}</div>
+                    <button onClick={() => onSelectOrder(e)} className="mt-2 px-2 py-1 text-[10px] border border-cyan-200 bg-cyan-50 text-cyan-700 rounded font-bold">
+                      Abrir
+                    </button>
+                  </div>
+                ))
+              ) : (
+                <div className="text-sm text-slate-400">Sem eventos nesse dia.</div>
+              )
+            ) : (
+              <div className="text-sm text-slate-400">Selecione uma data no calendario.</div>
+            )}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const ReportsView = ({ orders, onToast }) => {
+  const [period, setPeriod] = useState('30d');
+  const scoped = useMemo(() => filterByPeriod(orders, period), [orders, period]);
+
+  const statusSummary = useMemo(() => {
+    const map = {};
+    scoped.forEach((o) => {
+      map[o.status] = (map[o.status] || 0) + 1;
+    });
+    return map;
+  }, [scoped]);
+
+  const providerSummary = useMemo(() => {
+    const map = {};
+    scoped.forEach((o) => {
+      map[o.provider] = (map[o.provider] || 0) + 1;
+    });
+    return Object.entries(map).map(([provider, total]) => ({ provider, total })).sort((a, b) => b.total - a.total);
+  }, [scoped]);
+
+  const topDelays = useMemo(
+    () =>
+      scoped
+        .filter((o) => getDelayHours(o) > 0)
+        .sort((a, b) => getDelayHours(b) - getDelayHours(a))
+        .slice(0, 10),
+    [scoped]
+  );
+
+  const exportCsv = () => {
+    const header = ['protocol', 'provider', 'tech', 'owner', 'type', 'priority', 'status', 'createdAt', 'deadlineAt', 'delayHours'];
+    const rows = scoped.map((o) => [
+      o.protocol,
+      o.provider,
+      o.tech || '',
+      o.owner || '',
+      o.type,
+      o.priority,
+      o.status,
+      formatDateTime(o.createdAt),
+      formatDateTime(o.deadlineAt),
+      getDelayHours(o).toFixed(2),
+    ]);
+
+    const csv = [header.join(','), ...rows.map((r) => r.map((v) => `"${String(v).replace(/"/g, '""')}"`).join(','))].join('\n');
+
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `relatorio_os_${Date.now()}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    onToast('CSV exportado (mock).');
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <h2 className="text-2xl font-bold text-slate-900">Relatorios</h2>
+          <p className="text-sm text-slate-500">Indicadores operacionais e exportacao CSV.</p>
+        </div>
+        <PeriodTabs value={period} onChange={setPeriod} />
+      </div>
+
+      <div className="flex justify-end">
+        <button onClick={exportCsv} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold hover:bg-blue-700 flex items-center gap-2">
+          <Save size={14} />
+          Exportar CSV
+        </button>
+      </div>
+
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <h3 className="font-bold text-slate-800 mb-3">Resumo por status</h3>
+          <div className="space-y-2">
+            {Object.entries(statusSummary).map(([status, count]) => (
+              <div key={status} className="flex items-center justify-between p-2 rounded border border-slate-200 bg-slate-50">
+                <Badge color={getStatusColor(status)}>{status}</Badge>
+                <span className="font-mono font-bold text-slate-700">{count}</span>
+              </div>
+            ))}
+            {Object.keys(statusSummary).length === 0 && <div className="text-sm text-slate-400">Sem dados na janela.</div>}
+          </div>
+        </div>
+
+        <div className="bg-white border border-slate-200 rounded-xl p-4 shadow-sm">
+          <h3 className="font-bold text-slate-800 mb-3">Top provedores</h3>
+          <div className="space-y-2">
+            {providerSummary.slice(0, 8).map((p) => (
+              <div key={p.provider} className="flex items-center justify-between p-2 rounded border border-slate-200 bg-slate-50">
+                <span className="text-sm text-slate-700">{p.provider}</span>
+                <span className="font-mono font-bold text-slate-700">{p.total}</span>
+              </div>
+            ))}
+            {providerSummary.length === 0 && <div className="text-sm text-slate-400">Sem dados na janela.</div>}
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shadow-sm">
+        <div className="px-5 py-3 border-b border-slate-100 font-bold text-sm text-slate-700">Top atrasos</div>
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-sm">
+            <thead className="bg-slate-50 text-slate-500">
+              <tr>
+                <th className="px-5 py-3 text-left">Protocolo</th>
+                <th className="px-5 py-3 text-left">Provedor</th>
+                <th className="px-5 py-3 text-left">Tecnico</th>
+                <th className="px-5 py-3 text-left">Status</th>
+                <th className="px-5 py-3 text-right">Delay (h)</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-100">
+              {topDelays.map((o) => (
+                <tr key={o.id}>
+                  <td className="px-5 py-3 font-mono">{o.protocol}</td>
+                  <td className="px-5 py-3">{o.provider}</td>
+                  <td className="px-5 py-3">{o.tech || '-'}</td>
+                  <td className="px-5 py-3"><Badge color={getStatusColor(o.status)}>{o.status}</Badge></td>
+                  <td className="px-5 py-3 text-right font-mono font-bold text-rose-600">{getDelayHours(o).toFixed(2)}</td>
+                </tr>
+              ))}
+              {topDelays.length === 0 && <tr><td colSpan={5} className="px-5 py-10 text-center text-slate-400">Sem atrasos no periodo.</td></tr>}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+const SettingsView = ({ role, onToast }) => {
+  const isAdmin = role === 'super_admin';
+
+  const [tab, setTab] = useState('perfil');
+  const [profile, setProfile] = useState({
+    name: 'Analista NOC',
+    email: 'analista@consulterp.com',
+    timezone: 'America/Sao_Paulo',
+  });
+
+  const [prefs, setPrefs] = useState({
+    notifyEmail: true,
+    notifyPush: true,
+    compactTable: false,
+  });
+
+  const [sync, setSync] = useState({
+    interval: 15,
+    heartbeat: 5,
+    enabled: true,
+  });
+
+  const saveProfile = () => onToast('Perfil salvo (mock).');
+  const savePrefs = () => onToast('Preferencias salvas (mock).');
+  const saveSync = () => onToast('Config de sincronizacao salva (mock).');
+
+  return (
+    <div className="space-y-5 max-w-5xl">
+      <h2 className="text-2xl font-bold text-slate-900">Configuracoes</h2>
+
+      <div className="flex gap-2 flex-wrap">
+        {[
+          { id: 'perfil', label: 'Perfil' },
+          { id: 'preferencias', label: 'Preferencias' },
+          { id: 'sync', label: 'Sincronizacao' },
+        ].map((t) => (
+          <button key={t.id} onClick={() => setTab(t.id)} className={cn('px-3 py-1.5 rounded-full text-xs font-bold border', tab === t.id ? 'bg-cyan-50 border-cyan-200 text-cyan-700' : 'bg-white border-slate-200 text-slate-500')}>
+            {t.label}
+          </button>
+        ))}
+      </div>
+
+      {tab === 'perfil' && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+          <input value={profile.name} onChange={(e) => setProfile((p) => ({ ...p, name: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          <input value={profile.email} onChange={(e) => setProfile((p) => ({ ...p, email: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          <input value={profile.timezone} onChange={(e) => setProfile((p) => ({ ...p, timezone: e.target.value }))} className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+          <div className="flex justify-end">
+            <button onClick={saveProfile} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold">Salvar Perfil</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'preferencias' && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={prefs.notifyEmail} onChange={(e) => setPrefs((p) => ({ ...p, notifyEmail: e.target.checked }))} />
+            Notificacoes por e-mail
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={prefs.notifyPush} onChange={(e) => setPrefs((p) => ({ ...p, notifyPush: e.target.checked }))} />
+            Notificacoes push
+          </label>
+          <label className="flex items-center gap-2 text-sm text-slate-700">
+            <input type="checkbox" checked={prefs.compactTable} onChange={(e) => setPrefs((p) => ({ ...p, compactTable: e.target.checked }))} />
+            Modo de tabela compacta
+          </label>
+          <div className="flex justify-end">
+            <button onClick={savePrefs} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold">Salvar Preferencias</button>
+          </div>
+        </div>
+      )}
+
+      {tab === 'sync' && (
+        <div className="bg-white border border-slate-200 rounded-xl p-5 shadow-sm space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <input type="number" disabled={!isAdmin} value={sync.interval} onChange={(e) => setSync((p) => ({ ...p, interval: Number(e.target.value) }))} className={cn('px-3 py-2 border border-slate-300 rounded-lg text-sm', !isAdmin && 'opacity-60')} />
+            <input type="number" disabled={!isAdmin} value={sync.heartbeat} onChange={(e) => setSync((p) => ({ ...p, heartbeat: Number(e.target.value) }))} className={cn('px-3 py-2 border border-slate-300 rounded-lg text-sm', !isAdmin && 'opacity-60')} />
+            <label className={cn('px-3 py-2 border border-slate-300 rounded-lg text-sm bg-slate-50 flex items-center gap-2', !isAdmin && 'opacity-60')}>
+              <input type="checkbox" disabled={!isAdmin} checked={sync.enabled} onChange={(e) => setSync((p) => ({ ...p, enabled: e.target.checked }))} />
+              Sincronizacao ativa
+            </label>
+          </div>
+
+          {!isAdmin && (
+            <div className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2 flex items-center gap-2">
+              <AlertTriangle size={14} />
+              Somente super_admin altera parametros reais.
+            </div>
+          )}
+
+          {isAdmin && (
+            <div className="flex justify-end">
+              <button onClick={saveSync} className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-semibold">Salvar Sync</button>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+};
+
+export default function AnalystTechnicianMockupComplete() {
+  const [sidebarOpen, setSidebarOpen] = useLocalStorageState('mock_sidebar_open_full_v1', true);
+  const [currentView, setCurrentView] = useLocalStorageState('mock_current_view_full_v1', 'dashboard');
+  const [role, setRole] = useLocalStorageState('mock_role_full_v1', 'analyst');
+  const [orders, setOrders] = useLocalStorageState('mock_orders_full_v1', () => generateMockOrders(260));
+
+  const [mobileOpen, setMobileOpen] = useState(false);
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [toastMessage, setToastMessage] = useState('');
+  const [commandOpen, setCommandOpen] = useState(false);
+
+  const onToast = (msg) => setToastMessage(msg);
+
+  useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'k') {
+        e.preventDefault();
+        setCommandOpen(true);
+      }
+      if (e.key === 'Escape') setCommandOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const cycleRole = () => {
+    setRole((prev) => (prev === 'analyst' ? 'technician' : prev === 'technician' ? 'super_admin' : 'analyst'));
+    onToast('Role alternada (mock).');
+  };
+
+  const refreshMockData = () => {
+    setOrders(generateMockOrders(260));
+    onToast('Base mock atualizada.');
+  };
+
+  const createOrder = (order) => {
+    setOrders((prev) => [order, ...prev]);
+    setCurrentView('os_list');
+  };
+
+  const updateOrderStatus = (id, status) => {
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (o.id !== id) return o;
+        const closedAt = status === 'Fechada' && o.status !== 'Fechada' ? Date.now() : o.closedAt;
+        return {
+          ...o,
+          status,
+          closedAt,
+          occurrences: [...o.occurrences, { at: Date.now(), user: 'Voce', text: `Status alterado para ${status}.` }],
+        };
+      })
+    );
+  };
+
+  const advanceOrderStatus = (id) => {
+    const order = orders.find((o) => o.id === id);
+    if (!order || order.status === 'Fechada') return;
+    updateOrderStatus(id, nextStatus(order.status));
+  };
+
+  const assignToMe = (id) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === id
+          ? {
+              ...o,
+              owner: 'Voce',
+              occurrences: [...o.occurrences, { at: Date.now(), user: 'Voce', text: 'OS assumida manualmente.' }],
+            }
+          : o
+      )
+    );
+    onToast('OS assumida.');
+  };
+
+  const bulkStatusUpdate = (ids, status) => {
+    setOrders((prev) =>
+      prev.map((o) => {
+        if (!ids.includes(o.id)) return o;
+        const closedAt = status === 'Fechada' && o.status !== 'Fechada' ? Date.now() : o.closedAt;
+        return {
+          ...o,
+          status,
+          closedAt,
+          occurrences: [...o.occurrences, { at: Date.now(), user: 'Voce', text: `Status alterado em lote para ${status}.` }],
+        };
+      })
+    );
+  };
+
+  const bulkAssignTech = (ids, techName) => {
+    setOrders((prev) =>
+      prev.map((o) =>
+        ids.includes(o.id)
+          ? {
+              ...o,
+              tech: techName,
+              occurrences: [...o.occurrences, { at: Date.now(), user: 'Voce', text: `Tecnico atribuido em lote: ${techName}.` }],
+            }
+          : o
+      )
+    );
+  };
+
+  const renderView = () => {
+    if (currentView === 'dashboard') {
+      return <DashboardView orders={orders} onSelectOrder={setSelectedOrder} onGoToCreate={() => setCurrentView('os_create')} />;
+    }
+
+    if (currentView === 'os_list') {
+      return (
+        <OSListView
+          orders={orders}
+          onSelectOrder={setSelectedOrder}
+          onAdvanceStatus={advanceOrderStatus}
+          onBulkStatusUpdate={bulkStatusUpdate}
+          onBulkAssignTech={bulkAssignTech}
+          onToast={onToast}
+        />
+      );
+    }
+
+    if (currentView === 'os_create') {
+      return <OSCreateView onCreateOrder={createOrder} onCancel={() => setCurrentView('os_list')} onToast={onToast} />;
+    }
+
+    if (currentView === 'technicians') {
+      return <TechniciansView orders={orders} onSelectOrder={setSelectedOrder} />;
+    }
+
+    if (currentView === 'knowledge') {
+      return <KnowledgeBaseView onToast={onToast} />;
+    }
+
+    if (currentView === 'notes') {
+      return <NotesView onToast={onToast} />;
+    }
+
+    if (currentView === 'calendar') {
+      return <CalendarView orders={orders} onSelectOrder={setSelectedOrder} />;
+    }
+
+    if (currentView === 'reports') {
+      return <ReportsView orders={orders} onToast={onToast} />;
+    }
+
+    if (currentView === 'settings') {
+      return <SettingsView role={role} onToast={onToast} />;
+    }
+
+    return <DashboardView orders={orders} onSelectOrder={setSelectedOrder} onGoToCreate={() => setCurrentView('os_create')} />;
+  };
+
+  const sidebarContent = (compact = false) => (
+    <>
+      <div className="h-16 border-b border-slate-200 flex items-center px-4">
+        <div className="w-8 h-8 rounded-lg bg-blue-600 text-white flex items-center justify-center">
+          <Activity size={16} />
+        </div>
+        {!compact && <span className="ml-3 font-bold text-slate-800 text-lg">ConsultERP</span>}
+      </div>
+
+      <nav className="p-3 space-y-4 overflow-y-auto custom-scrollbar">
+        {['OPERACIONAL', 'RECURSOS'].map((group) => (
+          <div key={group}>
+            {!compact && <div className="px-3 mb-1 text-[11px] font-bold tracking-wider text-slate-400 uppercase">{group}</div>}
+            <div className="space-y-1">
+              {NAV_ITEMS.filter((i) => i.group === group).map((item) => (
+                <SidebarItem
+                  key={item.id}
+                  icon={item.icon}
+                  label={item.label}
+                  compact={compact}
+                  active={currentView === item.id}
+                  onClick={() => {
+                    setCurrentView(item.id);
+                    setMobileOpen(false);
+                  }}
+                />
+              ))}
+            </div>
+          </div>
+        ))}
+      </nav>
+    </>
+  );
+
+  return (
+    <div className="h-screen bg-slate-100 text-slate-900 overflow-hidden">
+      <style>{`
+        .custom-scrollbar::-webkit-scrollbar { width: 8px; height: 8px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb { background: #cbd5e1; border-radius: 4px; }
+        .custom-scrollbar::-webkit-scrollbar-thumb:hover { background: #94a3b8; }
+        .no-scrollbar::-webkit-scrollbar { display: none; }
+      `}</style>
+
+      <div className="flex h-full">
+        <aside className={cn('hidden md:flex flex-col bg-white border-r border-slate-200 transition-all', sidebarOpen ? 'w-64' : 'w-20')}>
+          {sidebarContent(!sidebarOpen)}
+        </aside>
+
+        {mobileOpen && (
+          <div className="fixed inset-0 z-[60] md:hidden">
+            <div className="absolute inset-0 bg-slate-900/40" onClick={() => setMobileOpen(false)} />
+            <aside className="absolute left-0 top-0 h-full w-72 bg-white border-r border-slate-200 shadow-2xl">
+              {sidebarContent(false)}
+            </aside>
+          </div>
+        )}
+
+        <div className="flex-1 flex flex-col overflow-hidden">
+          <header className="h-16 bg-white border-b border-slate-200 px-4 md:px-6 flex items-center justify-between">
+            <div className="flex items-center gap-2 text-sm text-slate-500">
+              <button onClick={() => setMobileOpen(true)} className="md:hidden p-2 rounded hover:bg-slate-100">
+                <Menu size={18} />
+              </button>
+              <button onClick={() => setSidebarOpen((v) => !v)} className="hidden md:inline-flex p-2 rounded hover:bg-slate-100">
+                <Menu size={18} />
+              </button>
+              <span>Home</span>
+              <span>/</span>
+              <span className="font-medium text-slate-800">{VIEW_TITLE[currentView]}</span>
+            </div>
+
+            <div className="flex items-center gap-3">
+              <button onClick={() => setCommandOpen(true)} className="hidden md:inline-flex px-2.5 py-1.5 border border-slate-300 rounded-lg text-xs text-slate-600 hover:bg-slate-50">
+                Ctrl/Cmd + K
+              </button>
+
+              <button onClick={refreshMockData} className="p-2 rounded-full text-slate-500 hover:bg-slate-100">
+                <RefreshCw size={17} />
+              </button>
+
+              <button className="p-2 rounded-full text-slate-500 hover:bg-slate-100 relative">
+                <Bell size={18} />
+                <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full" />
+              </button>
+
+              <button onClick={cycleRole} className="px-3 py-1 rounded-full border border-slate-200 bg-slate-100 text-xs font-bold text-slate-600 uppercase flex items-center gap-1">
+                <User size={12} />
+                {role.replace('_', ' ')}
+              </button>
+            </div>
+          </header>
+
+          <main className="flex-1 overflow-y-auto custom-scrollbar p-4 md:p-6">
+            <div className="max-w-[1500px] mx-auto">{renderView()}</div>
+          </main>
+        </div>
+      </div>
+
+      <CommandPalette
+        open={commandOpen}
+        onClose={() => setCommandOpen(false)}
+        views={NAV_ITEMS.map((n) => ({ id: n.id, label: n.label }))}
+        orders={orders}
+        onNavigate={setCurrentView}
+        onOpenOrder={setSelectedOrder}
+      />
+
+      {selectedOrder && (
+        <OSDetailsDrawer
+          order={selectedOrder}
+          onClose={() => setSelectedOrder(null)}
+          onAdvanceStatus={advanceOrderStatus}
+          onAssignToMe={assignToMe}
+        />
+      )}
+
+      {toastMessage && <ToastMessage message={toastMessage} onDone={() => setToastMessage('')} />}
+    </div>
+  );
+}
