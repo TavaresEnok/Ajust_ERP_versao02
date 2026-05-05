@@ -1,11 +1,12 @@
 'use client';
+import { useErpWebSocket } from './ws-client';
 
 import React, { useEffect, useMemo, useState, createContext, useContext } from 'react';
 import {
-  PieChart, Users, Settings, LogOut, LayoutDashboard, Search, Bell, Menu, X,
+  PieChart, Users, Settings, LogOut, Sparkles, Terminal, LayoutDashboard, Search, Bell, Menu, X,
   Filter, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Clock, Calendar,
   ArrowRight, FileText, ChevronLeft, Shield, CheckCheck, HelpCircle, Eye, Copy,
-  RefreshCw, TrendingUp, Sun, Moon, Activity, Plus, Download, ExternalLink, Briefcase, Sliders, Target, User, UserCog, Wrench, Database
+  RefreshCw, TrendingUp, Sun, Moon, Activity, Plus, Download, ExternalLink, Briefcase, Sliders, Target, User, UserCog, Wrench, Database, Phone, Key, Star, FileDown, Zap
 } from 'lucide-react';
 /* ----------------------------- Theme Context ----------------------------- */
 
@@ -19,6 +20,20 @@ import { AdminDashboardViewModule } from './gerencia/views/admin-dashboard-view'
 import { GlobalOrdersViewModule } from './gerencia/views/global-orders-view';
 import { TenantManagementViewModule } from './gerencia/views/tenant-management-view';
 import { SettingsViewModule } from './gerencia/views/settings-view';
+import { AnalystCredentialsNeoView } from './analista-credentials-neo-view';
+import { AnalystNotesView } from './analista-notes-view';
+import { CalendarManageViewModule } from './gerencia/views/calendar-manage-view';
+import { CmdbView } from './gerencia/views/cmdb-view';
+import { ChangeManagementView } from './gerencia/views/change-management-view';
+import { TimeTrackingView } from './gerencia/views/time-tracking-view';
+import { NotificationsConfigView } from './gerencia/views/notifications-config-view';
+import { OnCallScheduleView } from './gerencia/views/on-call-view';
+import { ApiKeysView } from './gerencia/views/api-keys-view';
+import { CsatView } from './gerencia/views/csat-view';
+import { PdfReportView } from './gerencia/views/pdf-report-view';
+import { SlaBuilderView } from './gerencia/views/sla-builder-view';
+import { OperationalHealthView } from './gerencia/views/operational-health-view';
+import { WorkflowBuilderView } from './gerencia/views/workflow-builder-view';
 
 /* ----------------------------- Core Helpers ----------------------------- */
 
@@ -304,6 +319,7 @@ const mapApiTenantUser = (membership) => ({
   email: membership.user?.email || '-',
   roleCode: membership.role?.code || 'leitura',
   role: ROLE_CODE_TO_LABEL[membership.role?.code] || membership.role?.name || membership.role?.code || 'Leitura',
+  sector: membership.sector || 'NOC',
   active: membership.user?.status === 'ACTIVE',
   status: membership.user?.status || 'INACTIVE',
   createdAt: membership.user?.createdAt || null,
@@ -359,8 +375,27 @@ const filterOrdersByWindow = (orders, window, field = 'createdAt') =>
 /* ----------------------------- Analytics ----------------------------- */
 
 const buildTimeline = (orders, window, now = Date.now()) => {
-  const end = window.end || now;
-  const start = window.start ?? startOfDay(end - 13 * DAY_MS);
+  const withTs = orders
+    .flatMap((order) => [order.createdAt || null, order.closedAt || null])
+    .filter((ts) => Number.isFinite(ts));
+  const hasData = withTs.length > 0;
+
+  const end =
+    window.start == null
+      ? hasData
+        ? Math.max(...withTs)
+        : window.end || now
+      : window.end || now;
+
+  const start = (() => {
+    if (window.start != null) return window.start;
+    if (!hasData) return startOfDay(end - 13 * DAY_MS);
+
+    const earliest = Math.min(...withTs);
+    const spanDays = Math.floor((endOfDay(end) - startOfDay(earliest)) / DAY_MS) + 1;
+    const rangeDays = Math.max(1, Math.min(60, spanDays));
+    return startOfDay(end - (rangeDays - 1) * DAY_MS);
+  })();
 
   const rangeDays = Math.max(1, Math.min(60, Math.floor((endOfDay(end) - startOfDay(start)) / DAY_MS) + 1));
   const timeline = [];
@@ -374,7 +409,7 @@ const buildTimeline = (orders, window, now = Date.now()) => {
     const backlog = orders.filter((o) => o.createdAt <= dayEnd && (!o.closedAt || o.closedAt > dayEnd)).length;
 
     timeline.push({
-      date: `${pad(new Date(dayStart).getDate())}/${pad(new Date(dayStart).getMonth() + 1)}`,
+      date: pad(new Date(dayStart).getDate()) + "/" + pad(new Date(dayStart).getMonth() + 1),
       created,
       closed,
       backlog,
@@ -1482,7 +1517,7 @@ const SLABucketDrawer = ({ bucket, onClose, onSelectOS }) => (
 
 const ManagerDashboardView = ({ orders, onSelectOS, loading }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 7 * DAY_MS), end: toInputDate(Date.now()) });
 
   const now = Date.now();
@@ -1916,7 +1951,7 @@ const GlobalOrdersView = ({ orders, onSelectOS, title = 'Ordens Globais', showTe
 
 const TechniciansModule = ({ orders, onSelectOS }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 7 * DAY_MS), end: toInputDate(Date.now()) });
   const [activeTab, setActiveTab] = useState('performance');
   const [search, setSearch] = useState('');
@@ -2655,7 +2690,7 @@ const TechniciansModule = ({ orders, onSelectOS }) => {
 
 const ProvidersAnalysisView = ({ orders, onSelectOS }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 7 * DAY_MS), end: toInputDate(Date.now()) });
   const [activeTab, setActiveTab] = useState('ranking');
   const [search, setSearch] = useState('');
@@ -3211,9 +3246,498 @@ const ProvidersAnalysisView = ({ orders, onSelectOS }) => {
   );
 };
 
+const ANALYST_PROVIDER_PERIOD_LABELS = ['Tudo', 'Hoje', '7d', '15d', '30d'];
+
+const filterOrdersByPeriodLabel = (orders, period, now = Date.now()) => {
+  if (period === 'Tudo') return orders;
+  if (period === 'Hoje') {
+    const start = startOfDay(now);
+    const end = endOfDay(now);
+    return orders.filter((o) => (o.createdAt || 0) >= start && (o.createdAt || 0) <= end);
+  }
+  const days = Number(String(period).replace('d', ''));
+  if (!Number.isFinite(days) || days <= 0) return orders;
+  const start = startOfDay(now - (days - 1) * DAY_MS);
+  return orders.filter((o) => (o.createdAt || 0) >= start);
+};
+
+const buildAnalystProviderOccurrences = (orders) => {
+  const byOccurrence = new Map();
+  orders.forEach((order) => {
+    const provider = order.provider || 'Sem provedor';
+    const contract = String(order.contract || '').trim();
+    const hasContract = !!contract && contract !== '-';
+    const number = hasContract ? contract : `Sem contrato (${order.protocol || order.id})`;
+    const key = hasContract ? `${provider}::${contract}` : `${provider}::LEG-${order.id}`;
+    if (!byOccurrence.has(key)) {
+      byOccurrence.set(key, {
+        id: key,
+        provider,
+        number,
+        type: order.type || '-',
+        status: order.status || 'Aberta',
+        sector: order.sector || '-',
+        origin: order.origin || '-',
+        createdAt: order.createdAt || Date.now(),
+        orders: [],
+      });
+    }
+    const occurrence = byOccurrence.get(key);
+    occurrence.orders.push(order);
+    if ((order.createdAt || 0) < occurrence.createdAt) {
+      occurrence.createdAt = order.createdAt || occurrence.createdAt;
+    }
+    if (isActive(order)) {
+      occurrence.status = order.status || occurrence.status;
+    }
+  });
+  return Array.from(byOccurrence.values()).sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+};
+
+const AnalystProvidersOperationalView = ({ orders, onSelectOS }) => {
+  const { dark } = useTheme();
+  const [search, setSearch] = useState('');
+  const [selectedProvider, setSelectedProvider] = useState(null);
+  const [period, setPeriod] = useState('Tudo');
+  const [occurrenceSearch, setOccurrenceSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todas');
+  const [typeFilter, setTypeFilter] = useState('Todos');
+  const [onlyDelayed, setOnlyDelayed] = useState(false);
+  const [selectedOccurrenceId, setSelectedOccurrenceId] = useState(null);
+
+  const now = Date.now();
+  const allOccurrences = useMemo(() => buildAnalystProviderOccurrences(orders), [orders]);
+
+  const providerRows = useMemo(() => {
+    const map = new Map();
+    allOccurrences.forEach((occurrence) => {
+      if (!map.has(occurrence.provider)) {
+        map.set(occurrence.provider, {
+          provider: occurrence.provider,
+          occurrences: 0,
+          orders: 0,
+          active: 0,
+          delayed: 0,
+          critical: 0,
+        });
+      }
+      const row = map.get(occurrence.provider);
+      row.occurrences += 1;
+      row.orders += occurrence.orders.length;
+      row.active += occurrence.orders.filter(isActive).length;
+      row.delayed += occurrence.orders.filter((o) => isActive(o) && getDelayHours(o, now) > 0).length;
+      row.critical += occurrence.orders.filter((o) => o.priority === 'Alta' || o.priority === 'Critica').length;
+    });
+    return Array.from(map.values()).sort((a, b) => b.orders - a.orders);
+  }, [allOccurrences, now]);
+
+  const filteredProviders = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return providerRows.filter((row) => !q || row.provider.toLowerCase().includes(q));
+  }, [providerRows, search]);
+
+  const providerOrders = useMemo(() => {
+    if (!selectedProvider) return [];
+    return orders.filter((order) => order.provider === selectedProvider);
+  }, [orders, selectedProvider]);
+
+  const scopedProviderOrders = useMemo(() => filterOrdersByPeriodLabel(providerOrders, period, now), [providerOrders, period, now]);
+
+  const providerOccurrences = useMemo(() => {
+    if (!selectedProvider) return [];
+    return buildAnalystProviderOccurrences(scopedProviderOrders).filter((occurrence) => occurrence.provider === selectedProvider);
+  }, [scopedProviderOrders, selectedProvider]);
+
+  const typeOptions = useMemo(() => ['Todos', ...Array.from(new Set(providerOccurrences.map((occurrence) => occurrence.type).filter(Boolean)))], [providerOccurrences]);
+
+  const filteredOccurrences = useMemo(() => {
+    const q = occurrenceSearch.toLowerCase().trim();
+    return providerOccurrences.filter((occurrence) => {
+      const bySearch = !q || `${occurrence.number} ${occurrence.type} ${occurrence.sector} ${occurrence.status}`.toLowerCase().includes(q);
+      const byStatus = statusFilter === 'Todas' || occurrence.status === statusFilter;
+      const byType = typeFilter === 'Todos' || occurrence.type === typeFilter;
+      const byDelay = !onlyDelayed || occurrence.orders.some((order) => isActive(order) && getDelayHours(order, now) > 0);
+      return bySearch && byStatus && byType && byDelay;
+    });
+  }, [providerOccurrences, occurrenceSearch, statusFilter, typeFilter, onlyDelayed, now]);
+
+  const selectedOccurrence = useMemo(
+    () => providerOccurrences.find((occurrence) => occurrence.id === selectedOccurrenceId) || null,
+    [providerOccurrences, selectedOccurrenceId]
+  );
+
+  const selectedOccurrenceOrders = useMemo(() => {
+    if (!selectedOccurrence) return [];
+    return [...selectedOccurrence.orders].sort((a, b) => (a.deadlineAt || 0) - (b.deadlineAt || 0));
+  }, [selectedOccurrence]);
+
+  useEffect(() => {
+    setSelectedOccurrenceId(null);
+    setOccurrenceSearch('');
+    setStatusFilter('Todas');
+    setTypeFilter('Todos');
+    setOnlyDelayed(false);
+    setPeriod('Tudo');
+  }, [selectedProvider]);
+
+  useEffect(() => {
+    if (!selectedOccurrenceId) return;
+    if (!providerOccurrences.some((occurrence) => occurrence.id === selectedOccurrenceId)) {
+      setSelectedOccurrenceId(null);
+    }
+  }, [selectedOccurrenceId, providerOccurrences]);
+
+  if (selectedProvider) {
+    return (
+      <div className="space-y-5">
+        <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+          <div>
+            <button
+              onClick={() => setSelectedProvider(null)}
+              className={cn('inline-flex items-center gap-1 text-xs font-semibold mb-2 hover:underline', dark ? 'text-cyan-300' : 'text-cyan-700')}
+            >
+              <ChevronLeft size={14} />
+              Voltar para lista de provedores
+            </button>
+            <h2 className={cn('text-2xl font-bold', dark ? 'text-slate-100' : 'text-slate-900')}>{selectedProvider}</h2>
+            <p className={cn('text-sm', dark ? 'text-slate-400' : 'text-slate-500')}>
+              Fluxo operacional por ocorrência, seguindo o padrão da tela de analista.
+            </p>
+          </div>
+          <div className={cn('flex items-center border rounded-lg p-1 gap-1 overflow-x-auto no-scrollbar', dark ? 'bg-[#1e293b]/60 border-slate-700/50' : 'bg-white border-slate-200')}>
+            {ANALYST_PROVIDER_PERIOD_LABELS.map((label) => (
+              <button
+                key={label}
+                onClick={() => setPeriod(label)}
+                className={cn(
+                  'px-3 py-1.5 text-xs rounded font-semibold whitespace-nowrap transition-colors',
+                  period === label
+                    ? dark ? 'bg-cyan-900/40 text-cyan-200' : 'bg-slate-800 text-white'
+                    : dark ? 'text-slate-400 hover:bg-white/5 hover:text-slate-200' : 'text-slate-500 hover:bg-slate-100'
+                )}
+              >
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
+          <div className={cn('border rounded-xl p-4 shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+            <div className={cn('text-xs uppercase font-bold', dark ? 'text-slate-500' : 'text-slate-400')}>Ocorrências</div>
+            <div className={cn('text-3xl font-bold mt-2', dark ? 'text-slate-100' : 'text-slate-800')}>{providerOccurrences.length}</div>
+          </div>
+          <div className={cn('border rounded-xl p-4 shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+            <div className={cn('text-xs uppercase font-bold', dark ? 'text-slate-500' : 'text-slate-400')}>Total O.S</div>
+            <div className={cn('text-3xl font-bold mt-2', dark ? 'text-slate-100' : 'text-slate-800')}>{scopedProviderOrders.length}</div>
+          </div>
+          <div className={cn('border rounded-xl p-4 shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+            <div className={cn('text-xs uppercase font-bold', dark ? 'text-slate-500' : 'text-slate-400')}>Ativas</div>
+            <div className={cn('text-3xl font-bold mt-2', dark ? 'text-indigo-300' : 'text-indigo-700')}>{scopedProviderOrders.filter(isActive).length}</div>
+          </div>
+          <div className={cn('border rounded-xl p-4 shadow-sm', dark ? 'bg-[#111b2e]/75 border-rose-500/30' : 'bg-white border-rose-200')}>
+            <div className="text-xs uppercase font-bold text-rose-500">Atrasadas</div>
+            <div className="text-3xl font-bold text-rose-600 mt-2">{scopedProviderOrders.filter((order) => isActive(order) && getDelayHours(order, now) > 0).length}</div>
+          </div>
+          <div className={cn('border rounded-xl p-4 shadow-sm', dark ? 'bg-[#111b2e]/75 border-amber-500/30' : 'bg-white border-amber-200')}>
+            <div className="text-xs uppercase font-bold text-amber-600">Alta/Critica</div>
+            <div className="text-3xl font-bold text-amber-600 mt-2">{scopedProviderOrders.filter((order) => order.priority === 'Alta' || order.priority === 'Critica').length}</div>
+          </div>
+        </div>
+
+        {!selectedOccurrence && (
+          <>
+            <div className={cn('border rounded-xl p-4', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+              <div className="grid grid-cols-1 lg:grid-cols-12 gap-3">
+                <div className="lg:col-span-5 relative">
+                  <Search size={14} className={cn('absolute left-3 top-1/2 -translate-y-1/2', dark ? 'text-slate-500' : 'text-slate-400')} />
+                  <input
+                    value={occurrenceSearch}
+                    onChange={(e) => setOccurrenceSearch(e.target.value)}
+                    placeholder="Buscar ocorrência..."
+                    className={cn(
+                      'w-full pl-9 pr-3 py-2 border rounded-lg text-sm transition-colors',
+                      dark ? 'bg-[#0d1628]/80 border-slate-700/60 text-slate-200 placeholder:text-slate-500' : 'bg-white border-slate-300 text-slate-900'
+                    )}
+                  />
+                </div>
+                <div className="lg:col-span-3">
+                  <select
+                    value={statusFilter}
+                    onChange={(e) => setStatusFilter(e.target.value)}
+                    className={cn('w-full px-3 py-2 border rounded-lg text-sm', dark ? 'bg-[#0d1628]/80 border-slate-700/60 text-slate-300' : 'bg-white border-slate-300 text-slate-900')}
+                  >
+                    <option>Todas</option>
+                    {Array.from(new Set(providerOccurrences.map((occurrence) => occurrence.status))).map((status) => (
+                      <option key={status}>{status}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="lg:col-span-2">
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                    className={cn('w-full px-3 py-2 border rounded-lg text-sm', dark ? 'bg-[#0d1628]/80 border-slate-700/60 text-slate-300' : 'bg-white border-slate-300 text-slate-900')}
+                  >
+                    {typeOptions.map((type) => (
+                      <option key={type}>{type}</option>
+                    ))}
+                  </select>
+                </div>
+                <div className="lg:col-span-2 flex items-center gap-2">
+                  <input id="only-delayed-occ" type="checkbox" checked={onlyDelayed} onChange={(e) => setOnlyDelayed(e.target.checked)} />
+                  <label htmlFor="only-delayed-occ" className={cn('text-xs font-semibold', dark ? 'text-slate-400' : 'text-slate-600')}>
+                    Só com atraso
+                  </label>
+                </div>
+              </div>
+            </div>
+
+            <div className={cn('border rounded-xl overflow-hidden shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+              <div className={cn('px-5 py-3 border-b', dark ? 'border-slate-700/50' : 'border-slate-100')}>
+                <div className={cn('font-bold text-sm', dark ? 'text-slate-300' : 'text-slate-700')}>
+                  Ocorrências do provedor ({filteredOccurrences.length})
+                </div>
+              </div>
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-sm">
+                  <thead className={cn(dark ? 'bg-[#0d1628]/90 text-slate-400' : 'bg-slate-50 text-slate-500')}>
+                    <tr>
+                      <th className="px-4 py-3 text-left">Ocorrência</th>
+                      <th className="px-4 py-3 text-left">Tipo</th>
+                      <th className="px-4 py-3 text-left">Setor</th>
+                      <th className="px-4 py-3 text-left">Status</th>
+                      <th className="px-4 py-3 text-right">O.S</th>
+                      <th className="px-4 py-3 text-center">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className={cn('divide-y', dark ? 'divide-slate-700/50' : 'divide-slate-100')}>
+                    {filteredOccurrences.map((occurrence) => (
+                      <tr
+                        key={occurrence.id}
+                        className={cn('cursor-pointer transition-colors', dark ? 'hover:bg-white/5' : 'hover:bg-slate-50')}
+                        onClick={() => setSelectedOccurrenceId(occurrence.id)}
+                      >
+                        <td className={cn('px-4 py-3 font-mono text-xs', dark ? 'text-slate-300' : 'text-slate-700')}>{occurrence.number}</td>
+                        <td className={cn('px-4 py-3', dark ? 'text-slate-300' : 'text-slate-700')}>{occurrence.type || '-'}</td>
+                        <td className={cn('px-4 py-3', dark ? 'text-slate-300' : 'text-slate-700')}>{occurrence.sector || '-'}</td>
+                        <td className="px-4 py-3">
+                          <ErpBadge color={getStatusColor(occurrence.status || 'Aberta')} dark={dark}>{occurrence.status || '-'}</ErpBadge>
+                        </td>
+                        <td className={cn('px-4 py-3 text-right font-mono', dark ? 'text-slate-300' : 'text-slate-700')}>{occurrence.orders.length}</td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              setSelectedOccurrenceId(occurrence.id);
+                            }}
+                            className={cn(
+                              'px-3 py-1 rounded border text-[11px] font-bold transition-colors',
+                              dark ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300 hover:bg-cyan-900/50' : 'border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
+                            )}
+                          >
+                            Abrir
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {filteredOccurrences.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className={cn('px-4 py-10 text-center', dark ? 'text-slate-500' : 'text-slate-400')}>
+                          Nenhuma ocorrência encontrada para os filtros atuais.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </>
+        )}
+
+        {selectedOccurrence && (
+          <div className="space-y-4">
+            <div className={cn('border rounded-xl p-4 shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+              <button
+                onClick={() => setSelectedOccurrenceId(null)}
+                className={cn('inline-flex items-center gap-1 text-xs font-semibold mb-2 hover:underline', dark ? 'text-cyan-300' : 'text-cyan-700')}
+              >
+                <ChevronLeft size={14} />
+                Voltar para ocorrências
+              </button>
+              <div className="flex flex-col lg:flex-row lg:items-start lg:justify-between gap-3">
+                <div>
+                  <div className={cn('text-xs uppercase font-bold', dark ? 'text-slate-500' : 'text-slate-400')}>
+                    Ocorrência {selectedOccurrence.number}
+                  </div>
+                  <div className={cn('text-sm mt-1', dark ? 'text-slate-300' : 'text-slate-700')}>
+                    Tipo: {selectedOccurrence.type || '-'} • Setor: {selectedOccurrence.sector || '-'} • Origem: {selectedOccurrence.origin || '-'}
+                  </div>
+                </div>
+                <ErpBadge color={getStatusColor(selectedOccurrence.status || 'Aberta')} dark={dark}>
+                  {selectedOccurrence.status || '-'}
+                </ErpBadge>
+              </div>
+            </div>
+
+            <div className={cn('border rounded-xl overflow-hidden shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+              <div className={cn('px-5 py-3 border-b', dark ? 'border-slate-700/50' : 'border-slate-100')}>
+                <div className={cn('font-bold text-sm', dark ? 'text-slate-300' : 'text-slate-700')}>
+                  Ordens de serviço da ocorrência ({selectedOccurrenceOrders.length})
+                </div>
+              </div>
+              <div className="overflow-x-auto custom-scrollbar">
+                <table className="w-full text-sm">
+                  <thead className={cn(dark ? 'bg-[#0d1628]/90 text-slate-400' : 'bg-slate-50 text-slate-500')}>
+                    <tr>
+                      <th className="px-4 py-3 text-left">Protocolo</th>
+                      <th className="px-4 py-3 text-left">Tipo</th>
+                      <th className="px-4 py-3 text-left">Prioridade</th>
+                      <th className="px-4 py-3 text-left">Status</th>
+                      <th className="px-4 py-3 text-right">Prazo</th>
+                      <th className="px-4 py-3 text-center">Ação</th>
+                    </tr>
+                  </thead>
+                  <tbody className={cn('divide-y', dark ? 'divide-slate-700/50' : 'divide-slate-100')}>
+                    {selectedOccurrenceOrders.map((order) => (
+                      <tr
+                        key={order.id}
+                        className={cn('cursor-pointer transition-colors', dark ? 'hover:bg-white/5' : 'hover:bg-slate-50')}
+                        onClick={() => onSelectOS(order)}
+                      >
+                        <td className={cn('px-4 py-3 font-mono', dark ? 'text-slate-300' : 'text-slate-700')}>{order.protocol}</td>
+                        <td className={cn('px-4 py-3', dark ? 'text-slate-300' : 'text-slate-700')}>{order.type}</td>
+                        <td className="px-4 py-3">
+                          <ErpBadge color={getPriorityColor(order.priority)} dark={dark}>{order.priority}</ErpBadge>
+                        </td>
+                        <td className="px-4 py-3">
+                          <ErpBadge color={getStatusColor(order.status)} dark={dark}>{order.status}</ErpBadge>
+                        </td>
+                        <td className={cn('px-4 py-3 text-right font-mono text-xs', getDelayHours(order, now) > 0 ? 'text-rose-600 font-bold' : dark ? 'text-slate-400' : 'text-slate-600')}>
+                          {formatDateTime(order.deadlineAt)}
+                        </td>
+                        <td className="px-4 py-3 text-center">
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              onSelectOS(order);
+                            }}
+                            className={cn(
+                              'px-3 py-1 rounded border text-[11px] font-bold transition-colors',
+                              dark ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300 hover:bg-cyan-900/50' : 'border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
+                            )}
+                          >
+                            Abrir O.S
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                    {selectedOccurrenceOrders.length === 0 && (
+                      <tr>
+                        <td colSpan={6} className={cn('px-4 py-10 text-center', dark ? 'text-slate-500' : 'text-slate-400')}>
+                          Esta ocorrência ainda não possui O.S vinculadas.
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
+        <div>
+          <h2 className={cn('text-2xl font-bold', dark ? 'text-slate-100' : 'text-slate-900')}>Provedores</h2>
+          <p className={cn('text-sm', dark ? 'text-slate-400' : 'text-slate-500')}>
+            Selecione um provedor para navegar por ocorrências e ordens de serviço.
+          </p>
+        </div>
+        <div className="relative w-full lg:w-[340px]">
+          <Search size={14} className={cn('absolute left-3 top-1/2 -translate-y-1/2', dark ? 'text-slate-500' : 'text-slate-400')} />
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar provedor..."
+            className={cn(
+              'w-full pl-9 pr-3 py-2 border rounded-lg text-sm transition-colors',
+              dark ? 'bg-[#0d1628]/80 border-slate-700/60 text-slate-200 placeholder:text-slate-500' : 'bg-white border-slate-300 text-slate-900'
+            )}
+          />
+        </div>
+      </div>
+
+      <div className={cn('border rounded-xl overflow-hidden shadow-sm', dark ? 'bg-[#111b2e]/75 border-slate-700/60' : 'bg-white border-slate-200')}>
+        <div className={cn('px-5 py-3 border-b', dark ? 'border-slate-700/50' : 'border-slate-100')}>
+          <div className={cn('font-bold text-sm', dark ? 'text-slate-300' : 'text-slate-700')}>
+            Provedores ({filteredProviders.length})
+          </div>
+        </div>
+        <div className="overflow-x-auto custom-scrollbar">
+          <table className="w-full text-sm">
+            <thead className={cn(dark ? 'bg-[#0d1628]/90 text-slate-400' : 'bg-slate-50 text-slate-500')}>
+              <tr>
+                <th className="px-4 py-3 text-left">Provedor</th>
+                <th className="px-4 py-3 text-right">Ocorrências</th>
+                <th className="px-4 py-3 text-right">O.S</th>
+                <th className="px-4 py-3 text-right">Ativas</th>
+                <th className="px-4 py-3 text-right">Atrasadas</th>
+                <th className="px-4 py-3 text-right">Alta/Critica</th>
+                <th className="px-4 py-3 text-center">Ação</th>
+              </tr>
+            </thead>
+            <tbody className={cn('divide-y', dark ? 'divide-slate-700/50' : 'divide-slate-100')}>
+              {filteredProviders.map((row) => (
+                <tr
+                  key={row.provider}
+                  className={cn('cursor-pointer transition-colors', dark ? 'hover:bg-white/5' : 'hover:bg-slate-50')}
+                  onClick={() => setSelectedProvider(row.provider)}
+                >
+                  <td className={cn('px-4 py-3 font-semibold', dark ? 'text-slate-100' : 'text-slate-800')}>{row.provider}</td>
+                  <td className={cn('px-4 py-3 text-right font-mono', dark ? 'text-slate-300' : 'text-slate-700')}>{row.occurrences}</td>
+                  <td className={cn('px-4 py-3 text-right font-mono', dark ? 'text-slate-300' : 'text-slate-700')}>{row.orders}</td>
+                  <td className={cn('px-4 py-3 text-right font-mono', dark ? 'text-indigo-300' : 'text-indigo-700')}>{row.active}</td>
+                  <td className={cn('px-4 py-3 text-right font-mono', row.delayed > 0 ? 'text-rose-600 font-bold' : dark ? 'text-slate-500' : 'text-slate-500')}>{row.delayed}</td>
+                  <td className={cn('px-4 py-3 text-right font-mono', dark ? 'text-amber-300' : 'text-amber-700')}>{row.critical}</td>
+                  <td className="px-4 py-3 text-center">
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        setSelectedProvider(row.provider);
+                      }}
+                      className={cn(
+                        'px-3 py-1 rounded border text-[11px] font-bold transition-colors',
+                        dark ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300 hover:bg-cyan-900/50' : 'border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100'
+                      )}
+                    >
+                      Abrir
+                    </button>
+                  </td>
+                </tr>
+              ))}
+              {filteredProviders.length === 0 && (
+                <tr>
+                  <td colSpan={7} className={cn('px-4 py-10 text-center', dark ? 'text-slate-500' : 'text-slate-400')}>
+                    Nenhum provedor encontrado.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+};
+
 const ServiceTypesView = ({ orders, onSelectOS }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 7 * DAY_MS), end: toInputDate(Date.now()) });
   const [selectedTypeRow, setSelectedTypeRow] = useState(null);
   const [rankingSearch, setRankingSearch] = useState('');
@@ -3499,7 +4023,7 @@ const ServiceTypesView = ({ orders, onSelectOS }) => {
 
 const SLAView = ({ orders, onSelectOS }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 7 * DAY_MS), end: toInputDate(Date.now()) });
   const [selectedBucket, setSelectedBucket] = useState(null);
   const [impactSearch, setImpactSearch] = useState('');
@@ -3894,7 +4418,7 @@ const SLAView = ({ orders, onSelectOS }) => {
 
 const ReportsView = ({ orders, tenants, isSuperAdmin }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('30d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 30 * DAY_MS), end: toInputDate(Date.now()) });
   const [statusFilter, setStatusFilter] = useState('Todos');
   const [tenantFilter, setTenantFilter] = useState('Todos');
@@ -4159,6 +4683,133 @@ const AnalystDashboardView = ({ orders, onSelectOS, loading }) => {
   );
 };
 
+const AnalystAjustpediaView = ({ tenantId, notify }) => {
+  const { dark } = useTheme();
+  const [loading, setLoading] = useState(false);
+  const [entries, setEntries] = useState([]);
+  const [search, setSearch] = useState('');
+  const [selectedTag, setSelectedTag] = useState('Todas');
+
+  useEffect(() => {
+    if (!tenantId) return;
+    let active = true;
+    const load = async () => {
+      setLoading(true);
+      try {
+        const response = await fetch(`/api/knowledge/articles?tenantId=${encodeURIComponent(tenantId)}&limit=300`, { cache: 'no-store' });
+        if (!response.ok) {
+          throw new Error(await readApiErrorMessage(response, 'Falha ao carregar Ajustpedia.'));
+        }
+        const payload = await response.json();
+        if (!active) return;
+        const mapped = Array.isArray(payload)
+          ? payload.map((item) => ({
+            id: item.id,
+            title: item.title || 'Sem titulo',
+            tags: Array.isArray(item.tags) ? item.tags : [],
+            content: String(item.content || ''),
+            author: item.author?.name || 'Equipe',
+            updatedAt: parseDateToTs(item.updatedAt || item.createdAt),
+          }))
+          : [];
+        setEntries(mapped.sort((a, b) => b.updatedAt - a.updatedAt));
+      } catch (error) {
+        if (!active) return;
+        notify?.(error instanceof Error ? error.message : 'Falha ao carregar Ajustpedia.');
+      } finally {
+        if (active) setLoading(false);
+      }
+    };
+    load();
+    return () => {
+      active = false;
+    };
+  }, [tenantId, notify]);
+
+  const tags = useMemo(() => ['Todas', ...Array.from(new Set(entries.flatMap((entry) => entry.tags)))], [entries]);
+  const filtered = useMemo(() => {
+    const q = search.toLowerCase().trim();
+    return entries.filter((entry) => {
+      const byTag = selectedTag === 'Todas' || entry.tags.includes(selectedTag);
+      const bySearch = !q || `${entry.title} ${entry.content} ${entry.tags.join(' ')}`.toLowerCase().includes(q);
+      return byTag && bySearch;
+    });
+  }, [entries, search, selectedTag]);
+
+  return (
+    <div className="space-y-4">
+      <div>
+        <h2 className={cn('text-2xl font-bold', dark ? 'text-slate-100' : 'text-slate-900')}>Ajustpedia</h2>
+        <p className={cn('text-sm', dark ? 'text-slate-400' : 'text-slate-500')}>Base de procedimentos técnicos para a gestão.</p>
+      </div>
+      <div className={cn('border rounded-xl p-4 grid grid-cols-1 md:grid-cols-12 gap-3', dark ? 'bg-[#1e293b]/60 border-slate-700/50' : 'bg-white border-slate-200')}>
+        <div className="md:col-span-8">
+          <input
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Buscar por titulo, tag ou comando..."
+            className={cn('w-full px-3 py-2 border rounded-lg text-sm', dark ? 'bg-[#0f172a]/80 border-slate-700/50 text-slate-200' : 'bg-white border-slate-300 text-slate-900')}
+          />
+        </div>
+        <div className="md:col-span-4">
+          <select
+            value={selectedTag}
+            onChange={(e) => setSelectedTag(e.target.value)}
+            className={cn('w-full px-3 py-2 border rounded-lg text-sm', dark ? 'bg-[#0f172a]/80 border-slate-700/50 text-slate-200' : 'bg-white border-slate-300 text-slate-900')}
+          >
+            {tags.map((tag) => (
+              <option key={tag} value={tag}>{tag}</option>
+            ))}
+          </select>
+        </div>
+      </div>
+
+      <div className={cn('border rounded-xl overflow-hidden', dark ? 'bg-[#1e293b]/60 border-slate-700/50' : 'bg-white border-slate-200')}>
+        <div className={cn('px-5 py-3 border-b text-sm font-bold', dark ? 'border-slate-700/50 text-slate-300' : 'border-slate-100 text-slate-700')}>
+          Entradas ({filtered.length})
+        </div>
+        <div className="max-h-[62vh] overflow-y-auto custom-scrollbar divide-y divide-slate-200/20">
+          {loading && (
+            <div className={cn('px-5 py-8 text-sm', dark ? 'text-slate-400' : 'text-slate-500')}>Carregando Ajustpedia...</div>
+          )}
+          {!loading && filtered.length === 0 && (
+            <div className={cn('px-5 py-10 text-sm', dark ? 'text-slate-400' : 'text-slate-500')}>Nenhuma entrada encontrada.</div>
+          )}
+          {!loading && filtered.map((entry) => (
+            <div key={entry.id} className="px-5 py-4 space-y-2">
+              <div className="flex items-center justify-between gap-2">
+                <div className={cn('font-semibold', dark ? 'text-slate-100' : 'text-slate-800')}>{entry.title}</div>
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(entry.content || '');
+                    notify?.('Comando copiado.');
+                  }}
+                  className={cn('px-2.5 py-1 rounded border text-xs font-bold', dark ? 'border-cyan-700/50 bg-cyan-900/30 text-cyan-300' : 'border-cyan-200 bg-cyan-50 text-cyan-700')}
+                >
+                  Copiar
+                </button>
+              </div>
+              <div className="flex flex-wrap gap-1">
+                {entry.tags.map((tag) => (
+                  <span key={`${entry.id}-${tag}`} className={cn('px-2 py-0.5 rounded-full text-[10px] font-bold border', dark ? 'border-slate-600 text-slate-300' : 'border-slate-200 text-slate-600')}>
+                    {tag}
+                  </span>
+                ))}
+              </div>
+              <pre className={cn('text-xs p-3 rounded-lg whitespace-pre-wrap break-words overflow-x-auto', dark ? 'bg-[#0f172a]/80 text-slate-300' : 'bg-slate-50 text-slate-700')}>
+                {entry.content || '-'}
+              </pre>
+              <div className={cn('text-[11px]', dark ? 'text-slate-500' : 'text-slate-500')}>
+                Autor: {entry.author} • Atualizado em {formatDateTime(entry.updatedAt)}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+};
+
 /* ----------------------------- Main App ----------------------------- */
 
 export default function App() {
@@ -4283,6 +4934,16 @@ export default function App() {
     };
   }, []);
 
+    // Real-time WebSocket for gerencia
+  useErpWebSocket({
+    tenantId,
+    onEvent: (ev) => {
+      if (ev.type === 'order_created' || ev.type === 'order_updated' || ev.type === 'ixc_sync_success') {
+        if (!syncing) loadRemoteData(tenantId, userRole);
+      }
+    }
+  });
+
   const syncData = () => {
     if (!tenantId) {
       notify('Tenant não identificado para sincronização.');
@@ -4325,6 +4986,21 @@ export default function App() {
       tenants: 'Gestão de Clientes',
       settings: 'Configurações',
       analyst_dashboard: 'Meu Painel',
+      analyst_providers: 'Provedores',
+      analyst_credentials_neo: 'Cofre Neo',
+      analyst_ajustpedia: 'Ajustpedia',
+      analyst_notes: 'Minhas Notas',
+      cmdb: 'CMDB — Repositório de Ativos',
+      change_management: 'Gestão de Mudanças (RFC/ITIL)',
+      time_tracking: 'Time Tracking',
+      notifications_config: 'Notificações Externas',
+      on_call: 'Escala de Plantão (On-Call)',
+      api_keys: 'API Keys',
+      csat: 'CSAT (Satisfação)',
+      pdf_reports: 'Exportação PDF',
+      sla_builder: 'SLA Policy Builder',
+      operational_health: 'Saúde Operacional (Health Score)',
+      workflow_builder: 'Workflow Builder (Automações)',
     };
     return map[currentView] || 'Dashboard';
   }, [currentView]);
@@ -4373,6 +5049,54 @@ export default function App() {
 
       case 'settings':
         return <SettingsView role={userRole} notify={notify} tenantId={tenantId} />;
+
+      case 'analyst_providers':
+        return <AnalystProvidersOperationalView orders={orders} onSelectOS={setSelectedOS} />;
+
+      case 'analyst_credentials_neo':
+        return <AnalystCredentialsNeoView dark={dark} onToast={notify} />;
+
+      case 'analyst_ajustpedia':
+        return <AnalystAjustpediaView tenantId={tenantId} notify={notify} />;
+
+      case 'analyst_notes':
+        return <AnalystNotesView dark={dark} onToast={notify} />;
+
+      case 'calendar':
+        return <CalendarManageViewModule dark={dark} />;
+
+      case 'cmdb':
+        return <CmdbView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'change_management':
+        return <ChangeManagementView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'time_tracking':
+        return <TimeTrackingView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'notifications_config':
+        return <NotificationsConfigView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'on_call':
+        return <OnCallScheduleView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'api_keys':
+        return <ApiKeysView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'csat':
+        return <CsatView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'pdf_reports':
+        return <PdfReportView dark={dark} tenantId={tenantId} tenantName={tenantName} onToast={notify} />;
+
+      case 'sla_builder':
+        return <SlaBuilderView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'operational_health':
+        return <OperationalHealthView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'workflow_builder':
+        return <WorkflowBuilderView dark={dark} tenantId={tenantId} onToast={notify} />;
 
       default:
         return userRole === 'super_admin' ? (
@@ -4443,10 +5167,38 @@ export default function App() {
           },
           {
             key: 'sla_config',
-            label: 'SLA & Performance',
+            label: 'Monitor SLA & Performance',
             icon: Clock,
             onClick: () => setCurrentView('sla'),
             active: currentView === 'sla'
+          },
+          {
+            key: 'sla_builder',
+            label: 'SLA Policy Builder',
+            icon: Settings,
+            onClick: () => setCurrentView('sla_builder'),
+            active: currentView === 'sla_builder'
+          },
+          {
+            key: 'operational_health',
+            label: 'Saúde Operacional',
+            icon: Activity,
+            onClick: () => setCurrentView('operational_health'),
+            active: currentView === 'operational_health'
+          },
+          {
+            key: 'workflow_builder',
+            label: 'Workflow Builder',
+            icon: Zap,
+            onClick: () => setCurrentView('workflow_builder'),
+            active: currentView === 'workflow_builder'
+          },
+          {
+            key: 'calendar',
+            label: 'Calendário',
+            icon: Calendar,
+            onClick: () => setCurrentView('calendar'),
+            active: currentView === 'calendar'
           },
           {
             key: 'section_admin',
@@ -4474,6 +5226,100 @@ export default function App() {
             icon: Settings,
             onClick: () => setCurrentView('settings'),
             active: currentView === 'settings'
+          },
+          {
+            key: 'cmdb',
+            label: 'CMDB (Ativos)',
+            icon: DatabaseIcon,
+            onClick: () => setCurrentView('cmdb'),
+            active: currentView === 'cmdb'
+          },
+          {
+            key: 'change_management',
+            label: 'Gestão de Mudanças',
+            icon: Target,
+            onClick: () => setCurrentView('change_management'),
+            active: currentView === 'change_management'
+          },
+          {
+            key: 'time_tracking',
+            label: 'Time Tracking',
+            icon: Clock,
+            onClick: () => setCurrentView('time_tracking'),
+            active: currentView === 'time_tracking'
+          },
+          {
+            key: 'on_call',
+            label: 'Escala de Plantão',
+            icon: Phone,
+            onClick: () => setCurrentView('on_call'),
+            active: currentView === 'on_call'
+          },
+          {
+            key: 'csat',
+            label: 'CSAT (Satisfação)',
+            icon: Star,
+            onClick: () => setCurrentView('csat'),
+            active: currentView === 'csat'
+          },
+          {
+            key: 'pdf_reports',
+            label: 'Relatórios PDF',
+            icon: FileDown,
+            onClick: () => setCurrentView('pdf_reports'),
+            active: currentView === 'pdf_reports'
+          },
+          {
+            key: 'notifications_config',
+            label: 'Notificações & Alertas',
+            icon: Bell,
+            onClick: () => setCurrentView('notifications_config'),
+            active: currentView === 'notifications_config'
+          },
+          {
+            key: 'api_keys',
+            label: 'Integração & API Keys',
+            icon: Key,
+            onClick: () => setCurrentView('api_keys'),
+            active: currentView === 'api_keys'
+          },
+          {
+            key: 'section_analyst_functions',
+            kind: 'section',
+            label: 'Funções analista',
+            role: 'gerente'
+          },
+          {
+            key: 'analyst_providers',
+            label: 'Provedores',
+            icon: Shield,
+            onClick: () => setCurrentView('analyst_providers'),
+            active: currentView === 'analyst_providers',
+            role: 'gerente'
+          },
+          {
+            key: 'analyst_credentials_neo',
+            label: 'Cofre Neo',
+            icon: DatabaseIcon,
+            onClick: () => setCurrentView('analyst_credentials_neo'),
+            active: currentView === 'analyst_credentials_neo',
+            role: 'gerente'
+          },
+          {
+            key: 'analyst_ajustpedia',
+            label: 'Ajustpedia',
+            icon: FileText,
+            onClick: () => setCurrentView('analyst_ajustpedia'),
+            active: currentView === 'analyst_ajustpedia',
+            role: 'gerente'
+          },
+          {
+            key: 'analyst_notes',
+            label: 'Minhas Notas',
+            icon: User,
+            onClick: () => setCurrentView('analyst_notes'),
+            active: currentView === 'analyst_notes',
+            role: 'gerente'
           }
         ].filter(item => !item.role || item.role === userRole || (item.role === 'gerente' && userRole === 'super_admin'))}
         onLogout={handleLogout}

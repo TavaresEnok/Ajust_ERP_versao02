@@ -56,9 +56,7 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       return response;
     }
 
-    const response = await fetch(
-      `${apiBaseUrl()}/service-orders/export/${id}/download?tenantId=${encodeURIComponent(me.tenant.id)}`,
-      {
+    const response = await fetch(`${apiBaseUrl()}/service-orders/export/${id}/download`, {
         method: 'GET',
         headers: { authorization: `Bearer ${accessToken}` },
         cache: 'no-store'

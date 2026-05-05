@@ -107,7 +107,6 @@ function resolveLegacyPath(pathname: string, role: string | null | undefined) {
     return '/cliente';
   }
 
-  // Any unresolved legacy portal route falls back to the role home.
   if (normalized.startsWith('/portal/')) {
     return home;
   }
@@ -115,25 +114,51 @@ function resolveLegacyPath(pathname: string, role: string | null | undefined) {
   return null;
 }
 
+/**
+ * Fast-path: decodifica o JWT localmente (sem verificar assinatura, isso é feito pela API)
+ * para checar se o token ainda não expirou. Evita uma chamada HTTP ao /auth/me por request.
+ * Se o token estiver expirado ou malformado, cai no fluxo de refresh normal.
+ */
+function jwtIsLikelyValid(token: string): boolean {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+    if (!payload.exp) return false;
+    // Considera expirado 30s antes para evitar race condition de clock
+    return payload.exp * 1000 > Date.now() + 30_000;
+  } catch {
+    return false;
+  }
+}
+
 async function fetchMe(accessToken: string) {
-  const response = await fetch(`${apiBaseUrl()}/auth/me`, {
-    method: 'GET',
-    headers: { authorization: `Bearer ${accessToken}` },
-    cache: 'no-store'
-  });
-  if (!response.ok) return null;
-  return (await response.json()) as MeResult;
+  try {
+    const response = await fetch(`${apiBaseUrl()}/auth/me`, {
+      method: 'GET',
+      headers: { authorization: `Bearer ${accessToken}` },
+      cache: 'no-store'
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as MeResult;
+  } catch {
+    return null;
+  }
 }
 
 async function refreshAccess(refreshToken: string) {
-  const response = await fetch(`${apiBaseUrl()}/auth/refresh`, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ refreshToken }),
-    cache: 'no-store'
-  });
-  if (!response.ok) return null;
-  return (await response.json()) as RefreshResult;
+  try {
+    const response = await fetch(`${apiBaseUrl()}/auth/refresh`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ refreshToken }),
+      cache: 'no-store'
+    });
+    if (!response.ok) return null;
+    return (await response.json()) as RefreshResult;
+  } catch {
+    return null;
+  }
 }
 
 function buildLoginRedirect(request: NextRequest) {
@@ -141,6 +166,15 @@ function buildLoginRedirect(request: NextRequest) {
   url.pathname = '/login';
   url.searchParams.set('next', request.nextUrl.pathname);
   return url;
+}
+
+/** Remove header usado em bypass histórico de middleware (defesa em profundidade). */
+function nextSafe(request: NextRequest) {
+  const headers = new Headers(request.headers);
+  headers.delete('x-middleware-subrequest');
+  return NextResponse.next({
+    request: { headers },
+  });
 }
 
 export async function middleware(request: NextRequest) {
@@ -157,7 +191,7 @@ export async function middleware(request: NextRequest) {
   const isLogin = pathname === '/login';
   const isProtected = isProtectedPath(pathname);
   if (!isLogin && !isProtected) {
-    return NextResponse.next();
+    return nextSafe(request);
   }
 
   const accessToken = request.cookies.get('erp_access_token')?.value;
@@ -167,15 +201,21 @@ export async function middleware(request: NextRequest) {
   let authenticated = false;
 
   if (accessToken) {
-    const me = await fetchMe(accessToken);
-    if (me?.tenant?.role) {
-      role = me.tenant.role;
+    // ─── Fast-path: JWT local check evita roundtrip HTTP em ~90% dos requests ──
+    if (jwtIsLikelyValid(accessToken) && role) {
       authenticated = true;
-    } else if (refreshToken) {
-      refreshed = await refreshAccess(refreshToken);
-      if (refreshed) {
-        role = refreshed.role || role;
+    } else {
+      // Token expirado ou sem role — verifica na API
+      const me = await fetchMe(accessToken);
+      if (me?.tenant?.role) {
+        role = me.tenant.role;
         authenticated = true;
+      } else if (refreshToken) {
+        refreshed = await refreshAccess(refreshToken);
+        if (refreshed) {
+          role = refreshed.role || role;
+          authenticated = true;
+        }
       }
     }
   } else if (refreshToken) {
@@ -192,7 +232,7 @@ export async function middleware(request: NextRequest) {
 
   if (isLogin) {
     if (!role) {
-      const response = NextResponse.next();
+      const response = nextSafe(request);
       if (!accessToken && !refreshToken) clearAuthCookies(response);
       return response;
     }
@@ -215,11 +255,12 @@ export async function middleware(request: NextRequest) {
     return response;
   }
 
-  const response = NextResponse.next();
+  const response = nextSafe(request);
   if (refreshed) applyAuthCookies(response, refreshed);
   return response;
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico).*)']
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/).*)'
+  ]
 };

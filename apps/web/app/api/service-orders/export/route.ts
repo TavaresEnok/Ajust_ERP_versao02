@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildServiceOrderApiQuery, normalizeDashboardFilters } from '../../../../lib/erp-data';
+import { buildServiceOrderApiQuery, normalizeDashboardFilters } from '../../../../lib/query-builders';
 import { apiBaseUrl, applyLoginCookies, clearAuthCookies, RefreshApiResponse } from '../../auth/_lib';
 
 type ApiMeResponse = {

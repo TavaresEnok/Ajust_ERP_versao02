@@ -17,6 +17,8 @@ import {
   Cpu,
   AppWindow,
   ArrowRightLeft,
+  Edit2,
+  X,
 } from 'lucide-react';
 
 const cn = (...classes: Array<string | false | null | undefined>) => classes.filter(Boolean).join(' ');
@@ -80,6 +82,18 @@ export function AnalystCredentialsNeoView({ dark, onToast }: Props) {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [visibleSecret, setVisibleSecret] = useState<Record<string, boolean>>({});
   const [revealedSecret, setRevealedSecret] = useState<Record<string, string>>({});
+  const [isEditModalOpen, setIsEditModalOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [showModalSecret, setShowModalSecret] = useState(false);
+  const [fetchingSecret, setFetchingSecret] = useState(false);
+  const [formData, setFormData] = useState({
+    id: '',
+    equipmentName: '',
+    host: '',
+    username: '',
+    secret: '',
+    notes: '',
+  });
 
   useEffect(() => {
     let active = true;
@@ -218,9 +232,24 @@ export function AnalystCredentialsNeoView({ dark, onToast }: Props) {
     return '••••••••••••';
   };
 
-  const copyText = async (text: string) => {
+  const copyText = async (rawText: string) => {
+    const text = String(rawText || '');
+    if (!text) return;
     try {
-      await navigator.clipboard.writeText(text);
+      if (navigator.clipboard && window.isSecureContext) {
+        await navigator.clipboard.writeText(text);
+      } else {
+        const textArea = document.createElement('textarea');
+        textArea.value = text;
+        textArea.style.position = 'fixed';
+        textArea.style.left = '-999999px';
+        textArea.style.top = '-999999px';
+        document.body.appendChild(textArea);
+        textArea.focus();
+        textArea.select();
+        document.execCommand('copy');
+        textArea.remove();
+      }
       onToast('Copiado para área de transferência.');
     } catch {
       onToast('Não foi possível copiar.');
@@ -246,6 +275,71 @@ export function AnalystCredentialsNeoView({ dark, onToast }: Props) {
       setRevealedSecret((prev) => ({ ...prev, [credential.id]: String(payload?.secret || '') }));
     }
     setVisibleSecret((prev) => ({ ...prev, [credential.id]: true }));
+  };
+
+  const openEditModal = (credential: CredentialItem) => {
+    setFormData({
+      id: credential.id,
+      equipmentName: credential.equipmentName,
+      host: credential.host,
+      username: credential.username === 'NAO_INFORMADO' ? '' : (credential.username || ''),
+      secret: '••••••••••••',
+      notes: credential.notes || ''
+    });
+    setShowModalSecret(false);
+    setIsEditModalOpen(true);
+  };
+
+  const handleSaveEdit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!tenantId) return;
+    setSaving(true);
+    const secretToSave = formData.secret === '••••••••••••' ? undefined : formData.secret;
+
+    try {
+      const url = `/api/knowledge/credentials/${formData.id}`;
+      const res = await fetch(url, {
+        method: 'PATCH',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          tenantId,
+          equipmentName: formData.equipmentName,
+          host: formData.host,
+          username: formData.username,
+          secret: secretToSave,
+          notes: formData.notes
+        })
+      });
+
+      if (!res.ok) {
+        const payload = await res.json().catch(() => ({}));
+        onToast(payload?.error || 'Erro ao salvar alterações na credencial.');
+      } else {
+        onToast('Credencial atualizada com sucesso!');
+        setIsEditModalOpen(false);
+        setItems(prev => prev.map(item => {
+          if (item.id === formData.id) {
+            return {
+              ...item,
+              equipmentName: formData.equipmentName,
+              host: formData.host,
+              username: formData.username || 'NAO_INFORMADO',
+              notes: formData.notes,
+              updatedAt: new Date().toISOString()
+            };
+          }
+          return item;
+        }));
+        if (formData.secret) {
+          setRevealedSecret(prev => ({ ...prev, [formData.id]: formData.secret }));
+          setVisibleSecret(prev => ({ ...prev, [formData.id]: true }));
+        }
+      }
+    } catch (err) {
+      onToast('Falha na comunicação.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   return (
@@ -350,24 +444,66 @@ export function AnalystCredentialsNeoView({ dark, onToast }: Props) {
                             </span>
                           </div>
 
-                          <div className={cn('rounded-lg border p-2', dark ? 'bg-[#0a0d1e] border-[#2d3142]/70' : 'bg-slate-50 border-slate-200')}>
+                          <div className={cn('rounded-lg border p-2 relative group', dark ? 'bg-[#0a0d1e] border-[#2d3142]/70' : 'bg-slate-50 border-slate-200')}>
                             <div className={cn('text-[10px] uppercase mb-1', dark ? 'text-slate-300' : 'text-slate-500')}>Host / IP</div>
-                            <div className={cn('text-xs font-mono break-all', dark ? 'text-slate-100' : 'text-slate-800')}>
-                              {credential.host}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className={cn('text-xs font-mono break-all', dark ? 'text-slate-100' : 'text-slate-800')}>
+                                {credential.host}
+                              </div>
+                              <button
+                                type="button"
+                                onClick={(e) => { e.stopPropagation(); copyText(credential.host); }}
+                                className={cn('opacity-0 group-hover:opacity-100 p-1 rounded transition-all shrink-0', dark ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200')}
+                                title="Copiar Host/IP"
+                              >
+                                <Copy size={13} />
+                              </button>
                             </div>
                           </div>
 
-                          <div className={cn('rounded-lg border p-2', dark ? 'bg-[#0a0d1e] border-[#2d3142]/70' : 'bg-slate-50 border-slate-200')}>
+                          <div className={cn('rounded-lg border p-2 relative group', dark ? 'bg-[#0a0d1e] border-[#2d3142]/70' : 'bg-slate-50 border-slate-200')}>
                             <div className={cn('text-[10px] uppercase mb-1', dark ? 'text-slate-300' : 'text-slate-500')}>Usuário</div>
-                            <div className={cn('text-xs font-mono', dark ? 'text-slate-100' : 'text-slate-800')}>
-                              {credential.username || 'NAO_INFORMADO'}
+                            <div className="flex items-start justify-between gap-2">
+                              <div className={cn('text-xs font-mono break-all', dark ? 'text-slate-100' : 'text-slate-800')}>
+                                {credential.username || 'NAO_INFORMADO'}
+                              </div>
+                              {(credential.username && credential.username !== 'NAO_INFORMADO') && (
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); copyText(credential.username); }}
+                                  className={cn('opacity-0 group-hover:opacity-100 p-1 rounded transition-all shrink-0', dark ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200')}
+                                  title="Copiar Usuário"
+                                >
+                                  <Copy size={13} />
+                                </button>
+                              )}
                             </div>
                           </div>
 
-                          <div className={cn('rounded-lg border p-2', dark ? 'bg-[#0a0d1e] border-[#2d3142]/70' : 'bg-slate-50 border-slate-200')}>
+                          <div className={cn('rounded-lg border p-2 relative group', dark ? 'bg-[#0a0d1e] border-[#2d3142]/70' : 'bg-slate-50 border-slate-200')}>
                             <div className={cn('text-[10px] uppercase mb-1', dark ? 'text-slate-300' : 'text-slate-500')}>Credencial</div>
-                            <div className={cn('text-xs font-mono break-all', dark ? 'text-slate-100' : 'text-slate-800')}>
-                              {visibleSecret[credential.id] ? (revealedSecret[credential.id] || '••••••••••••') : '••••••••••••'}
+                            <div className="flex items-start justify-between gap-1">
+                              <div className={cn('text-xs font-mono break-all mt-0.5', dark ? 'text-slate-100' : 'text-slate-800')}>
+                                {getSecretText(credential)}
+                              </div>
+                              <div className="flex items-center opacity-0 group-hover:opacity-100 transition-opacity shrink-0">
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); toggleSecret(credential); }}
+                                  className={cn('p-1 rounded transition-all', dark ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200')}
+                                  title={visibleSecret[credential.id] ? "Ocultar" : "Revelar"}
+                                >
+                                  {visibleSecret[credential.id] ? <EyeOff size={13} /> : <Eye size={13} />}
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={(e) => { e.stopPropagation(); copyText(getSecretText(credential)); }}
+                                  className={cn('p-1 rounded transition-all', dark ? 'text-slate-400 hover:text-white hover:bg-white/10' : 'text-slate-400 hover:text-slate-700 hover:bg-slate-200')}
+                                  title="Copiar Credencial"
+                                >
+                                  <Copy size={13} />
+                                </button>
+                              </div>
                             </div>
                           </div>
                         </button>
@@ -389,11 +525,23 @@ export function AnalystCredentialsNeoView({ dark, onToast }: Props) {
             {selected && (
               <>
                 <div className={cn('p-5 border-b', dark ? 'bg-[#111219] border-[#2d3142]' : 'bg-slate-50 border-slate-200')}>
-                  <div className="flex items-center gap-2 mb-2">
-                    <span className={cn('px-2 py-1 rounded-md text-[10px] font-bold border', (TYPE_META[selected.equipmentType] || TYPE_META.OUTROS).chip)}>
-                      {selected.equipmentType}
-                    </span>
-                    <span className={cn('text-xs', dark ? 'text-slate-300' : 'text-slate-600')}>{selected.provider}</span>
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className={cn('px-2 py-1 rounded-md text-[10px] font-bold border', (TYPE_META[selected.equipmentType] || TYPE_META.OUTROS).chip)}>
+                        {selected.equipmentType}
+                      </span>
+                      <span className={cn('text-xs', dark ? 'text-slate-300' : 'text-slate-600')}>{selected.provider}</span>
+                    </div>
+                    <button
+                      onClick={() => openEditModal(selected)}
+                      className={cn(
+                        'flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-semibold border transition-colors shrink-0',
+                        dark ? 'bg-[#0a0d1e] border-[#2d3142]/70 text-slate-300 hover:text-white hover:border-[#5a42f5]/50' : 'bg-white border-slate-200 text-slate-700 hover:bg-slate-50 hover:border-blue-300'
+                      )}
+                    >
+                      <Edit2 size={13} />
+                      Editar
+                    </button>
                   </div>
                   <h3 className={cn('text-xl font-bold', dark ? 'text-white' : 'text-slate-900')}>{selected.equipmentName}</h3>
                 </div>
@@ -473,6 +621,161 @@ export function AnalystCredentialsNeoView({ dark, onToast }: Props) {
                 </div>
               </>
             )}
+          </div>
+        </div>
+      )}
+
+      {isEditModalOpen && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center p-4">
+          <div className="absolute inset-0 bg-black/60 backdrop-blur-sm" onClick={() => !saving && setIsEditModalOpen(false)}></div>
+          <div className={cn(
+            "relative w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden animate-in zoom-in-95 duration-200",
+            dark ? "bg-[#1e293b] border border-slate-700/50" : "bg-white border border-slate-200"
+          )}>
+            <div className={cn("px-6 py-4 border-b flex items-center justify-between", dark ? "border-slate-700/50" : "border-slate-100")}>
+              <h3 className={cn("font-bold text-lg flex items-center gap-2", dark ? "text-slate-100" : "text-slate-800")}>
+                <Edit2 size={18} />
+                Editar Credencial
+              </h3>
+              <button 
+                onClick={() => !saving && setIsEditModalOpen(false)}
+                className="p-2 hover:bg-slate-500/10 rounded-full transition-colors"
+              >
+                <X size={20} className="text-slate-400" />
+              </button>
+            </div>
+
+            <form onSubmit={handleSaveEdit} className="p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar">
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase">Identificação (Nome do Equipamento)</label>
+                <input
+                  required
+                  type="text"
+                  value={formData.equipmentName}
+                  onChange={e => setFormData({...formData, equipmentName: e.target.value})}
+                  className={cn(
+                    "w-full px-4 py-2 rounded-xl outline-none border transition-all",
+                    dark ? "bg-[#0f172a] border-slate-700 text-slate-100 focus:border-blue-500/50" : "bg-white border-slate-200 text-slate-800 focus:border-blue-300 shadow-sm"
+                  )}
+                />
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase">IP / Host</label>
+                <input
+                  required
+                  type="text"
+                  value={formData.host}
+                  onChange={e => setFormData({...formData, host: e.target.value})}
+                  className={cn(
+                    "w-full px-4 py-2 rounded-xl outline-none border transition-all font-mono",
+                    dark ? "bg-[#0f172a] border-slate-700 text-slate-100 focus:border-blue-500/50" : "bg-white border-slate-200 text-slate-800 focus:border-blue-300 shadow-sm"
+                  )}
+                />
+              </div>
+
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Usuário</label>
+                  <input
+                    type="text"
+                    value={formData.username}
+                    onChange={e => setFormData({...formData, username: e.target.value})}
+                    placeholder="Opcional"
+                    className={cn(
+                      "w-full px-4 py-2 rounded-xl outline-none border transition-all font-mono",
+                      dark ? "bg-[#0f172a] border-slate-700 text-slate-100 focus:border-blue-500/50" : "bg-white border-slate-200 text-slate-800 focus:border-blue-300 shadow-sm"
+                    )}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <label className="text-xs font-bold text-slate-500 uppercase">Senha</label>
+                  <div className="relative">
+                    <input
+                      type={showModalSecret ? "text" : "password"}
+                      value={formData.secret}
+                      onChange={e => setFormData({...formData, secret: e.target.value})}
+                      placeholder="Nova senha..."
+                      className={cn(
+                        "w-full pl-4 pr-10 py-2 rounded-xl outline-none border transition-all font-mono",
+                        dark ? "bg-[#0f172a] border-slate-700 text-slate-100 focus:border-blue-500/50" : "bg-white border-slate-200 text-slate-800 focus:border-blue-300 shadow-sm"
+                      )}
+                    />
+                    <button
+                      type="button"
+                      disabled={fetchingSecret}
+                      onClick={async () => {
+                        if (showModalSecret) {
+                          setShowModalSecret(false);
+                          return;
+                        }
+                        if (formData.secret === '••••••••••••') {
+                          setFetchingSecret(true);
+                          try {
+                            if (revealedSecret[formData.id]) {
+                              setFormData(prev => ({...prev, secret: revealedSecret[formData.id]}));
+                              setShowModalSecret(true);
+                            } else {
+                              const res = await fetch(`/api/knowledge/credentials/${encodeURIComponent(formData.id)}/reveal?tenantId=${encodeURIComponent(tenantId || '')}`, { method: 'POST' });
+                              if (res.ok) {
+                                const payload = await res.json();
+                                const dec = payload.secret || '';
+                                setRevealedSecret(prev => ({...prev, [formData.id]: dec}));
+                                setFormData(prev => ({...prev, secret: dec}));
+                                setShowModalSecret(true);
+                              } else {
+                                onToast('Falha ao revelar senha.');
+                              }
+                            }
+                          } finally {
+                            setFetchingSecret(false);
+                          }
+                        } else {
+                          setShowModalSecret(true);
+                        }
+                      }}
+                      className="absolute right-3 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 transition-colors"
+                    >
+                      {fetchingSecret ? <div className="w-4 h-4 rounded-full border-2 border-slate-400 border-t-transparent animate-spin" /> : (showModalSecret ? <EyeOff size={16} /> : <Eye size={16} />)}
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div className="space-y-1.5">
+                <label className="text-xs font-bold text-slate-500 uppercase">Observações</label>
+                <textarea
+                  rows={6}
+                  value={formData.notes}
+                  onChange={e => setFormData({...formData, notes: e.target.value})}
+                  className={cn(
+                    "w-full px-4 py-3 rounded-xl outline-none border transition-all resize-y min-h-[140px] max-h-[350px]",
+                    dark ? "bg-[#0f172a] border-slate-700 text-slate-100 focus:border-blue-500/50" : "bg-white border-slate-200 text-slate-800 focus:border-blue-300 shadow-sm"
+                  )}
+                ></textarea>
+              </div>
+
+              <div className="pt-4 flex gap-3">
+                <button
+                  type="button"
+                  disabled={saving}
+                  onClick={() => setIsEditModalOpen(false)}
+                  className={cn(
+                    "flex-1 py-2.5 rounded-xl font-bold transition-all border",
+                    dark ? "border-slate-700 text-slate-400 hover:bg-white/5" : "border-slate-200 text-slate-500 hover:bg-slate-50"
+                  )}
+                >
+                  Cancelar
+                </button>
+                <button
+                  type="submit"
+                  disabled={saving}
+                  className="flex-[2] py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white font-bold transition-all shadow-lg shadow-blue-600/20 disabled:opacity-50"
+                >
+                  {saving ? 'Gravando...' : 'Salvar Alterações'}
+                </button>
+              </div>
+            </form>
           </div>
         </div>
       )}

@@ -615,6 +615,39 @@ th {
   }
 }
 
+@keyframes staggerFade {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.98);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+.animate-stagger {
+  opacity: 0;
+  animation: staggerFade 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards;
+}
+
+@keyframes shimmer {
+  0% { background-position: -1000px 0; }
+  100% { background-position: 1000px 0; }
+}
+
+.skeleton-box {
+  background: linear-gradient(90deg, rgba(200, 210, 230, 0.15) 25%, rgba(200, 210, 230, 0.3) 50%, rgba(200, 210, 230, 0.15) 75%);
+  background-size: 1000px 100%;
+  animation: shimmer 2s infinite linear;
+  border-radius: 0.5rem;
+}
+
+html.erp-dark .skeleton-box {
+  background: linear-gradient(90deg, rgba(50, 60, 80, 0.3) 25%, rgba(60, 75, 100, 0.5) 50%, rgba(50, 60, 80, 0.3) 75%);
+  background-size: 1000px 100%;
+}
+
 @media (max-width: 1000px) {
   .grid-4 {
     grid-template-columns: repeat(2, minmax(0, 1fr));

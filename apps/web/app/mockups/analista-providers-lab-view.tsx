@@ -53,7 +53,7 @@ type Props = {
 };
 
 export function AnalystProvidersLabView({ dark = false, orders, onSelectOrder, onOpenProvider }: Props) {
-  const [period, setPeriod] = useState('30d');
+  const [period, setPeriod] = useState('Tudo');
   const [search, setSearch] = useState('');
 
   const providerRows = useMemo<ProviderRow[]>(() => {

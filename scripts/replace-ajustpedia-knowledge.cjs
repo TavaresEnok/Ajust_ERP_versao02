@@ -418,7 +418,6 @@ async function ensureUniqueSlug(tenantId, title) {
   let candidate = base;
   let index = 2;
   while (true) {
-    // eslint-disable-next-line no-await-in-loop
     const existing = await prisma.knowledgeArticle.findFirst({
       where: { tenantId, slug: candidate },
       select: { id: true }
@@ -451,9 +450,7 @@ async function main() {
 
   let createdCount = 0;
   for (const item of ARTICLES) {
-    // eslint-disable-next-line no-await-in-loop
     const slug = await ensureUniqueSlug(tenant.id, item.title);
-    // eslint-disable-next-line no-await-in-loop
     await prisma.knowledgeArticle.create({
       data: {
         tenantId: tenant.id,

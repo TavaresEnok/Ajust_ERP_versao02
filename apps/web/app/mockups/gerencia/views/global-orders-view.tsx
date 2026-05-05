@@ -40,7 +40,7 @@ export function GlobalOrdersViewModule({
   } = helpers;
 
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('all');
   const [customRange, setCustomRange] = useState({ start: toInputDate(Date.now() - 7 * DAY_MS), end: toInputDate(Date.now()) });
 
   const [search, setSearch] = useState('');

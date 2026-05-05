@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useEffect, useMemo, useState } from 'react';
+import { io } from 'socket.io-client';
 import {
   Activity,
   AlertTriangle,
@@ -110,7 +111,6 @@ const NAV_ITEMS = [
   { group: 'OPERACIONAL', id: 'dashboard', label: 'Meu Painel', icon: LayoutDashboard },
   { group: 'OPERACIONAL', id: 'os_list', label: 'Ordens de Serviço', icon: Search },
   { group: 'OPERACIONAL', id: 'providers', label: 'Provedores', icon: Briefcase },
-  { group: 'OPERACIONAL', id: 'providers_lab', label: 'Provedores Lab', icon: Sparkles },
   { group: 'RECURSOS', id: 'credentials', label: 'Cofre de Credenciais', icon: User },
   { group: 'RECURSOS', id: 'ajustpedia', label: 'Ajustpedia', icon: Terminal },
   { group: 'RECURSOS', id: 'notes', label: 'Minhas Notas', icon: StickyNote },
@@ -123,7 +123,6 @@ const VIEW_TITLE = {
   os_list: 'Ordens de Serviço',
   occurrences: 'Ocorrências',
   providers: 'Provedores',
-  providers_lab: 'Provedores Lab',
   credentials: 'Cofre de Credenciais',
   ajustpedia: 'Ajustpedia',
   notes: 'Minhas Notas',
@@ -336,6 +335,7 @@ const mapApiOrderToUi = (apiOrder, apiOccurrence) => {
     origin: apiOrder.origin || occurrence?.origin || 'Suporte Online',
     solicitant: apiOrder.requester || '',
     description: apiOrder.description || '',
+    isCustomerVisible: apiOrder.isCustomerVisible !== false,
     occurrenceId: occurrence?.id || apiOrder.occurrenceId || `OCC-LEGACY-${apiOrder.id}`,
     occurrenceNumber: occurrence?.number || apiOrder.occurrenceNumber || createOccurrenceNumber(),
     occurrenceSector: occurrence?.sector || apiOrder.occurrenceSector || apiOrder.sector || 'NOC',
@@ -645,88 +645,6 @@ const buildOccurrencesFromOrders = (orders) => {
     .sort((a, b) => b.createdAt - a.createdAt);
 };
 
-const generateMockOrders = (count = 260) => {
-  const now = Date.now();
-  const providerOccurrencePool = new Map();
-
-  return Array.from({ length: count }).map((_, i) => {
-    const createdAt = now - Math.floor(Math.random() * 80 * DAY_MS);
-    const deadlineAt = createdAt + (8 + Math.floor(Math.random() * 72)) * HOUR_MS;
-    const status = randomFrom(STATUS_FLOW);
-    const priority = randomFrom(PRIORITIES);
-    const provider = randomFrom(PROVIDERS);
-    const type = randomFrom(SERVICE_TYPES);
-
-    const owner = randomFrom(ANALYST_USERS);
-    const tech = Math.random() > 0.2 ? randomFrom(ANALYST_USERS) : null;
-
-    let closedAt = null;
-    if (status === 'Fechada') {
-      const jitter = (Math.floor(Math.random() * 18) - 5) * HOUR_MS;
-      closedAt = Math.max(createdAt + 2 * HOUR_MS, deadlineAt + jitter);
-    }
-
-    const protocol = `${new Date(createdAt).getFullYear()}${String(100000 + i * 13).padStart(6, '0')}`;
-    const currentPool = providerOccurrencePool.get(provider) || [];
-    let occurrence = null;
-
-    if (currentPool.length > 0 && Math.random() > 0.52) {
-      occurrence = randomFrom(currentPool);
-    } else {
-      occurrence = {
-        id: `OCC-${provider.replace(/\s+/g, '-').toLowerCase()}-${i}`,
-        number: `${new Date(createdAt).getFullYear()}${String(260000 + i * 7).padStart(6, '0')}`,
-        sector: randomFrom(OCCURRENCE_SECTORS),
-        origin: randomFrom(OCCURRENCE_ORIGINS),
-        type: randomFrom(OCCURRENCE_TYPES),
-        status: randomFrom(OCCURRENCE_STATUS),
-        openedBy: randomFrom(['Analista', 'Atendimento', 'Gerente']),
-        responsible: Math.random() > 0.45 ? 'Analista' : randomFrom(TECHS).name,
-        createdAt: createdAt - Math.floor(Math.random() * 4 * HOUR_MS),
-      };
-      providerOccurrencePool.set(provider, [...currentPool, occurrence]);
-    }
-
-    return {
-      id: `OS-${202400 + i}`,
-      protocol,
-      provider,
-      tech,
-      owner,
-      type,
-      priority,
-      status,
-      createdAt,
-      deadlineAt,
-      closedAt,
-      sector: randomFrom(['NOC', 'SAC', 'Suporte N1', 'Suporte N2']),
-      origin: randomFrom(['WhatsApp', 'Ligacao', 'Ticket', 'Email']),
-      solicitant: randomFrom(['Atendimento Provedor', 'Supervisor NOC', 'Gerente Operacional', 'Cliente Corporativo']),
-      description: `Cliente relata ${type.toLowerCase()} com oscilacao e impacto no servico.`,
-      occurrenceId: occurrence.id,
-      occurrenceNumber: occurrence.number,
-      occurrenceSector: occurrence.sector,
-      occurrenceOrigin: occurrence.origin,
-      occurrenceType: occurrence.type,
-      occurrenceStatus: occurrence.status,
-      occurrenceOpenedBy: occurrence.openedBy,
-      occurrenceResponsible: occurrence.responsible,
-      occurrenceCreatedAt: occurrence.createdAt,
-      occurrenceDescription: `Ocorrencia ${occurrence.type.toLowerCase()} registrada para ${provider}.`,
-      isInconsistent: Math.random() > 0.98,
-      attachments: [
-        { id: `a-${i}-1`, name: 'print_cliente.png' },
-        { id: `a-${i}-2`, name: 'log_olt.txt' },
-      ],
-      occurrences: [
-        { at: createdAt, user: 'Sistema', text: 'OS criada via integracao API.' },
-        { at: createdAt + 90 * 60 * 1000, user: 'NOC N1', text: 'Triagem inicial concluida.' },
-        ...(closedAt ? [{ at: closedAt, user: tech || 'NOC N2', text: 'Normalizacao confirmada.' }] : []),
-      ],
-    };
-  });
-};
-
 const Badge = ErpBadge;
 
 /* ---- Skeleton Loaders ---- */
@@ -889,6 +807,7 @@ const CommandPalette = ({ open, onClose, views, orders, onNavigate, onOpenOrder 
 const OSDetailsDrawer = ({ order, onClose, onOpenOccurrence, onEditOrder, onAddOrderAnnotation }) => {
   const { dark } = useTheme();
   const [annotationText, setAnnotationText] = useState('');
+  const [annotationHideFromClient, setAnnotationHideFromClient] = useState(false);
   const [annotationSaving, setAnnotationSaving] = useState(false);
 
   useEffect(() => {
@@ -900,6 +819,7 @@ const OSDetailsDrawer = ({ order, onClose, onOpenOccurrence, onEditOrder, onAddO
 
   useEffect(() => {
     setAnnotationText('');
+    setAnnotationHideFromClient(false);
     setAnnotationSaving(false);
   }, [order?.id]);
 
@@ -910,8 +830,11 @@ const OSDetailsDrawer = ({ order, onClose, onOpenOccurrence, onEditOrder, onAddO
     if (message.length < 2 || !onAddOrderAnnotation || annotationSaving) return;
     setAnnotationSaving(true);
     try {
-      const ok = await onAddOrderAnnotation(order, message);
-      if (ok) setAnnotationText('');
+      const ok = await onAddOrderAnnotation(order, message, annotationHideFromClient);
+      if (ok) {
+        setAnnotationText('');
+        setAnnotationHideFromClient(false);
+      }
     } finally {
       setAnnotationSaving(false);
     }
@@ -1026,7 +949,16 @@ const OSDetailsDrawer = ({ order, onClose, onOpenOccurrence, onEditOrder, onAddO
                     : "bg-white border-slate-300 text-slate-900 placeholder:text-slate-400"
                 )}
               />
-              <div className="mt-2 flex justify-end">
+              <div className="mt-2 flex items-center justify-between gap-2">
+                <label className={cn("inline-flex items-center gap-2 text-xs font-medium", dark ? "text-slate-300" : "text-slate-600")}>
+                  <input
+                    type="checkbox"
+                    checked={annotationHideFromClient}
+                    onChange={(e) => setAnnotationHideFromClient(e.target.checked)}
+                    className={cn("h-3.5 w-3.5 rounded border", dark ? "border-slate-600 bg-[#1e293b]" : "border-slate-300")}
+                  />
+                  Nao mostrar ao cliente
+                </label>
                 <button
                   onClick={submitOrderAnnotation}
                   disabled={annotationSaving || annotationText.trim().length < 2}
@@ -1087,6 +1019,7 @@ const EditOrderModal = ({ order, onClose, onSave }) => {
     deadlineDate: toDateInputValue(order?.deadlineAt || Date.now()),
     deadlineTime: toTimeInputValue(order?.deadlineAt || Date.now()),
     description: order?.description || '',
+    hideFromClient: order?.isCustomerVisible === false,
     attachments: normalizeAttachments(order?.attachments),
   }));
 
@@ -1104,6 +1037,7 @@ const EditOrderModal = ({ order, onClose, onSave }) => {
       deadlineDate: toDateInputValue(order.deadlineAt || Date.now()),
       deadlineTime: toTimeInputValue(order.deadlineAt || Date.now()),
       description: order.description || '',
+      hideFromClient: order?.isCustomerVisible === false,
       attachments: normalizeAttachments(order.attachments),
     });
   }, [order]);
@@ -1124,6 +1058,7 @@ const EditOrderModal = ({ order, onClose, onSave }) => {
       origin: form.origin,
       deadlineAt: Number.isFinite(parsedDeadline) ? parsedDeadline : order.deadlineAt,
       description: form.description,
+      hideFromClient: !!form.hideFromClient,
       attachments: normalizeAttachments(form.attachments),
     });
     onClose();
@@ -1250,6 +1185,15 @@ const EditOrderModal = ({ order, onClose, onSave }) => {
           <label className={labelClass}>Descricao tecnica da O.S</label>
           <textarea value={form.description} onChange={(e) => setForm((p) => ({ ...p, description: e.target.value }))} rows={4} className={inputClass} placeholder="Descricao da O.S" />
         </div>
+        <label className={cn("inline-flex items-center gap-2 text-xs font-semibold", dark ? "text-slate-300" : "text-slate-600")}>
+          <input
+            type="checkbox"
+            checked={!!form.hideFromClient}
+            onChange={(e) => setForm((p) => ({ ...p, hideFromClient: e.target.checked }))}
+            className={cn("h-3.5 w-3.5 rounded border", dark ? "border-slate-600 bg-[#1e293b]" : "border-slate-300")}
+          />
+          Nao mostrar ao cliente
+        </label>
 
         <div className={cn(panelClass, "space-y-2")}>
           <div className={labelClass}>Anexos da O.S (imagem, video, audio, texto, PDF)</div>
@@ -1559,9 +1503,9 @@ const OccurrencesView = ({ orders, onSelectOrder, onCreateInternalOrder, focusOc
   );
 };
 
-const DashboardView = ({ orders, onSelectOrder, onGoToProviders, onGoToKnowledge, loading, currentAnalystName }) => {
+const DashboardView = ({ orders, summaryData, onSelectOrder, onGoToProviders, onGoToKnowledge, loading, currentAnalystName }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('Tudo');
   const [monthOffset, setMonthOffset] = useState(0);
   const [mineScopeMode, setMineScopeMode] = useState('owner_or_tech');
   const [hoverDayIndex, setHoverDayIndex] = useState(null);
@@ -1724,7 +1668,7 @@ const DashboardView = ({ orders, onSelectOrder, onGoToProviders, onGoToKnowledge
       <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-5 gap-4">
         <div className={cn("border rounded-xl p-4 shadow-sm", dark ? "bg-[#1e293b]/60 backdrop-blur-md border-slate-700/50" : "bg-white border-slate-200")}>
           <div className="text-xs uppercase font-bold text-slate-400">Ativas (Geral)</div>
-          <div className={cn("text-3xl font-bold mt-2", dark ? "text-white" : "text-slate-800")}>{active.length}</div>
+          <div className={cn("text-3xl font-bold mt-2", dark ? "text-white" : "text-slate-800")}>{summaryData?.active ?? active.length}</div>
         </div>
         <div className={cn("border rounded-xl p-4 shadow-sm", dark ? "bg-[#1e293b]/60 backdrop-blur-md border-slate-700/50" : "bg-white border-slate-200")}>
           <div className="text-xs uppercase font-bold text-slate-400">Minhas Ativas</div>
@@ -1739,8 +1683,8 @@ const DashboardView = ({ orders, onSelectOrder, onGoToProviders, onGoToKnowledge
           <div className="text-3xl font-bold text-amber-500 mt-2">{mineDueToday.length}</div>
         </div>
         <div className={cn("border rounded-xl p-4 shadow-sm", dark ? "bg-[#1e293b]/60 backdrop-blur-md border-slate-700/50" : "bg-white border-slate-200")}>
-          <div className="text-xs uppercase font-bold text-slate-400">Minhas Fechadas</div>
-          <div className="text-3xl font-bold mt-2 text-emerald-500">{mineClosed.length}</div>
+          <div className="text-xs uppercase font-bold text-slate-400">Fechadas (Geral)</div>
+          <div className="text-3xl font-bold mt-2 text-emerald-500">{summaryData?.closed ?? closed.length}</div>
         </div>
       </div>
 
@@ -2042,7 +1986,7 @@ const OSListView = ({
   onToast,
 }) => {
   const { dark } = useTheme();
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('Tudo');
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState('Todas');
   const [providerFilter, setProviderFilter] = useState('Todos');
@@ -2256,6 +2200,7 @@ const OSCreateView = ({ onCreateOrder, onCancel, onToast, resetToken }) => {
       deadlineTime: `${pad(plusOneDay.getHours())}:${pad(plusOneDay.getMinutes())}`,
       description: '',
       internalNotes: '',
+      hideFromClient: false,
       occurrenceNumber: createOccurrenceNumber(),
       occurrenceStatus: 'Aberta',
       occurrenceType: OCCURRENCE_TYPES[0],
@@ -2326,6 +2271,7 @@ const OSCreateView = ({ onCreateOrder, onCancel, onToast, resetToken }) => {
         origin: form.origin,
         description: form.description,
         internalNotes: form.internalNotes,
+        hideFromClient: !!form.hideFromClient,
         occurrenceId,
         occurrenceNumber,
         occurrenceStatus: form.occurrenceStatus,
@@ -2531,6 +2477,15 @@ const OSCreateView = ({ onCreateOrder, onCancel, onToast, resetToken }) => {
             <label className="text-sm font-semibold text-slate-700">Observacoes internas</label>
             <textarea rows={3} value={form.internalNotes} onChange={(e) => setField('internalNotes', e.target.value)} className="w-full mt-1 px-3 py-2 border border-slate-300 rounded-lg text-sm bg-amber-50" placeholder="Notas para a equipe..." />
           </div>
+          <label className="inline-flex items-center gap-2 text-xs font-semibold text-slate-600">
+            <input
+              type="checkbox"
+              checked={!!form.hideFromClient}
+              onChange={(e) => setField('hideFromClient', e.target.checked)}
+              className="h-3.5 w-3.5 rounded border border-slate-300"
+            />
+            Nao mostrar ao cliente
+          </label>
         </div>
 
         <div className="flex justify-end gap-2">
@@ -2657,6 +2612,7 @@ const ProvidersView = ({
       deadlineDate: `${plusOneDay.getFullYear()}-${pad(plusOneDay.getMonth() + 1)}-${pad(plusOneDay.getDate())}`,
       deadlineTime: `${pad(plusOneDay.getHours())}:${pad(plusOneDay.getMinutes())}`,
       description: '',
+      hideFromClient: false,
       attachments: [],
     };
   };
@@ -3374,6 +3330,15 @@ const ProvidersView = ({
                 <label className={labelClass}>Descricao tecnica da O.S</label>
                 <textarea value={orderDraft.description} onChange={(e) => setOrderDraft((p) => ({ ...p, description: e.target.value }))} rows={3} placeholder="Descreva a ordem de servico" className={inputClass} />
               </div>
+              <label className={cn("inline-flex items-center gap-2 text-xs font-semibold", dark ? "text-slate-300" : "text-slate-600")}>
+                <input
+                  type="checkbox"
+                  checked={!!orderDraft.hideFromClient}
+                  onChange={(e) => setOrderDraft((p) => ({ ...p, hideFromClient: e.target.checked }))}
+                  className={cn("h-3.5 w-3.5 rounded border", dark ? "border-slate-600 bg-[#1e293b]" : "border-slate-300")}
+                />
+                Nao mostrar ao cliente
+              </label>
               <div className={cn(panelClass, "space-y-2")}>
                 <div className={sectionTitleClass}>Anexos da primeira O.S</div>
                 <div className={cn("text-[11px]", dark ? "text-slate-400" : "text-slate-500")}>Ate 10 anexos por O.S, maximo 10MB por arquivo.</div>
@@ -3512,6 +3477,15 @@ const ProvidersView = ({
                 <label className={labelClass}>Descricao tecnica da O.S</label>
                 <textarea value={orderDraft.description} onChange={(e) => setOrderDraft((p) => ({ ...p, description: e.target.value }))} rows={3} placeholder="Descreva a ordem de servico" className={inputClass} />
               </div>
+              <label className={cn("inline-flex items-center gap-2 text-xs font-semibold", dark ? "text-slate-300" : "text-slate-600")}>
+                <input
+                  type="checkbox"
+                  checked={!!orderDraft.hideFromClient}
+                  onChange={(e) => setOrderDraft((p) => ({ ...p, hideFromClient: e.target.checked }))}
+                  className={cn("h-3.5 w-3.5 rounded border", dark ? "border-slate-600 bg-[#1e293b]" : "border-slate-300")}
+                />
+                Nao mostrar ao cliente
+              </label>
               <div className={cn(panelClass, "space-y-2")}>
                 <div className={sectionTitleClass}>Anexos da O.S</div>
                 <div className={cn("text-[11px]", dark ? "text-slate-400" : "text-slate-500")}>Ate 10 anexos por O.S, maximo 10MB por arquivo.</div>
@@ -3647,7 +3621,7 @@ const ProvidersView = ({
 };
 
 const TechniciansView = ({ orders, onSelectOrder }) => {
-  const [period, setPeriod] = useState('7d');
+  const [period, setPeriod] = useState('Tudo');
   const [tab, setTab] = useState('performance');
   const [search, setSearch] = useState('');
   const [selectedTech, setSelectedTech] = useState(null);
@@ -3873,157 +3847,6 @@ const TechniciansView = ({ orders, onSelectOrder }) => {
   );
 };
 
-const ProvidersLabView = ({ orders, onSelectOrder, onOpenProvider }) => {
-  const { dark } = useTheme();
-  const [period, setPeriod] = useState('30d');
-  const [search, setSearch] = useState('');
-  const scoped = useMemo(() => filterByPeriod(orders, period), [orders, period]);
-
-  const providers = useMemo(() => {
-    return buildProviderRows(scoped).filter((row) =>
-      row.name.toLowerCase().includes(search.toLowerCase().trim())
-    );
-  }, [scoped, search]);
-
-  return (
-    <div className="space-y-5">
-      <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-3">
-        <div>
-          <h2 className={cn("text-2xl font-bold", dark ? "text-slate-100" : "text-slate-900")}>Provedores Lab</h2>
-          <p className={cn("text-sm", dark ? "text-slate-400" : "text-slate-500")}>
-            Layout alternativo para comparar leitura operacional sem tabela.
-          </p>
-        </div>
-        <div className="flex items-center gap-2">
-          <PeriodTabs value={period} onChange={setPeriod} />
-          <div className="relative">
-            <Search size={14} className={cn("absolute left-3 top-1/2 -translate-y-1/2", dark ? "text-slate-500" : "text-slate-400")} />
-            <input
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              placeholder="Buscar provedor..."
-              className={cn(
-                "pl-9 pr-3 py-2 border rounded-lg text-sm w-[220px]",
-                dark ? "bg-[#0f172a]/80 border-slate-700/50 text-slate-200" : "bg-white border-slate-300 text-slate-900"
-              )}
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
-        {providers.map((row) => {
-          const recentOrders = [...row.orders].sort((a, b) => b.createdAt - a.createdAt).slice(0, 5);
-          const total = Math.max(1, row.total);
-          const activePct = Math.min(100, Math.round((row.active / total) * 100));
-          const delayedPct = Math.min(100, Math.round((row.delayed / total) * 100));
-          const closedPct = Math.min(100, Math.round((row.closed / total) * 100));
-
-          return (
-            <div
-              key={row.slug}
-              className={cn(
-                "rounded-2xl border p-4 shadow-sm overflow-hidden",
-                dark
-                  ? "bg-gradient-to-br from-[#0f172a] via-[#111c34] to-[#0e2230] border-slate-700/50"
-                  : "bg-gradient-to-br from-white via-slate-50 to-cyan-50 border-slate-200"
-              )}
-            >
-              <div className="flex items-start justify-between gap-3">
-                <div>
-                  <div className={cn("text-xs uppercase tracking-wider", dark ? "text-cyan-400" : "text-cyan-700")}>Operacao</div>
-                  <div className={cn("text-xl font-bold", dark ? "text-white" : "text-slate-900")}>{row.name}</div>
-                  <div className={cn("text-xs mt-1", dark ? "text-slate-400" : "text-slate-500")}>{row.city}</div>
-                </div>
-                <button
-                  onClick={() => onOpenProvider(row.name)}
-                  className={cn(
-                    "px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors",
-                    dark
-                      ? "bg-cyan-900/30 border-cyan-700/50 text-cyan-300 hover:bg-cyan-900/50"
-                      : "bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100"
-                  )}
-                >
-                  Abrir detalhe
-                </button>
-              </div>
-
-              <div className="grid grid-cols-4 gap-2 mt-4">
-                <div className={cn("rounded-lg p-2 border", dark ? "border-slate-700/50 bg-[#0b1328]" : "border-slate-200 bg-white")}>
-                  <div className="text-[11px] text-slate-500">Total</div>
-                  <div className={cn("text-lg font-bold", dark ? "text-slate-200" : "text-slate-800")}>{row.total}</div>
-                </div>
-                <div className={cn("rounded-lg p-2 border", dark ? "border-indigo-700/40 bg-[#0b1328]" : "border-indigo-200 bg-indigo-50")}>
-                  <div className="text-[11px] text-slate-500">Ativas</div>
-                  <div className={cn("text-lg font-bold", dark ? "text-indigo-300" : "text-indigo-700")}>{row.active}</div>
-                </div>
-                <div className={cn("rounded-lg p-2 border", dark ? "border-rose-700/40 bg-[#0b1328]" : "border-rose-200 bg-rose-50")}>
-                  <div className="text-[11px] text-slate-500">Atraso</div>
-                  <div className="text-lg font-bold text-rose-500">{row.delayed}</div>
-                </div>
-                <div className={cn("rounded-lg p-2 border", dark ? "border-emerald-700/40 bg-[#0b1328]" : "border-emerald-200 bg-emerald-50")}>
-                  <div className="text-[11px] text-slate-500">Fechadas</div>
-                  <div className="text-lg font-bold text-emerald-500">{row.closed}</div>
-                </div>
-              </div>
-
-              <div className="mt-4 space-y-2">
-                <div>
-                  <div className="text-[11px] uppercase text-slate-500 mb-1">Carga ativa ({activePct}%)</div>
-                  <div className={cn("h-2 rounded-full", dark ? "bg-slate-800" : "bg-slate-200")}>
-                    <div className="h-2 rounded-full bg-indigo-500" style={{ width: `${activePct}%` }} />
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase text-slate-500 mb-1">Risco atraso ({delayedPct}%)</div>
-                  <div className={cn("h-2 rounded-full", dark ? "bg-slate-800" : "bg-slate-200")}>
-                    <div className="h-2 rounded-full bg-rose-500" style={{ width: `${delayedPct}%` }} />
-                  </div>
-                </div>
-                <div>
-                  <div className="text-[11px] uppercase text-slate-500 mb-1">Resolucao ({closedPct}%)</div>
-                  <div className={cn("h-2 rounded-full", dark ? "bg-slate-800" : "bg-slate-200")}>
-                    <div className="h-2 rounded-full bg-emerald-500" style={{ width: `${closedPct}%` }} />
-                  </div>
-                </div>
-              </div>
-
-              <div className="mt-4">
-                <div className="text-[11px] uppercase text-slate-500 mb-2">Ultimas O.S</div>
-                <div className="space-y-2">
-                  {recentOrders.map((order) => (
-                    <button
-                      key={order.id}
-                      onClick={() => onSelectOrder(order)}
-                      className={cn(
-                        "w-full text-left border rounded-lg p-2 transition-colors",
-                        dark ? "border-slate-700/50 bg-[#0b1328] hover:bg-[#13203d]" : "border-slate-200 bg-white hover:bg-slate-50"
-                      )}
-                    >
-                      <div className="flex items-center justify-between gap-2">
-                        <span className={cn("font-mono text-xs", dark ? "text-slate-300" : "text-slate-700")}>{order.protocol}</span>
-                        <Badge color={getStatusColor(order.status)}>{order.status}</Badge>
-                      </div>
-                      <div className={cn("text-xs mt-1 truncate", dark ? "text-slate-400" : "text-slate-600")}>{order.type}</div>
-                      <div className="text-[11px] text-slate-500 mt-1">{formatDateTime(order.createdAt)}</div>
-                    </button>
-                  ))}
-                  {recentOrders.length === 0 && <div className="text-xs text-slate-500">Sem O.S neste periodo.</div>}
-                </div>
-              </div>
-            </div>
-          );
-        })}
-      </div>
-
-      {providers.length === 0 && (
-        <div className={cn("border rounded-xl p-8 text-center text-sm", dark ? "bg-[#1e293b]/60 border-slate-700/50 text-slate-400" : "bg-white border-slate-200 text-slate-500")}>
-          Nenhum provedor encontrado para os filtros atuais.
-        </div>
-      )}
-    </div>
-  );
-};
 
 const KnowledgeBaseView = ({ onToast, section = 'ajustpedia' }) => {
   const [tab, setTab] = useState(section === 'credentials' ? 'credenciais' : 'ajustpedia');
@@ -4971,92 +4794,144 @@ const KnowledgeBaseView = ({ onToast, section = 'ajustpedia' }) => {
   );
 };
 
-const CalendarView = ({ orders, onSelectOrder }) => {
-  const [monthDate, setMonthDate] = useState(() => {
-    const d = new Date();
-    d.setDate(1);
-    return d;
-  });
+// ─── Calendar Types ────────────────────────────────────────────────────────────
+type CalendarEventType = 'REUNIAO' | 'REUNIAO_ONLINE' | 'PLANTAO' | 'FERIADO' | 'LEMBRETE' | 'OUTRO';
 
-  const [selectedDay, setSelectedDay] = useState(null);
+interface CalendarEvent {
+  id: string;
+  title: string;
+  description?: string;
+  type: CalendarEventType;
+  isGlobal: boolean;
+  startAt: string;
+  endAt?: string;
+  allDay: boolean;
+  meetingLink?: string;
+  location?: string;
+  color: string;
+  assignee?: { id: string; name: string } | null;
+  createdBy?: { id: string; name: string } | null;
+}
 
-  const year = monthDate.getFullYear();
+const EVENT_META: Record<CalendarEventType, { label: string; color: string; bg: string; darkBg: string }> = {
+  REUNIAO:        { label: 'Reunião',  color: '#3b82f6', bg: 'bg-blue-100 text-blue-800 border-blue-200',      darkBg: 'bg-blue-900/40 text-blue-300 border-blue-700/40' },
+  REUNIAO_ONLINE: { label: 'Online',   color: '#8b5cf6', bg: 'bg-violet-100 text-violet-800 border-violet-200', darkBg: 'bg-violet-900/40 text-violet-300 border-violet-700/40' },
+  PLANTAO:        { label: 'Plantão',  color: '#f59e0b', bg: 'bg-amber-100 text-amber-800 border-amber-200',    darkBg: 'bg-amber-900/40 text-amber-300 border-amber-700/40' },
+  FERIADO:        { label: 'Feriado',  color: '#ef4444', bg: 'bg-red-100 text-red-800 border-red-200',          darkBg: 'bg-red-900/40 text-red-300 border-red-700/40' },
+  LEMBRETE:       { label: 'Lembrete', color: '#10b981', bg: 'bg-emerald-100 text-emerald-800 border-emerald-200', darkBg: 'bg-emerald-900/40 text-emerald-300 border-emerald-700/40' },
+  OUTRO:          { label: 'Outro',    color: '#6b7280', bg: 'bg-slate-100 text-slate-700 border-slate-200',    darkBg: 'bg-slate-700/40 text-slate-300 border-slate-600/40' },
+};
+
+const fmtTime = (iso: string): string =>
+  new Date(iso).toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' });
+
+const fmtFullDate = (iso: string): string =>
+  new Date(iso).toLocaleDateString('pt-BR', { weekday: 'long', day: '2-digit', month: 'long', year: 'numeric' });
+
+const CalendarView = ({ orders: _orders, onSelectOrder: _onSelectOrder }: { orders: unknown[]; onSelectOrder: (o: unknown) => void }) => {
+  const { dark } = useTheme();
+  const [monthDate, setMonthDate] = useState<Date>(() => { const d = new Date(); d.setDate(1); return d; });
+  const [selectedDay, setSelectedDay] = useState<number | null>(null);
+  const [events, setEvents] = useState<CalendarEvent[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [detailEvent, setDetailEvent] = useState<CalendarEvent | null>(null);
+
+  const year  = monthDate.getFullYear();
   const month = monthDate.getMonth();
-  const daysInMonth = new Date(year, month + 1, 0).getDate();
-  const firstWeekDay = new Date(year, month, 1).getDay();
 
-  const grid = [];
+  // Build grid
+  const daysInMonth  = new Date(year, month + 1, 0).getDate();
+  const firstWeekDay = new Date(year, month, 1).getDay();
+  const grid: (number | null)[] = [];
   for (let i = 0; i < firstWeekDay; i++) grid.push(null);
   for (let d = 1; d <= daysInMonth; d++) grid.push(d);
 
-  const getEventsForDay = (day) => {
-    if (!day) return [];
-    const start = new Date(year, month, day, 0, 0, 0, 0).getTime();
-    const end = start + DAY_MS - 1;
-    return orders
-      .filter((o) => {
-        const dueInDay = o.deadlineAt >= start && o.deadlineAt <= end;
-        const createdInDay = o.createdAt >= start && o.createdAt <= end;
-        return dueInDay || createdInDay;
-      })
-      .slice(0, 20);
-  };
+  const monthLabel = monthDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' });
+
+  useEffect(() => {
+    setLoading(true);
+    const from = new Date(year, month, 1).toISOString();
+    const to   = new Date(year, month + 1, 0, 23, 59, 59).toISOString();
+    fetch(`/api/calendar/events?from=${encodeURIComponent(from)}&to=${encodeURIComponent(to)}`, { cache: 'no-store' })
+      .then(r => r.ok ? r.json() : [])
+      .then((data: CalendarEvent[]) => setEvents(Array.isArray(data) ? data : []))
+      .catch(() => setEvents([]))
+      .finally(() => setLoading(false));
+  }, [year, month]);
+
+  const getEventsForDay = (day: number): CalendarEvent[] =>
+    events.filter(ev => {
+      const d = new Date(ev.startAt);
+      return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day;
+    });
+
+  const todayDay = (() => {
+    const now = new Date();
+    return (now.getFullYear() === year && now.getMonth() === month) ? now.getDate() : null;
+  })();
 
   const selectedEvents = selectedDay ? getEventsForDay(selectedDay) : [];
 
-  const { dark } = useTheme();
-
   return (
     <div className="space-y-5 h-full flex flex-col">
-      <div className="flex items-center justify-between">
-        <h2 className={cn("text-2xl font-bold", dark ? "text-slate-100" : "text-slate-900")}>Calendario Operacional</h2>
-        <div className={cn("flex items-center gap-2 border rounded-lg p-1", dark ? "bg-[#1e293b]/60 backdrop-blur-md border-slate-700/50" : "bg-white border-slate-200")}>
-          <button onClick={() => setMonthDate(new Date(year, month - 1, 1))} className={cn("p-2 rounded", dark ? "hover:bg-white/5 text-slate-300" : "hover:bg-slate-100 text-slate-600")}>
-            <ChevronLeft size={16} />
-          </button>
-          <div className={cn("text-sm font-semibold min-w-[150px] text-center", dark ? "text-slate-200" : "text-slate-700")}>
-            {monthDate.toLocaleString('pt-BR', { month: 'long', year: 'numeric' })}
+      {/* Header */}
+      <div className="flex items-center justify-between flex-wrap gap-3">
+        <div>
+          <h2 className={cn('text-2xl font-bold', dark ? 'text-slate-100' : 'text-slate-900')}>Calendário</h2>
+          <p className={cn('text-sm mt-0.5', dark ? 'text-slate-400' : 'text-slate-500')}>Reuniões, plantões, feriados e lembretes da equipe</p>
+        </div>
+        <div className="flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-1.5 flex-wrap">
+            {(Object.entries(EVENT_META) as [CalendarEventType, typeof EVENT_META[CalendarEventType]][]).map(([k, v]) => (
+              <span key={k} className={cn('text-[10px] px-2 py-0.5 rounded-full border font-medium', dark ? v.darkBg : v.bg)}>{v.label}</span>
+            ))}
           </div>
-          <button onClick={() => setMonthDate(new Date(year, month + 1, 1))} className={cn("p-2 rounded", dark ? "hover:bg-white/5 text-slate-300" : "hover:bg-slate-100 text-slate-600")}>
-            <ChevronRight size={16} />
-          </button>
+          <div className={cn('flex items-center gap-1 border rounded-lg p-1', dark ? 'bg-[#1e293b]/60 border-slate-700/50' : 'bg-white border-slate-200')}>
+            <button onClick={() => setMonthDate(new Date(year, month - 1, 1))} className={cn('p-2 rounded', dark ? 'hover:bg-white/5 text-slate-300' : 'hover:bg-slate-100 text-slate-600')}><ChevronLeft size={16} /></button>
+            <div className={cn('text-sm font-semibold min-w-[140px] text-center capitalize', dark ? 'text-slate-200' : 'text-slate-700')}>{monthLabel}</div>
+            <button onClick={() => setMonthDate(new Date(year, month + 1, 1))} className={cn('p-2 rounded', dark ? 'hover:bg-white/5 text-slate-300' : 'hover:bg-slate-100 text-slate-600')}><ChevronRight size={16} /></button>
+          </div>
         </div>
       </div>
 
       <div className="flex-1 grid grid-cols-1 lg:grid-cols-3 gap-4 min-h-0">
-        <div className={cn("lg:col-span-2 border rounded-xl p-4 overflow-y-auto custom-scrollbar", dark ? "bg-[#1e293b]/60 backdrop-blur-md border-slate-700/50" : "bg-white border-slate-200")}>
-          <div className="grid grid-cols-7 gap-2 mb-2">
-            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sab'].map((d) => (
+        {/* Calendar grid */}
+        <div className={cn('lg:col-span-2 border rounded-xl p-4 overflow-y-auto custom-scrollbar', dark ? 'bg-[#1e293b]/60 border-slate-700/50' : 'bg-white border-slate-200')}>
+          {loading && <div className="text-xs text-slate-400 mb-2">Carregando eventos...</div>}
+          <div className="grid grid-cols-7 gap-1 mb-2">
+            {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map(d => (
               <div key={d} className="text-[11px] font-bold uppercase text-slate-400 text-center py-1">{d}</div>
             ))}
           </div>
-
-          <div className="grid grid-cols-7 gap-2">
+          <div className="grid grid-cols-7 gap-1">
             {grid.map((day, idx) => {
-              const events = getEventsForDay(day);
-              const selected = selectedDay === day;
-
+              const dayEvs = day ? getEventsForDay(day) : [];
+              const isSel  = selectedDay === day;
+              const isToday = day === todayDay;
               return (
-                <button
-                  key={idx}
-                  disabled={!day}
-                  onClick={() => day && setSelectedDay(day)}
+                <button key={idx} disabled={!day}
+                  onClick={() => day && setSelectedDay(day === selectedDay ? null : day)}
                   className={cn(
-                    'min-h-[95px] rounded-lg border p-2 text-left transition-colors',
-                    !day ? 'border-transparent bg-transparent cursor-default' : (dark ? 'border-slate-700/50 hover:border-blue-500/50 hover:bg-blue-900/10' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'),
-                    selected && (dark ? 'ring-2 ring-blue-500 bg-blue-900/20' : 'ring-2 ring-blue-500 bg-blue-50')
+                    'min-h-[90px] rounded-lg border p-1.5 text-left transition-all',
+                    !day ? 'border-transparent cursor-default' : (dark ? 'border-slate-700/40 hover:border-blue-500/40 hover:bg-blue-900/10' : 'border-slate-200 hover:border-blue-300 hover:bg-blue-50/30'),
+                    isSel && (dark ? 'ring-2 ring-blue-500 bg-blue-900/20' : 'ring-2 ring-blue-400 bg-blue-50'),
                   )}
                 >
                   {day && (
                     <>
-                      <div className={cn("text-sm font-semibold", dark ? "text-slate-300" : "text-slate-700")}>{day}</div>
-                      <div className="mt-1 space-y-1">
-                        {events.slice(0, 3).map((e) => (
-                          <div key={e.id} className={cn("text-[10px] px-1.5 py-0.5 rounded border truncate", dark ? "bg-[#0f172a]/80 backdrop-blur-xl border-slate-700/50 text-slate-300" : "bg-slate-100 border-slate-200 text-slate-600")}>
-                            {e.protocol}
-                          </div>
-                        ))}
-                        {events.length > 3 && <div className="text-[10px] text-slate-400">+{events.length - 3} mais</div>}
+                      <div className={cn('text-xs font-bold w-6 h-6 flex items-center justify-center rounded-full mb-1', isToday ? 'bg-blue-600 text-white' : (dark ? 'text-slate-300' : 'text-slate-700'))}>{day}</div>
+                      <div className="space-y-0.5">
+                        {dayEvs.slice(0, 3).map(ev => {
+                          const m = EVENT_META[ev.type] ?? EVENT_META.OUTRO;
+                          return (
+                            <div key={ev.id} onClick={e => { e.stopPropagation(); setDetailEvent(ev); }}
+                              style={{ borderLeftColor: m.color }}
+                              className={cn('text-[9px] px-1 py-0.5 rounded border-l-2 truncate cursor-pointer hover:opacity-75 transition-opacity', dark ? 'bg-slate-800/70 text-slate-300' : 'bg-slate-50 text-slate-700')}>
+                              {ev.title}
+                            </div>
+                          );
+                        })}
+                        {dayEvs.length > 3 && <div className="text-[9px] text-slate-400 pl-1">+{dayEvs.length - 3}</div>}
                       </div>
                     </>
                   )}
@@ -5066,41 +4941,92 @@ const CalendarView = ({ orders, onSelectOrder }) => {
           </div>
         </div>
 
-        <div className={cn("border rounded-xl overflow-hidden flex flex-col", dark ? "bg-[#1e293b]/60 backdrop-blur-md border-slate-700/50" : "bg-white border-slate-200")}>
-          <div className={cn("px-4 py-3 border-b", dark ? "bg-[#0f172a]/80 backdrop-blur-xl border-slate-700/50" : "bg-slate-50 border-slate-100")}>
-            <h3 className={cn("font-bold", dark ? "text-slate-200" : "text-slate-700")}>{selectedDay ? `Eventos do dia ${selectedDay}` : 'Selecione um dia'}</h3>
+        {/* Side panel */}
+        <div className={cn('border rounded-xl flex flex-col overflow-hidden', dark ? 'bg-[#1e293b]/60 border-slate-700/50' : 'bg-white border-slate-200')}>
+          <div className={cn('px-4 py-3 border-b flex items-center justify-between', dark ? 'bg-[#0f172a]/60 border-slate-700/50' : 'bg-slate-50 border-slate-100')}>
+            <h3 className={cn('font-bold text-sm', dark ? 'text-slate-200' : 'text-slate-800')}>
+              {selectedDay ? `${selectedDay} de ${monthDate.toLocaleString('pt-BR', { month: 'long' })}` : 'Selecione um dia'}
+            </h3>
+            {selectedDay && <button onClick={() => setSelectedDay(null)} className="text-slate-400 hover:text-slate-600 text-xs">✕</button>}
           </div>
-          <div className="flex-1 overflow-y-auto custom-scrollbar p-4 space-y-2">
-            {selectedDay ? (
-              selectedEvents.length > 0 ? (
-                selectedEvents.map((e) => (
-                  <div key={e.id} className={cn("p-3 border rounded-lg", dark ? "bg-[#0f172a]/80 backdrop-blur-xl border-slate-700/50" : "bg-slate-50 border-slate-200")}>
-                    <div className="flex justify-between items-center mb-1">
-                      <span className={cn("font-mono text-xs", dark ? "text-slate-300" : "text-slate-700")}>{e.protocol}</span>
-                      <Badge color={getStatusColor(e.status)}>{e.status}</Badge>
-                    </div>
-                    <div className={cn("text-xs", dark ? "text-slate-400" : "text-slate-600")}>{e.provider}</div>
-                    <div className="text-xs text-slate-500 mt-1">{formatDateTime(e.deadlineAt)}</div>
-                    <button onClick={() => onSelectOrder(e)} className={cn("mt-2 px-2 py-1 text-[10px] border rounded font-bold transition-colors", dark ? "bg-cyan-900/30 border-cyan-700/50 text-cyan-400 hover:bg-cyan-900/50" : "border-cyan-200 bg-cyan-50 text-cyan-700 hover:bg-cyan-100/50")}>
-                      Abrir
-                    </button>
+          <div className="flex-1 overflow-y-auto custom-scrollbar p-3 space-y-2">
+            {!selectedDay && <div className="text-xs text-slate-400 text-center py-8">Clique num dia para ver os eventos</div>}
+            {selectedDay && selectedEvents.length === 0 && <div className="text-xs text-slate-400 text-center py-8">Nenhum evento neste dia</div>}
+            {selectedEvents.map(ev => {
+              const m = EVENT_META[ev.type] ?? EVENT_META.OUTRO;
+              return (
+                <div key={ev.id} onClick={() => setDetailEvent(ev)}
+                  style={{ borderLeftColor: m.color }}
+                  className={cn('p-3 rounded-lg border border-l-4 cursor-pointer hover:opacity-80 transition-opacity', dark ? 'bg-[#0f172a]/60 border-slate-700/40' : 'bg-slate-50 border-slate-200')}>
+                  <div className={cn('font-semibold text-sm', dark ? 'text-slate-100' : 'text-slate-800')}>{ev.title}</div>
+                  <div className="flex items-center gap-2 mt-1 flex-wrap">
+                    <span className={cn('text-[10px] px-1.5 py-0.5 rounded border', dark ? m.darkBg : m.bg)}>{m.label}</span>
+                    {ev.isGlobal && <span className="text-[10px] text-slate-400">Geral</span>}
+                    {ev.assignee && <span className="text-[10px] text-slate-400">{ev.assignee.name}</span>}
                   </div>
-                ))
-              ) : (
-                <div className="text-sm text-slate-400">Sem eventos nesse dia.</div>
-              )
-            ) : (
-              <div className="text-sm text-slate-400">Selecione uma data no calendario.</div>
-            )}
+                  {!ev.allDay ? <div className="text-[10px] text-slate-500 mt-1">{fmtTime(ev.startAt)}{ev.endAt ? ` — ${fmtTime(ev.endAt)}` : ''}</div> : <div className="text-[10px] text-slate-500 mt-1">Dia inteiro</div>}
+                  {ev.meetingLink && (
+                    <a href={ev.meetingLink} target="_blank" rel="noreferrer" onClick={e => e.stopPropagation()} className="text-[10px] text-violet-400 underline mt-1 block truncate">🔗 Link da reunião</a>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+          <div className={cn('border-t px-4 py-2', dark ? 'border-slate-700/50' : 'border-slate-100')}>
+            <div className="text-[10px] text-slate-400">{events.length} evento{events.length !== 1 ? 's' : ''} neste mês</div>
           </div>
         </div>
       </div>
+
+      {/* Detail Modal */}
+      {detailEvent && (() => {
+        const ev = detailEvent;
+        const m = EVENT_META[ev.type] ?? EVENT_META.OUTRO;
+        return (
+          <div className="fixed inset-0 z-[200] flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm" onClick={() => setDetailEvent(null)}>
+            <div className={cn('w-full max-w-md rounded-2xl shadow-2xl overflow-hidden', dark ? 'bg-[#1e293b] border border-slate-700/50' : 'bg-white border border-slate-200')} onClick={e => e.stopPropagation()}>
+              <div className="h-1.5 w-full" style={{ backgroundColor: m.color }} />
+              <div className="p-6">
+                <div className="flex items-start justify-between mb-4">
+                  <div>
+                    <span className={cn('text-[11px] font-medium px-2 py-0.5 rounded border', dark ? m.darkBg : m.bg)}>{m.label}</span>
+                    {ev.isGlobal && <span className="ml-2 text-[11px] text-slate-400">📢 Geral</span>}
+                    <h2 className={cn('text-xl font-bold mt-2', dark ? 'text-slate-100' : 'text-slate-900')}>{ev.title}</h2>
+                  </div>
+                  <button onClick={() => setDetailEvent(null)} className="text-slate-400 hover:text-slate-600 text-lg ml-4">✕</button>
+                </div>
+                <div className="space-y-3">
+                  <div className="flex items-start gap-2">
+                    <span className="text-slate-400 text-sm">📅</span>
+                    <div>
+                      <div className={cn('text-sm font-medium', dark ? 'text-slate-200' : 'text-slate-800')}>{fmtFullDate(ev.startAt)}</div>
+                      {ev.allDay ? <div className="text-xs text-slate-400">Dia inteiro</div> : <div className="text-xs text-slate-400">{fmtTime(ev.startAt)}{ev.endAt ? ` → ${fmtTime(ev.endAt)}` : ''}</div>}
+                    </div>
+                  </div>
+                  {ev.description && <div className="flex items-start gap-2"><span className="text-slate-400 text-sm">📝</span><p className={cn('text-sm', dark ? 'text-slate-300' : 'text-slate-700')}>{ev.description}</p></div>}
+                  {ev.location && <div className="flex items-center gap-2"><span className="text-slate-400 text-sm">📍</span><span className={cn('text-sm', dark ? 'text-slate-300' : 'text-slate-700')}>{ev.location}</span></div>}
+                  {ev.meetingLink && <div className="flex items-center gap-2"><span className="text-slate-400 text-sm">🔗</span><a href={ev.meetingLink} target="_blank" rel="noreferrer" className="text-sm text-violet-400 underline truncate">{ev.meetingLink}</a></div>}
+                  {ev.assignee && <div className="flex items-center gap-2"><span className="text-slate-400 text-sm">👤</span><span className={cn('text-sm', dark ? 'text-slate-300' : 'text-slate-700')}>{ev.assignee.name}</span></div>}
+                  {ev.isGlobal && !ev.assignee && <div className="flex items-center gap-2"><span className="text-slate-400 text-sm">📢</span><span className="text-sm text-slate-400">Visível para toda a equipe</span></div>}
+                  {ev.createdBy && <div className="text-xs text-slate-400 mt-1">Criado por {ev.createdBy.name}</div>}
+                </div>
+                {ev.meetingLink && (
+                  <a href={ev.meetingLink} target="_blank" rel="noreferrer" className="mt-5 flex items-center justify-center gap-2 w-full py-2.5 rounded-xl bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold transition-colors">
+                    🎥 Entrar na reunião
+                  </a>
+                )}
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };
 
+
 const ReportsView = ({ orders, onToast }) => {
-  const [period, setPeriod] = useState('30d');
+  const [period, setPeriod] = useState('Tudo');
   const scoped = useMemo(() => filterByPeriod(orders, period), [orders, period]);
 
   const statusSummary = useMemo(() => {
@@ -5446,17 +5372,19 @@ export default function AnalystTechnicianMockupComplete() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [editingOrder, setEditingOrder] = useState(null);
   const [editingOccurrence, setEditingOccurrence] = useState(null);
-  const [toastMessage, setToastMessage] = useState('');
+  const [toast, setToast] = useState<{ message: string; type: 'info' | 'success' | 'error' | 'warning' } | null>(null);
   useEffect(() => {
-    if (!toastMessage) return;
-    const t = setTimeout(() => setToastMessage(''), 2500);
+    if (!toast) return;
+    const t = setTimeout(() => setToast(null), 3000);
     return () => clearTimeout(t);
-  }, [toastMessage]);
+  }, [toast]);
   const [commandOpen, setCommandOpen] = useState(false);
   const [menuResetToken, setMenuResetToken] = useState(0);
   const [mounted, setMounted] = useState(false);
   const [tenantId, setTenantId] = useState(null);
   const [apiSyncing, setApiSyncing] = useState(false);
+  const [summaryData, setSummaryData] = useState(null);
+  const [socketFlashing, setSocketFlashing] = useState(false);
 
   const handleLogout = async () => {
     try {
@@ -5469,7 +5397,7 @@ export default function AnalystTechnicianMockupComplete() {
   const selectedOrder = useMemo(() => orders.find((o) => o.id === selectedOrderId) || null, [orders, selectedOrderId]);
   const roleCode = mapUiRoleToCode(role);
 
-  const onToast = (msg) => setToastMessage(msg);
+  const onToast = (msg: string, type: 'info' | 'success' | 'error' | 'warning' = 'info') => setToast({ message: msg, type });
   const apiEnabled = !!tenantId;
 
 
@@ -5498,6 +5426,16 @@ export default function AnalystTechnicianMockupComplete() {
     } finally {
       if (!silent) setApiSyncing(false);
     }
+  };
+
+  const loadRemoteSummary = async (targetTenantId) => {
+    if (!targetTenantId) return false;
+    try {
+      const response = await fetch(`/api/service-orders/summary?tenantId=${encodeURIComponent(targetTenantId)}`, { cache: 'no-store' });
+      if (response.ok) {
+        setSummaryData(await response.json());
+      }
+    } catch (e) {}
   };
 
   const transitionOrderRemote = async (orderId, nextStatusLabel, reason = 'Atualizacao manual pelo analista.') => {
@@ -5541,7 +5479,7 @@ export default function AnalystTechnicianMockupComplete() {
     }
   };
 
-  const addOrderAnnotation = async (order, message) => {
+  const addOrderAnnotation = async (order, message, hideFromClient = false) => {
     if (!apiEnabled || !order?.id) {
       onToast('Tenant nao identificado para comentar na O.S.');
       return false;
@@ -5554,7 +5492,7 @@ export default function AnalystTechnicianMockupComplete() {
       const response = await fetch(`/api/service-orders/${encodeURIComponent(order.id)}/annotations?tenantId=${encodeURIComponent(tenantId)}`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ message }),
+        body: JSON.stringify({ message, hideFromClient: !!hideFromClient }),
       });
       if (!response.ok) {
         throw new Error(await readApiErrorMessage(response, 'Falha ao registrar atualizacao da O.S.'));
@@ -5638,6 +5576,55 @@ export default function AnalystTechnicianMockupComplete() {
   }, []);
 
   useEffect(() => {
+    if (!tenantId) return;
+    const wsUrl = process.env.NEXT_PUBLIC_WS_URL
+      || `${window.location.protocol}//${window.location.hostname}:8071`;
+    
+    // Conecta passando o tenantId na handshake (para o backend EventsGateway assinar na sala)
+    const socket = io(wsUrl, {
+      auth: { tenantId }
+    });
+
+    const onRemoteRefresh = () => {
+      try {
+        const AudioContextConstructor = window.AudioContext || (window as any).webkitAudioContext;
+        if (AudioContextConstructor) {
+          const ctx = new AudioContextConstructor();
+          const osc = ctx.createOscillator();
+          const gain = ctx.createGain();
+          osc.connect(gain);
+          gain.connect(ctx.destination);
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(880, ctx.currentTime);
+          gain.gain.setValueAtTime(0.1, ctx.currentTime);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.15);
+        }
+      } catch (e) {}
+
+      setSocketFlashing(true);
+      setTimeout(() => setSocketFlashing(false), 800);
+      loadRemoteOrders(tenantId, { silent: true });
+      loadRemoteSummary(tenantId);
+    };
+
+    socket.on('service_order.created', onRemoteRefresh);
+    socket.on('service_order.updated', onRemoteRefresh);
+    socket.on('service_order.transitioned', onRemoteRefresh);
+    socket.on('service_order.annotation_created', onRemoteRefresh);
+    socket.on('service_order.attachment_uploaded', onRemoteRefresh);
+    socket.on('occurrence.created', onRemoteRefresh);
+    socket.on('occurrence.updated', onRemoteRefresh);
+    socket.on('occurrence.annotation_created', onRemoteRefresh);
+
+    return () => {
+      socket.disconnect();
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tenantId]);
+
+
+  useEffect(() => {
     let active = true;
     const bootstrapSession = async () => {
       try {
@@ -5657,7 +5644,10 @@ export default function AnalystTechnicianMockupComplete() {
         }
 
         if (nextTenantId) {
-          await loadRemoteOrders(nextTenantId);
+          await Promise.all([
+            loadRemoteOrders(nextTenantId),
+            loadRemoteSummary(nextTenantId)
+          ]);
         }
       } catch (error) {
         if (!active) return;
@@ -5794,6 +5784,7 @@ export default function AnalystTechnicianMockupComplete() {
         origin: patch.origin,
         analystName: patch.tech || patch.owner || currentAnalystName,
         ownerName: patch.owner || patch.tech || currentAnalystName,
+        hideFromClient: !!patch.hideFromClient,
         deadlineAt: patch.deadlineAt ? new Date(patch.deadlineAt).toISOString() : undefined,
       };
 
@@ -5887,6 +5878,7 @@ export default function AnalystTechnicianMockupComplete() {
             sector: orderDraft.sector || occurrenceDraft.sector,
             origin: orderDraft.origin || occurrenceDraft.origin,
             analystName: orderDraft.analyst || currentAnalystName || ANALYST_USERS[0],
+            hideFromClient: !!orderDraft.hideFromClient,
             deadlineAt:
               orderDraft.deadlineDate && orderDraft.deadlineTime
                 ? new Date(`${orderDraft.deadlineDate}T${orderDraft.deadlineTime}`).toISOString()
@@ -5935,6 +5927,7 @@ export default function AnalystTechnicianMockupComplete() {
           sector: internalOrder.sector || occurrence.sector,
           origin: internalOrder.origin || occurrence.origin,
           analystName: internalOrder.analyst || internalOrder.responsible || currentAnalystName || ANALYST_USERS[0],
+          hideFromClient: !!internalOrder.hideFromClient,
           deadlineAt:
             internalOrder.deadlineDate && internalOrder.deadlineTime
               ? new Date(`${internalOrder.deadlineDate}T${internalOrder.deadlineTime}`).toISOString()
@@ -5986,6 +5979,7 @@ export default function AnalystTechnicianMockupComplete() {
         sector: newOrder.sector || newOrder.occurrenceSector || 'NOC',
         origin: newOrder.origin || newOrder.occurrenceOrigin || 'Suporte Online',
         analyst: newOrder.tech || newOrder.owner || currentAnalystName || ANALYST_USERS[0],
+        hideFromClient: !!newOrder.hideFromClient,
         deadlineDate: toDateInputValue(newOrder.deadlineAt || Date.now() + 24 * HOUR_MS),
         deadlineTime: toTimeInputValue(newOrder.deadlineAt || Date.now() + 24 * HOUR_MS),
         attachments: newOrder.attachments || [],
@@ -5998,6 +5992,7 @@ export default function AnalystTechnicianMockupComplete() {
       return (
         <DashboardView
           orders={orders}
+          summaryData={summaryData}
           onSelectOrder={openOrderDetails}
           onGoToProviders={() => setCurrentView('providers')}
           onGoToKnowledge={() => setCurrentView('ajustpedia')}
@@ -6064,20 +6059,6 @@ export default function AnalystTechnicianMockupComplete() {
       );
     }
 
-    if (currentView === 'providers_lab') {
-      return (
-        <ProvidersLabView
-          orders={orders}
-          onSelectOrder={openOrderDetails}
-          onOpenProvider={(providerName) => {
-            setFocusProviderName(providerName);
-            setFocusOccurrenceId(null);
-            setCurrentView('providers');
-          }}
-        />
-      );
-    }
-
     if (currentView === 'ajustpedia') {
       return <KnowledgeBaseView onToast={onToast} section="ajustpedia" />;
     }
@@ -6105,9 +6086,11 @@ export default function AnalystTechnicianMockupComplete() {
     return (
       <DashboardView
         orders={orders}
+        summaryData={summaryData}
         onSelectOrder={openOrderDetails}
         onGoToProviders={() => setCurrentView('providers')}
         onGoToKnowledge={() => setCurrentView('ajustpedia')}
+        loading={initialLoading}
         currentAnalystName={currentAnalystName}
       />
     );
@@ -6155,7 +6138,7 @@ export default function AnalystTechnicianMockupComplete() {
         />
       )}
 
-      <ErpToast message={toastMessage} dark={dark} />
+      {toast && <ErpToast message={toast.message} type={toast.type} dark={dark} duration={3000} />}
     </>
   );
 
@@ -6186,6 +6169,10 @@ export default function AnalystTechnicianMockupComplete() {
         contentClassName="max-w-[1500px] mx-auto"
         contentWrapperClassName="flex-1 flex flex-col overflow-hidden relative"
       >
+        <div className={cn(
+          "fixed inset-0 pointer-events-none transition-colors duration-300 z-[9999]",
+          socketFlashing ? "bg-indigo-500/20" : "bg-transparent"
+        )} />
         {apiSyncing && (
           <div className={cn("mb-4 rounded-lg border px-3 py-2 text-xs", dark ? "bg-blue-900/20 border-blue-500/30 text-blue-400" : "bg-white border-slate-200 text-slate-500")}>
             Sincronizando dados operacionais com o backend...
@@ -6196,7 +6183,9 @@ export default function AnalystTechnicianMockupComplete() {
             {apiSyncError}
           </div>
         )}
-        {renderView()}
+        <div key={currentView} className="animate-fade-in flex-1 flex flex-col min-h-0">
+          {renderView()}
+        </div>
       </SharedPortalShell>
     </ThemeCtx.Provider>
   );

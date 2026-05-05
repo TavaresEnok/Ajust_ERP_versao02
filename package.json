@@ -6,23 +6,54 @@
   "engines": {
     "node": ">=20.0.0"
   },
+  "pnpm": {
+    "overrides": {
+      "@nestjs/common": "11.1.19",
+      "@nestjs/core": "11.1.19",
+      "@nestjs/platform-express": "11.1.19",
+      "@nestjs/platform-socket.io": "11.1.19",
+      "@nestjs/websockets": "11.1.19",
+      "@nestjs/testing": "11.1.19",
+      "follow-redirects": "^1.16.0",
+      "socket.io-parser": "^4.2.6",
+      "postcss": "^8.5.10",
+      "yaml": "^2.8.3",
+      "picomatch": "^4.0.4",
+      "defu": "^6.1.7",
+      "effect": "^3.20.0",
+      "express>path-to-regexp": "0.1.13"
+    }
+  },
   "scripts": {
     "dev": "corepack pnpm -r --parallel dev",
     "build": "corepack pnpm -r build",
     "lint": "corepack pnpm -r lint",
+    "lint:fix": "corepack pnpm exec eslint apps/api apps/worker packages/shared scripts --fix && corepack pnpm --filter @ajust/web exec next lint --fix",
     "typecheck": "corepack pnpm -r typecheck",
     "test:e2e": "corepack pnpm --filter @ajust/api test:e2e",
+    "test:e2e:security": "corepack pnpm --filter @ajust/api test:e2e:security",
+    "audit": "corepack pnpm audit --audit-level=moderate",
+    "format": "prettier --write \"apps/**/*.{ts,tsx,js,mjs,cjs,json}\" \"packages/**/*.ts\" \"scripts/**/*.{js,cjs}\" \"*.{json,mjs}\" \"eslint.config.mjs\" \"apps/web/eslint.config.mjs\"",
+    "format:check": "prettier --check \"apps/**/*.{ts,tsx,js,mjs,cjs,json}\" \"packages/**/*.ts\" \"scripts/**/*.{js,cjs}\" \"*.{json,mjs}\" \"eslint.config.mjs\" \"apps/web/eslint.config.mjs\"",
+    "validate": "corepack pnpm lint && corepack pnpm format:check && corepack pnpm typecheck && corepack pnpm audit",
     "test:web": "bash scripts/web-smoke.sh",
     "db:generate": "corepack pnpm exec prisma generate --schema prisma/schema.prisma",
     "db:migrate": "corepack pnpm exec prisma migrate dev --schema prisma/schema.prisma",
     "db:import:hub:pilot": "corepack pnpm exec node scripts/import-hub-real-pilot.cjs",
     "db:seed:roles": "corepack pnpm --filter @ajust/shared db:seed:roles",
     "db:seed:dev-admin": "corepack pnpm --filter @ajust/shared db:seed:dev-admin",
-    "db:seed:demo-users": "corepack pnpm --filter @ajust/shared db:seed:demo-users"
+    "db:seed:demo-users": "corepack pnpm --filter @ajust/shared db:seed:demo-users",
+    "db:seed:knowledge": "node scripts/replace-ajustpedia-knowledge.cjs"
   },
   "devDependencies": {
+    "@eslint/js": "^9.16.0",
+    "eslint": "^9.16.0",
+    "eslint-config-prettier": "^9.1.0",
+    "globals": "^15.13.0",
+    "prettier": "^3.4.2",
     "prisma": "^6.19.2",
-    "typescript": "^5.7.3"
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.18.2"
   },
   "dependencies": {
     "@prisma/client": "^6.19.2"

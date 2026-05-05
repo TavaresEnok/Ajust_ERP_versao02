@@ -89,6 +89,11 @@ enum AuditAction {
   CREDENTIAL_ACCESS
   EXPORT
   SYNC
+  CREATE_TENANT
+  UPDATE_TENANT
+  CREATE_USER
+  UPDATE_USER
+  DELETE_USER
 }
 
 model Tenant {
@@ -116,28 +121,54 @@ model Tenant {
   knowledgeArticles KnowledgeArticle[]
   knowledgeCredentials KnowledgeCredential[]
   notes             Note[]
+  calendarEvents    CalendarEvent[]
   auditLogs         AuditLog[]
   syncEvents        SyncEvent[]
   occurrenceAnnotations OccurrenceAnnotation[]
+  sectors           TenantSector[]
+  assets            Asset[]
+  changeRequests    ChangeRequest[]
+  timeEntries       TimeEntry[]
+  notificationConfigs NotificationConfig[]
+  onCallSchedules   OnCallSchedule[]
+  apiKeys           ApiKey[]
+  satisfactionResponses SatisfactionResponse[]
+  workflowRules         WorkflowRule[]
 
   @@index([status])
 }
 
+model TenantSector {
+  id        String   @id @default(uuid())
+  tenantId  String
+  name      String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, name])
+  @@index([tenantId])
+}
+
 model User {
-  id                 String     @id @default(uuid())
-  name               String
-  email              String     @unique
-  passwordHash       String
-  status             UserStatus @default(ACTIVE)
-  twoFactorEnabled   Boolean    @default(false)
-  twoFactorSecretEnc String?
-  lastLoginAt        DateTime?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
-  deletedAt          DateTime?
+  id                      String     @id @default(uuid())
+  name                    String
+  email                   String     @unique
+  passwordHash            String
+  status                  UserStatus @default(ACTIVE)
+  twoFactorEnabled        Boolean    @default(false)
+  twoFactorSecretEnc      String?
+  bootstrapTokenHash      String?
+  bootstrapTokenExpiresAt DateTime?
+  lastLoginAt             DateTime?
+  createdAt               DateTime   @default(now())
+  updatedAt               DateTime   @updatedAt
+  deletedAt               DateTime?
 
   tenants            UserTenant[]
   sessions           Session[]
+  bootstrapOtps      BootstrapOtp[]
   ownedOrders        ServiceOrder[]           @relation("OwnerOrders")
   assignedOrders     ServiceOrder[]           @relation("AssigneeOrders")
   occurrences        ServiceOrderOccurrence[]
@@ -149,6 +180,15 @@ model User {
   notes              Note[]
   knowledgeArticles  KnowledgeArticle[]
   occurrenceAnnotations OccurrenceAnnotation[]
+  calendarEventsCreated  CalendarEvent[]      @relation("CalendarEventCreator")
+  calendarEventsAssigned CalendarEvent[]      @relation("CalendarEventAssignee")
+  createdAssets      Asset[]
+  changeRequestsRequested ChangeRequest[]     @relation("ChangeRequestRequester")
+  changeRequestsApproved  ChangeRequest[]     @relation("ChangeRequestApprover")
+  changeRequestsExecuted  ChangeRequest[]     @relation("ChangeRequestExecutor")
+  timeEntries        TimeEntry[]
+  onCallSchedules    OnCallSchedule[]
+  createdApiKeys     ApiKey[]
 }
 
 model Occurrence {
@@ -192,6 +232,7 @@ model UserTenant {
   userId    String
   tenantId  String
   roleId    String
+  sector    String?
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
@@ -218,6 +259,21 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
+}
+
+model BootstrapOtp {
+  id          String    @id @default(uuid())
+  userId      String
+  otp         String    // OTP de 6 dígitos
+  attempts    Int       @default(0) // Contador de tentativas falhas
+  validatedAt DateTime? // null = ainda não validado, preenchido = validado com sucesso
+  expiresAt   DateTime  // Quando o OTP expira (15 minutos por padrão)
+  createdAt   DateTime  @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, expiresAt])
+  @@index([userId, validatedAt])
 }
 
 model ServiceOrder {
@@ -248,6 +304,7 @@ model ServiceOrder {
   approvalCompleted Boolean            @default(false)
   tags              String[]           @default([])
   internalNotes     String?
+  isCustomerVisible Boolean            @default(true)
   createdAt         DateTime           @default(now())
   updatedAt         DateTime           @updatedAt
   deletedAt         DateTime?
@@ -260,6 +317,9 @@ model ServiceOrder {
   attachments ServiceOrderAttachment[]
   approvals   ServiceOrderApproval[]
   slaEvents   SlaEvent[]
+  assets      AssetServiceOrder[]
+  timeEntries TimeEntry[]
+  satisfaction SatisfactionResponse?
 
   @@unique([tenantId, protocol])
   @@index([tenantId, status, priority, deadlineAt])
@@ -273,6 +333,7 @@ model ServiceOrderOccurrence {
   actorUserId    String?
   sourceSystem   SourceSystem @default(ERP)
   message        String
+  isCustomerVisible Boolean    @default(true)
   createdAt      DateTime     @default(now())
 
   serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
@@ -369,6 +430,7 @@ model SyncEvent {
   integrationId String?
   source        SourceSystem
   eventType     String
+  payload       Json?
   payloadHash   String?
   status        SyncStatus   @default(RECEIVED)
   errorMessage  String?
@@ -498,6 +560,7 @@ model OccurrenceAnnotation {
   occurrenceId String
   actorUserId  String?
   message      String
+  isCustomerVisible Boolean @default(true)
   createdAt    DateTime @default(now())
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -505,4 +568,283 @@ model OccurrenceAnnotation {
   actorUser  User?      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, occurrenceId, createdAt(sort: Desc)])
+}
+
+// ─── Calendar ─────────────────────────────────────────────────────────────────
+
+enum CalendarEventType {
+  REUNIAO
+  REUNIAO_ONLINE
+  PLANTAO
+  FERIADO
+  LEMBRETE
+  OUTRO
+}
+
+model CalendarEvent {
+  id          String            @id @default(uuid())
+  tenantId    String
+  title       String
+  description String?
+  type        CalendarEventType @default(OUTRO)
+  isGlobal    Boolean           @default(false)
+  startAt     DateTime
+  endAt       DateTime?
+  allDay      Boolean           @default(false)
+  meetingLink String?
+  location    String?
+  color       String?           @default("#3b82f6")
+  createdById String?
+  assigneeId  String?
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation("CalendarEventCreator",  fields: [createdById], references: [id], onDelete: SetNull)
+  assignee  User?  @relation("CalendarEventAssignee", fields: [assigneeId],  references: [id], onDelete: SetNull)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([tenantId, startAt])
+  @@index([tenantId, assigneeId, startAt])
+  @@index([tenantId, isGlobal, startAt])
+}
+
+
+// ─── CMDB (Configuration Management Database) ──────────────────────────────
+
+enum AssetStatus {
+  ATIVO
+  INATIVO
+  MANUTENCAO
+  DESATIVADO
+}
+
+enum AssetCategory {
+  SERVIDOR
+  SWITCH
+  ROTEADOR
+  LINK_TRANSIT
+  FIREWALL
+  SOFTWARE
+  CONTRATO
+  OUTRO
+}
+
+model Asset {
+  id          String        @id @default(uuid())
+  tenantId    String
+  name        String
+  category    AssetCategory @default(OUTRO)
+  status      AssetStatus   @default(ATIVO)
+  description String?
+  location    String?
+  serialNumber String?
+  vendor      String?
+  contractEnd DateTime?
+  tags        String[]      @default([])
+  createdById String?
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+  deletedAt   DateTime?
+
+  tenant      Tenant        @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy   User?         @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  serviceOrders AssetServiceOrder[]
+
+  @@index([tenantId, status])
+  @@index([tenantId, category])
+}
+
+model AssetServiceOrder {
+  id        String   @id @default(uuid())
+  assetId   String
+  orderId   String
+  createdAt DateTime @default(now())
+
+  asset Asset        @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  order ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@unique([assetId, orderId])
+}
+
+// ─── Change Management (RFC / ITIL) ────────────────────────────────────────
+
+enum ChangeStatus {
+  RASCUNHO
+  AGUARDANDO_APROVACAO
+  APROVADO
+  EM_EXECUCAO
+  CONCLUIDO
+  CANCELADO
+  REJEITADO
+}
+
+enum ChangeRisk {
+  BAIXO
+  MEDIO
+  ALTO
+  CRITICO
+}
+
+model ChangeRequest {
+  id              String       @id @default(uuid())
+  tenantId        String
+  number          String
+  title           String
+  description     String
+  justification   String
+  rollbackPlan    String?
+  status          ChangeStatus @default(RASCUNHO)
+  risk            ChangeRisk   @default(MEDIO)
+  plannedStart    DateTime?
+  plannedEnd      DateTime?
+  requestedById   String?
+  approvedById    String?
+  approvedAt      DateTime?
+  executedById    String?
+  affectedSystems String[]     @default([])
+  tags            String[]     @default([])
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  deletedAt       DateTime?
+
+  tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  requestedBy User?  @relation("ChangeRequestRequester", fields: [requestedById], references: [id], onDelete: SetNull)
+  approvedBy  User?  @relation("ChangeRequestApprover",  fields: [approvedById], references: [id], onDelete: SetNull)
+  executedBy  User?  @relation("ChangeRequestExecutor",  fields: [executedById],  references: [id], onDelete: SetNull)
+
+  @@unique([tenantId, number])
+  @@index([tenantId, status])
+  @@index([tenantId, plannedStart])
+}
+
+// ─── Time Tracking ─────────────────────────────────────────────────────────
+
+model TimeEntry {
+  id           String   @id @default(uuid())
+  tenantId     String
+  orderId      String
+  userId       String
+  minutes      Int
+  description  String?
+  billable     Boolean  @default(true)
+  loggedAt     DateTime @default(now())
+  createdAt    DateTime @default(now())
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, orderId])
+  @@index([tenantId, userId, loggedAt])
+}
+
+// ─── Notification Config ────────────────────────────────────────────────────
+
+enum NotificationChannel {
+  EMAIL
+  WEBHOOK
+  SLACK
+}
+
+enum NotificationTrigger {
+  ORDER_CREATED
+  ORDER_ESCALATED
+  ORDER_CLOSED
+  SLA_BREACH_WARNING
+  OCCURRENCE_CREATED
+}
+
+model NotificationConfig {
+  id        String                @id @default(uuid())
+  tenantId  String
+  name      String
+  channel   NotificationChannel
+  trigger   NotificationTrigger
+  target    String                // email address, webhook URL, slack webhook
+  active    Boolean               @default(true)
+  createdAt DateTime              @default(now())
+  updatedAt DateTime              @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active])
+  @@index([tenantId, trigger])
+}
+
+// ─── On-Call Schedule ──────────────────────────────────────────────────────
+
+model OnCallSchedule {
+  id        String   @id @default(uuid())
+  tenantId  String
+  userId    String
+  startsAt  DateTime
+  endsAt    DateTime
+  notes     String?
+  createdAt DateTime @default(now())
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, startsAt])
+}
+
+// ─── API Keys ──────────────────────────────────────────────────────────────
+
+model ApiKey {
+  id          String    @id @default(uuid())
+  tenantId    String
+  name        String
+  keyHash     String    @unique
+  keyPrefix   String
+  active      Boolean   @default(true)
+  lastUsedAt  DateTime?
+  expiresAt   DateTime?
+  createdById String?
+  createdAt   DateTime  @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([tenantId, active])
+  @@index([keyPrefix])
+}
+
+// ─── CSAT (Satisfaction Survey) ────────────────────────────────────────────
+
+model SatisfactionResponse {
+  id        String   @id @default(uuid())
+  tenantId  String
+  orderId   String   @unique
+  score     Int      // 1-5
+  comment   String?
+  token     String   @unique @default(uuid())
+  answered  Boolean  @default(false)
+  createdAt DateTime @default(now())
+  answeredAt DateTime?
+
+  tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, answered])
+}
+
+// ─── Workflow Automation Engine ───────────────────────────────────────────────
+
+model WorkflowRule {
+  id          String   @id @default(uuid())
+  tenantId    String
+  name        String
+  description String?
+  enabled     Boolean  @default(true)
+  /// JSON: { trigger, conditions[], actions[], nodes[], edges[] }
+  definition  Json
+  runCount    Int      @default(0)
+  lastRunAt   DateTime?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, enabled])
 }

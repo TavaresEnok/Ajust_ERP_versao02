@@ -258,9 +258,23 @@ export class IxcReconciliationService implements OnModuleInit, OnModuleDestroy {
     return allowed.includes(normalized as Priority) ? (normalized as Priority) : 'NORMAL';
   }
 
-  private async buildProtocol(tenantId: string) {
+  /**
+   * Gera protocolo de OS usando sequência PostgreSQL atômica por tenant.
+   * Mesma lógica da API — elimina race condition do count()-based.
+   */
+  private async buildProtocol(tenantId: string): Promise<string> {
     const year = new Date().getFullYear();
-    const count = await this.prisma.serviceOrder.count({ where: { tenantId } });
-    return `${year}${String(100000 + count + 1).padStart(6, '0')}`;
+    const seqName = `os_seq_${tenantId.replace(/-/g, '_')}`;
+
+    await this.prisma.$executeRawUnsafe(
+      `CREATE SEQUENCE IF NOT EXISTS "${seqName}" START 1 INCREMENT 1`
+    );
+
+    const result = await this.prisma.$queryRawUnsafe<[{ nextval: bigint }]>(
+      `SELECT nextval('"${seqName}"')`
+    );
+
+    const seq = Number(result[0].nextval);
+    return `${year}${String(seq).padStart(6, '0')}`;
   }
 }

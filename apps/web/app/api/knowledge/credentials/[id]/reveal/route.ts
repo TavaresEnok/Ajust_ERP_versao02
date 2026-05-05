@@ -7,9 +7,7 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (session instanceof NextResponse) return session;
 
   const { id } = await context.params;
-  const tenantId = request.nextUrl.searchParams.get('tenantId') || session.me.tenant!.id;
-
-  const response = await fetch(`${apiBaseUrl()}/knowledge/credentials/${encodeURIComponent(id)}/reveal?tenantId=${encodeURIComponent(tenantId)}`, {
+    const response = await fetch(`${apiBaseUrl()}/knowledge/credentials/${encodeURIComponent(id)}/reveal`, {
     method: 'POST',
     headers: {
       authorization: `Bearer ${session.accessToken}`,

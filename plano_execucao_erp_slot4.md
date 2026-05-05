@@ -14,7 +14,7 @@ Stack obrigatoria (confirmada):
 - Realtime: NestJS Gateway (WebSocket)
 - Banco: PostgreSQL
 - Cache/estado: Redis
-- Fila/eventos: RabbitMQ (padrao) ou NATS
+- Cache/estado: Redis
 - ORM: Prisma
 - Auth: JWT + Refresh Token
 - Validacao: Zod (preferencial) ou class-validator
@@ -53,7 +53,6 @@ Decisoes oficiais incorporadas nesta v2:
 - `worker` (NestJS standalone): jobs assinc., sync, reconciliacao, fila DLQ.
 - `postgres`: persistencia transacional.
 - `redis`: cache, rate-limit, token/session blacklist, pub/sub leve.
-- `rabbitmq`: eventos e processamento assinc.
 
 Padrao arquitetural:
 - Monorepo TypeScript (`apps/web`, `apps/api`, `apps/worker`, `packages/shared`).
@@ -65,8 +64,6 @@ Padrao arquitetural:
 - `8071` -> NestJS API + WebSocket (`api`)
 - `8072` -> PostgreSQL
 - `8073` -> Redis
-- `8074` -> RabbitMQ AMQP
-- `8075` -> RabbitMQ Management
 - `8076` -> Worker health/debug
 - `8077` -> pgAdmin opcional
 - `8078` -> Observabilidade opcional
@@ -205,7 +202,7 @@ Sprint 6 - Integracao IXC (MVP)
 - Recepcao webhook IXC.
 - Sync REST incremental + reconciliacao a cada 5 min.
 - Regras de conflito por dominio de autoridade.
-- Retry + DLQ no RabbitMQ.
+- Retry + DLQ interno (no worker).
 - Entrega: fluxo hibrido SGP/ERP estavel.
 
 Sprint 7 - Dashboards e relatorios
@@ -262,14 +259,14 @@ Rollout:
 - Vazamento cross-tenant
   - Mitigacao: guard global por `tenant_id`, testes automaticos de isolamento, revisao de query.
 - Gargalo em picos de eventos
-  - Mitigacao: buffer RabbitMQ, consumidores escalaveis, cache Redis e backpressure.
+  - Mitigacao: consumidores escalaveis, cache Redis e backpressure.
 - Divergencia de dados entre SGP e ERP
   - Mitigacao: politica formal de autoridade + reconciliacao recorrente e rastreio via `SyncEvent`.
 
 ## 8) Status de execucao (17/02/2026)
 
 Entregas validadas ate aqui:
-- Infra Slot 4 operacional (`8070` a `8077`) com `web`, `api`, `worker`, `postgres`, `redis`, `rabbitmq`.
+- Infra Slot 4 operacional (`8070` a `8077`) com `web`, `api`, `worker`, `postgres`, `redis`.
 - Sprint 1 concluida: monorepo, bootstrap `web/api/worker`, compose e health endpoints.
 - Sprint 2 concluida: IAM base, JWT + refresh rotativo, sessao/dispositivo e isolamento por tenant.
 - Sprint 3 concluida: dominio de OS, workflow principal, anexos com limites MVP e auditoria basica.
@@ -304,8 +301,7 @@ Validacoes executadas:
    - adicionar politica de notificacao/alerta para falhas na retencao;
    - preparar trilha para formatos adicionais (ex.: consolidado gerencial).
 3. Integracao assinc madura:
-   - publicar eventos de sync em RabbitMQ;
-   - retry com backoff e DLQ para falhas de webhook/reconciliacao.
+   - retry com backoff para falhas de webhook/reconciliacao.
 4. Seguranca e governanca:
    - completar cobertura de auditoria obrigatoria;
    - fluxo de logout remoto para todos os papeis (MVP+).

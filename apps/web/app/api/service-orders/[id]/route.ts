@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { omitTenantIdFromBody, omitTenantIdFromSearchParams } from '../../../../lib/strip-tenant-upstream';
 import { apiBaseUrl } from '../../auth/_lib';
 import { applyRefreshIfNeeded, resolveAuthSession } from '../../_proxy';
 
@@ -7,10 +8,10 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   if (session instanceof NextResponse) return session;
 
   const { id } = await context.params;
-  const body = (await request.json()) as Record<string, unknown>;
-  const tenantId = String(body.tenantId || request.nextUrl.searchParams.get('tenantId') || session.me.tenant!.id);
+  const raw = await request.json().catch(() => ({}));
+  const body = omitTenantIdFromBody(raw);
 
-  const response = await fetch(`${apiBaseUrl()}/service-orders/${encodeURIComponent(id)}?tenantId=${encodeURIComponent(tenantId)}`, {
+  const response = await fetch(`${apiBaseUrl()}/service-orders/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
@@ -28,3 +29,4 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }
+

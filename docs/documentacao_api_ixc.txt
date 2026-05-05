@@ -1,0 +1,2568 @@
+ Documentação API IXCSoft
+
+Fonte: https://wikiapiprovedor.ixcsoft.com.br/
+
+ 1. Configuração do Webservice
+
+ Gerar o token de acesso (API)
+
+Configuração Webservice
+Gerar o token de acesso (API)
+
+1 - Para gerar o token, é preciso ir em Configurações do sistema >> Usuários >> Novo>.
+
+
+
+
+
+
+1.1 - As permissões e logs de usuários para o webservice funcionam da mesma forma que de um usuário logado no sistema, por isso, para que não haja nenhuma restrição o usuário webservice deve estar em um grupo administrador, ou seja, que tenha acesso total ao sistema. 2 - Após clicar em novo, este é o formulário que deverá ser preenchido, é de suma importância que esteja marcado o botão Permite acesso ao webservice.
+
+
+
+
+
+
+3 - Após salvar, o token será gerado automaticamente.
+
+
+
+
+
+
+4 - Na guia parâmetros recomendamos remover os filtros de filtrar setor e filtrar funcionário para o usuário da API caso o mesmo vá trabalhar com ordens de serviço
+
+
+
+
+
+
+5 - Usando o Token gerado no arquivo de requisição da API como mostrado abaixo:
+
+
+
+
+
+Verificando acesso ao módulo API
+
+Para verificar se o servidor do seu IXC esta com os módulos API liberados basta digitar a seguinte URL no navegador IP/webservice/v1
+
+
+
+
+
+Configurando acesso ao Webservice API
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja altarado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somenta a API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo apache2.conf aberto no terminal, devemos pressionar CTRL+W e digitar /var/www/ como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, existe uma opção como selecionado na imagem abaixo "AllowOverride" que vai estar com o valor "None": OBS: Caso não consiga pesquisar, ou não exista essa informação no arquivo, pode-se fechar o mesmo sem salvar pressionando CTRL+X e pular para o passo de número 8 desta wiki
+
+
+
+
+
+
+5. Nesta tela, devemos alterar de "None", para "All", como mostra a imagem abaixo:
+
+
+
+
+
+
+6. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+7. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição
+
+8. Na tela do terminal, digitar a2enmod rewrite e pressionar ENTER, como mostra na imagem abaixo:
+
+
+
+
+
+
+9. Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar service apache2 restart e pressionar ENTER:
+
+
+
+
+
+
+10. Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Apache
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API Apache do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente a API.
+
+Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+Após isso é necessário procurar a linha que possui o código AccessFileName, e então remover a linha .htixcsoft e Salvar. Conforme a Imagem abaixo:
+
+
+
+
+
+
+Próximo passo é verificar se o arquivo htixcsoft está no servidor, utilizando o seguinte comando: ls -la /var/www/ | grep htixcsoft. Após isso mover o arquivo com o seguinte comando: mv /var/www/.htixcsoft /var/www/.htaccess e por fim verificar a existência do arquivo htaccess através do seguinte comando: ls -la /var/www/ | grep htaccess. Conforme a imagem abaixo:
+
+
+
+
+
+
+Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar systemctl restart apache2 e pressionar ENTER:
+
+
+
+
+
+
+Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Nginx
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente na API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+1.1 Utilize o comando ssh root@seuip.
+
+1.2 Vai aparecer uma mensagem solicitando o password do servidor, você deve inserir o mesmo.
+
+
+
+
+
+
+
+
+1.3 Feito isso vai aparecer a seguinte tela:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Nginx. Para acessar o arquivo de configuração do Nginx, basta executar o seguinte comando: nano /etc/nginx/sites-enabled/default
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo nginx.conf aberto no terminal, devemos pressionar CTRL+W e digitar webservice como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, você deve apagar todo o que tem do selecionado e colar o novo código fonte, para facilitar a exclusão das linha utilize o comando CTRL + K.
+
+Obs: Deve cuidar a identação do código.
+Novo codigo fonte que deve colocar é:
+
+
+
+location /webservice {
+     auth_basic "Acesso restrito";
+     auth_basic_user_file /var/www/webservice/.htpasswd;
+     autoindex off;
+     try_files $uri $uri /webservice/index.php?$query_string;
+     rewrite !\.(js|ico|txt|gif|jpg|png|css)$ index.php;
+     rewrite (.*)/css/(.*)$ /css/$2;
+     rewrite (.*)/js/(.*)$ /js/$2;
+     rewrite (.*)/images/(.*)$ /images/$2;
+
+
+
+
+
+
+
+
+4.1 Fazendo este procedimento voce deve clicar CTRL + O e vai aparecer a seguinte tela:
+
+
+
+
+
+
+Voce deve clicar S para salvar as alterações e em seguida vai aparecer a seguinte tela ai deve clicar ENTER.
+
+
+
+
+
+
+5. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+6. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição.
+
+6.1 Vai abrir a tela abaixo logo vamos executar o comando systemctl restart nginx.service
+
+ Verificando acesso ao módulo API
+
+Configuração Webservice
+Gerar o token de acesso (API)
+
+1 - Para gerar o token, é preciso ir em Configurações do sistema >> Usuários >> Novo>.
+
+
+
+
+
+
+1.1 - As permissões e logs de usuários para o webservice funcionam da mesma forma que de um usuário logado no sistema, por isso, para que não haja nenhuma restrição o usuário webservice deve estar em um grupo administrador, ou seja, que tenha acesso total ao sistema. 2 - Após clicar em novo, este é o formulário que deverá ser preenchido, é de suma importância que esteja marcado o botão Permite acesso ao webservice.
+
+
+
+
+
+
+3 - Após salvar, o token será gerado automaticamente.
+
+
+
+
+
+
+4 - Na guia parâmetros recomendamos remover os filtros de filtrar setor e filtrar funcionário para o usuário da API caso o mesmo vá trabalhar com ordens de serviço
+
+
+
+
+
+
+5 - Usando o Token gerado no arquivo de requisição da API como mostrado abaixo:
+
+
+
+
+
+Verificando acesso ao módulo API
+
+Para verificar se o servidor do seu IXC esta com os módulos API liberados basta digitar a seguinte URL no navegador IP/webservice/v1
+
+
+
+
+
+Configurando acesso ao Webservice API
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja altarado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somenta a API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo apache2.conf aberto no terminal, devemos pressionar CTRL+W e digitar /var/www/ como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, existe uma opção como selecionado na imagem abaixo "AllowOverride" que vai estar com o valor "None": OBS: Caso não consiga pesquisar, ou não exista essa informação no arquivo, pode-se fechar o mesmo sem salvar pressionando CTRL+X e pular para o passo de número 8 desta wiki
+
+
+
+
+
+
+5. Nesta tela, devemos alterar de "None", para "All", como mostra a imagem abaixo:
+
+
+
+
+
+
+6. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+7. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição
+
+8. Na tela do terminal, digitar a2enmod rewrite e pressionar ENTER, como mostra na imagem abaixo:
+
+
+
+
+
+
+9. Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar service apache2 restart e pressionar ENTER:
+
+
+
+
+
+
+10. Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Apache
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API Apache do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente a API.
+
+Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+Após isso é necessário procurar a linha que possui o código AccessFileName, e então remover a linha .htixcsoft e Salvar. Conforme a Imagem abaixo:
+
+
+
+
+
+
+Próximo passo é verificar se o arquivo htixcsoft está no servidor, utilizando o seguinte comando: ls -la /var/www/ | grep htixcsoft. Após isso mover o arquivo com o seguinte comando: mv /var/www/.htixcsoft /var/www/.htaccess e por fim verificar a existência do arquivo htaccess através do seguinte comando: ls -la /var/www/ | grep htaccess. Conforme a imagem abaixo:
+
+
+
+
+
+
+Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar systemctl restart apache2 e pressionar ENTER:
+
+
+
+
+
+
+Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Nginx
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente na API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+1.1 Utilize o comando ssh root@seuip.
+
+1.2 Vai aparecer uma mensagem solicitando o password do servidor, você deve inserir o mesmo.
+
+
+
+
+
+
+
+
+1.3 Feito isso vai aparecer a seguinte tela:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Nginx. Para acessar o arquivo de configuração do Nginx, basta executar o seguinte comando: nano /etc/nginx/sites-enabled/default
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo nginx.conf aberto no terminal, devemos pressionar CTRL+W e digitar webservice como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, você deve apagar todo o que tem do selecionado e colar o novo código fonte, para facilitar a exclusão das linha utilize o comando CTRL + K.
+
+Obs: Deve cuidar a identação do código.
+Novo codigo fonte que deve colocar é:
+
+
+
+location /webservice {
+     auth_basic "Acesso restrito";
+     auth_basic_user_file /var/www/webservice/.htpasswd;
+     autoindex off;
+     try_files $uri $uri /webservice/index.php?$query_string;
+     rewrite !\.(js|ico|txt|gif|jpg|png|css)$ index.php;
+     rewrite (.*)/css/(.*)$ /css/$2;
+     rewrite (.*)/js/(.*)$ /js/$2;
+     rewrite (.*)/images/(.*)$ /images/$2;
+
+
+
+
+
+
+
+
+4.1 Fazendo este procedimento voce deve clicar CTRL + O e vai aparecer a seguinte tela:
+
+
+
+
+
+
+Voce deve clicar S para salvar as alterações e em seguida vai aparecer a seguinte tela ai deve clicar ENTER.
+
+
+
+
+
+
+5. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+6. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição.
+
+6.1 Vai abrir a tela abaixo logo vamos executar o comando systemctl restart nginx.service
+
+ Configurando acesso ao Webservice API
+
+Configuração Webservice
+Gerar o token de acesso (API)
+
+1 - Para gerar o token, é preciso ir em Configurações do sistema >> Usuários >> Novo>.
+
+
+
+
+
+
+1.1 - As permissões e logs de usuários para o webservice funcionam da mesma forma que de um usuário logado no sistema, por isso, para que não haja nenhuma restrição o usuário webservice deve estar em um grupo administrador, ou seja, que tenha acesso total ao sistema. 2 - Após clicar em novo, este é o formulário que deverá ser preenchido, é de suma importância que esteja marcado o botão Permite acesso ao webservice.
+
+
+
+
+
+
+3 - Após salvar, o token será gerado automaticamente.
+
+
+
+
+
+
+4 - Na guia parâmetros recomendamos remover os filtros de filtrar setor e filtrar funcionário para o usuário da API caso o mesmo vá trabalhar com ordens de serviço
+
+
+
+
+
+
+5 - Usando o Token gerado no arquivo de requisição da API como mostrado abaixo:
+
+
+
+
+
+Verificando acesso ao módulo API
+
+Para verificar se o servidor do seu IXC esta com os módulos API liberados basta digitar a seguinte URL no navegador IP/webservice/v1
+
+
+
+
+
+Configurando acesso ao Webservice API
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja altarado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somenta a API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo apache2.conf aberto no terminal, devemos pressionar CTRL+W e digitar /var/www/ como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, existe uma opção como selecionado na imagem abaixo "AllowOverride" que vai estar com o valor "None": OBS: Caso não consiga pesquisar, ou não exista essa informação no arquivo, pode-se fechar o mesmo sem salvar pressionando CTRL+X e pular para o passo de número 8 desta wiki
+
+
+
+
+
+
+5. Nesta tela, devemos alterar de "None", para "All", como mostra a imagem abaixo:
+
+
+
+
+
+
+6. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+7. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição
+
+8. Na tela do terminal, digitar a2enmod rewrite e pressionar ENTER, como mostra na imagem abaixo:
+
+
+
+
+
+
+9. Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar service apache2 restart e pressionar ENTER:
+
+
+
+
+
+
+10. Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Apache
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API Apache do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente a API.
+
+Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+Após isso é necessário procurar a linha que possui o código AccessFileName, e então remover a linha .htixcsoft e Salvar. Conforme a Imagem abaixo:
+
+
+
+
+
+
+Próximo passo é verificar se o arquivo htixcsoft está no servidor, utilizando o seguinte comando: ls -la /var/www/ | grep htixcsoft. Após isso mover o arquivo com o seguinte comando: mv /var/www/.htixcsoft /var/www/.htaccess e por fim verificar a existência do arquivo htaccess através do seguinte comando: ls -la /var/www/ | grep htaccess. Conforme a imagem abaixo:
+
+
+
+
+
+
+Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar systemctl restart apache2 e pressionar ENTER:
+
+
+
+
+
+
+Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Nginx
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente na API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+1.1 Utilize o comando ssh root@seuip.
+
+1.2 Vai aparecer uma mensagem solicitando o password do servidor, você deve inserir o mesmo.
+
+
+
+
+
+
+
+
+1.3 Feito isso vai aparecer a seguinte tela:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Nginx. Para acessar o arquivo de configuração do Nginx, basta executar o seguinte comando: nano /etc/nginx/sites-enabled/default
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo nginx.conf aberto no terminal, devemos pressionar CTRL+W e digitar webservice como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, você deve apagar todo o que tem do selecionado e colar o novo código fonte, para facilitar a exclusão das linha utilize o comando CTRL + K.
+
+Obs: Deve cuidar a identação do código.
+Novo codigo fonte que deve colocar é:
+
+
+
+location /webservice {
+     auth_basic "Acesso restrito";
+     auth_basic_user_file /var/www/webservice/.htpasswd;
+     autoindex off;
+     try_files $uri $uri /webservice/index.php?$query_string;
+     rewrite !\.(js|ico|txt|gif|jpg|png|css)$ index.php;
+     rewrite (.*)/css/(.*)$ /css/$2;
+     rewrite (.*)/js/(.*)$ /js/$2;
+     rewrite (.*)/images/(.*)$ /images/$2;
+
+
+
+
+
+
+
+
+4.1 Fazendo este procedimento voce deve clicar CTRL + O e vai aparecer a seguinte tela:
+
+
+
+
+
+
+Voce deve clicar S para salvar as alterações e em seguida vai aparecer a seguinte tela ai deve clicar ENTER.
+
+
+
+
+
+
+5. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+6. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição.
+
+6.1 Vai abrir a tela abaixo logo vamos executar o comando systemctl restart nginx.service
+
+ Configurando acesso ao Webservice API Apache
+
+Configuração Webservice
+Gerar o token de acesso (API)
+
+1 - Para gerar o token, é preciso ir em Configurações do sistema >> Usuários >> Novo>.
+
+
+
+
+
+
+1.1 - As permissões e logs de usuários para o webservice funcionam da mesma forma que de um usuário logado no sistema, por isso, para que não haja nenhuma restrição o usuário webservice deve estar em um grupo administrador, ou seja, que tenha acesso total ao sistema. 2 - Após clicar em novo, este é o formulário que deverá ser preenchido, é de suma importância que esteja marcado o botão Permite acesso ao webservice.
+
+
+
+
+
+
+3 - Após salvar, o token será gerado automaticamente.
+
+
+
+
+
+
+4 - Na guia parâmetros recomendamos remover os filtros de filtrar setor e filtrar funcionário para o usuário da API caso o mesmo vá trabalhar com ordens de serviço
+
+
+
+
+
+
+5 - Usando o Token gerado no arquivo de requisição da API como mostrado abaixo:
+
+
+
+
+
+Verificando acesso ao módulo API
+
+Para verificar se o servidor do seu IXC esta com os módulos API liberados basta digitar a seguinte URL no navegador IP/webservice/v1
+
+
+
+
+
+Configurando acesso ao Webservice API
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja altarado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somenta a API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo apache2.conf aberto no terminal, devemos pressionar CTRL+W e digitar /var/www/ como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, existe uma opção como selecionado na imagem abaixo "AllowOverride" que vai estar com o valor "None": OBS: Caso não consiga pesquisar, ou não exista essa informação no arquivo, pode-se fechar o mesmo sem salvar pressionando CTRL+X e pular para o passo de número 8 desta wiki
+
+
+
+
+
+
+5. Nesta tela, devemos alterar de "None", para "All", como mostra a imagem abaixo:
+
+
+
+
+
+
+6. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+7. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição
+
+8. Na tela do terminal, digitar a2enmod rewrite e pressionar ENTER, como mostra na imagem abaixo:
+
+
+
+
+
+
+9. Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar service apache2 restart e pressionar ENTER:
+
+
+
+
+
+
+10. Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Apache
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API Apache do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente a API.
+
+Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+Após isso é necessário procurar a linha que possui o código AccessFileName, e então remover a linha .htixcsoft e Salvar. Conforme a Imagem abaixo:
+
+
+
+
+
+
+Próximo passo é verificar se o arquivo htixcsoft está no servidor, utilizando o seguinte comando: ls -la /var/www/ | grep htixcsoft. Após isso mover o arquivo com o seguinte comando: mv /var/www/.htixcsoft /var/www/.htaccess e por fim verificar a existência do arquivo htaccess através do seguinte comando: ls -la /var/www/ | grep htaccess. Conforme a imagem abaixo:
+
+
+
+
+
+
+Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar systemctl restart apache2 e pressionar ENTER:
+
+
+
+
+
+
+Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Nginx
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente na API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+1.1 Utilize o comando ssh root@seuip.
+
+1.2 Vai aparecer uma mensagem solicitando o password do servidor, você deve inserir o mesmo.
+
+
+
+
+
+
+
+
+1.3 Feito isso vai aparecer a seguinte tela:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Nginx. Para acessar o arquivo de configuração do Nginx, basta executar o seguinte comando: nano /etc/nginx/sites-enabled/default
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo nginx.conf aberto no terminal, devemos pressionar CTRL+W e digitar webservice como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, você deve apagar todo o que tem do selecionado e colar o novo código fonte, para facilitar a exclusão das linha utilize o comando CTRL + K.
+
+Obs: Deve cuidar a identação do código.
+Novo codigo fonte que deve colocar é:
+
+
+
+location /webservice {
+     auth_basic "Acesso restrito";
+     auth_basic_user_file /var/www/webservice/.htpasswd;
+     autoindex off;
+     try_files $uri $uri /webservice/index.php?$query_string;
+     rewrite !\.(js|ico|txt|gif|jpg|png|css)$ index.php;
+     rewrite (.*)/css/(.*)$ /css/$2;
+     rewrite (.*)/js/(.*)$ /js/$2;
+     rewrite (.*)/images/(.*)$ /images/$2;
+
+
+
+
+
+
+
+
+4.1 Fazendo este procedimento voce deve clicar CTRL + O e vai aparecer a seguinte tela:
+
+
+
+
+
+
+Voce deve clicar S para salvar as alterações e em seguida vai aparecer a seguinte tela ai deve clicar ENTER.
+
+
+
+
+
+
+5. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+6. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição.
+
+6.1 Vai abrir a tela abaixo logo vamos executar o comando systemctl restart nginx.service
+
+ Configurando acesso ao Webservice API Nginx
+
+Configuração Webservice
+Gerar o token de acesso (API)
+
+1 - Para gerar o token, é preciso ir em Configurações do sistema >> Usuários >> Novo>.
+
+
+
+
+
+
+1.1 - As permissões e logs de usuários para o webservice funcionam da mesma forma que de um usuário logado no sistema, por isso, para que não haja nenhuma restrição o usuário webservice deve estar em um grupo administrador, ou seja, que tenha acesso total ao sistema. 2 - Após clicar em novo, este é o formulário que deverá ser preenchido, é de suma importância que esteja marcado o botão Permite acesso ao webservice.
+
+
+
+
+
+
+3 - Após salvar, o token será gerado automaticamente.
+
+
+
+
+
+
+4 - Na guia parâmetros recomendamos remover os filtros de filtrar setor e filtrar funcionário para o usuário da API caso o mesmo vá trabalhar com ordens de serviço
+
+
+
+
+
+
+5 - Usando o Token gerado no arquivo de requisição da API como mostrado abaixo:
+
+
+
+
+
+Verificando acesso ao módulo API
+
+Para verificar se o servidor do seu IXC esta com os módulos API liberados basta digitar a seguinte URL no navegador IP/webservice/v1
+
+
+
+
+
+Configurando acesso ao Webservice API
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja altarado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somenta a API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo apache2.conf aberto no terminal, devemos pressionar CTRL+W e digitar /var/www/ como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, existe uma opção como selecionado na imagem abaixo "AllowOverride" que vai estar com o valor "None": OBS: Caso não consiga pesquisar, ou não exista essa informação no arquivo, pode-se fechar o mesmo sem salvar pressionando CTRL+X e pular para o passo de número 8 desta wiki
+
+
+
+
+
+
+5. Nesta tela, devemos alterar de "None", para "All", como mostra a imagem abaixo:
+
+
+
+
+
+
+6. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+7. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição
+
+8. Na tela do terminal, digitar a2enmod rewrite e pressionar ENTER, como mostra na imagem abaixo:
+
+
+
+
+
+
+9. Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar service apache2 restart e pressionar ENTER:
+
+
+
+
+
+
+10. Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Apache
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API Apache do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente a API.
+
+Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+
+
+
+
+
+Em seguida, precisamos acessar o arquivo de configuração do Apache, no caso da IXC, hoje utilizamos o Apache2, mas caso possua uma versão diferente ou a instalação tenha sido realizada de forma diferenciada para você, favor entrar em contato com o suporte, para que os mesmos possam auxiliar na configuração! Para acessar o arquivo de configuração do apache, basta executar o seguinte comando:
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+Após isso é necessário procurar a linha que possui o código AccessFileName, e então remover a linha .htixcsoft e Salvar. Conforme a Imagem abaixo:
+
+
+
+
+
+
+Próximo passo é verificar se o arquivo htixcsoft está no servidor, utilizando o seguinte comando: ls -la /var/www/ | grep htixcsoft. Após isso mover o arquivo com o seguinte comando: mv /var/www/.htixcsoft /var/www/.htaccess e por fim verificar a existência do arquivo htaccess através do seguinte comando: ls -la /var/www/ | grep htaccess. Conforme a imagem abaixo:
+
+
+
+
+
+
+Depois precisamos reiniciar o serviço apache para que possamos usar as alterações realizadas, para isso precisamos digitar systemctl restart apache2 e pressionar ENTER:
+
+
+
+
+
+
+Agora podemos fechar o terminal e acessar o sistema normalmente, pois nele vamos criar o usuário responsável pelo acesso ao WEBSERVICE.
+
+
+
+
+Configurando acesso ao Webservice API Nginx
+
+OBS: Para que os passos a seguir funcionem, é totalmente necessário que o computador onde serão executadas as configurações, possua o sistema IXCSoft instalado!
+
+Nesta Wiki, vou abordar, como realizar a configuração da API do sistema da IXCSoft, é de extrema importância que não seja alterado nada além do que for solicitado nessa wiki, pois mudanças de forma incorreta, podem acarretar em um problema de acesso ao sistema e não somente na API.
+
+1. Antes de mais nada, precisamos acessar o terminal com o usuário root, da seguinte forma:
+
+1.1 Utilize o comando ssh root@seuip.
+
+1.2 Vai aparecer uma mensagem solicitando o password do servidor, você deve inserir o mesmo.
+
+
+
+
+
+
+
+
+1.3 Feito isso vai aparecer a seguinte tela:
+
+
+
+
+
+
+2. Em seguida, precisamos acessar o arquivo de configuração do Nginx. Para acessar o arquivo de configuração do Nginx, basta executar o seguinte comando: nano /etc/nginx/sites-enabled/default
+
+
+
+
+
+
+Executando tal comando ele irá abrir a seguinte tela:
+
+
+
+
+
+
+3. Com o arquivo nginx.conf aberto no terminal, devemos pressionar CTRL+W e digitar webservice como mostra na imagem abaixo e pressionar ENTER:
+
+
+
+
+
+
+4. Na tela que aparecer, você deve apagar todo o que tem do selecionado e colar o novo código fonte, para facilitar a exclusão das linha utilize o comando CTRL + K.
+
+Obs: Deve cuidar a identação do código.
+Novo codigo fonte que deve colocar é:
+
+
+
+location /webservice {
+     auth_basic "Acesso restrito";
+     auth_basic_user_file /var/www/webservice/.htpasswd;
+     autoindex off;
+     try_files $uri $uri /webservice/index.php?$query_string;
+     rewrite !\.(js|ico|txt|gif|jpg|png|css)$ index.php;
+     rewrite (.*)/css/(.*)$ /css/$2;
+     rewrite (.*)/js/(.*)$ /js/$2;
+     rewrite (.*)/images/(.*)$ /images/$2;
+
+
+
+
+
+
+
+
+4.1 Fazendo este procedimento voce deve clicar CTRL + O e vai aparecer a seguinte tela:
+
+
+
+
+
+
+Voce deve clicar S para salvar as alterações e em seguida vai aparecer a seguinte tela ai deve clicar ENTER.
+
+
+
+
+
+
+5. Depois de alterar, basta pressionarmos CTRL+O e em seguida ENTER, para salvar o arquivo alterado:
+
+
+
+
+
+
+6. Depois de salvo o arquivo, basta pressionar CTRL+X para sair da edição.
+
+6.1 Vai abrir a tela abaixo logo vamos executar o comando systemctl restart nginx.service
+
+ 2. Erros Comuns
+
+ Erro 404 not found nginx - API
+
+Erros comuns API
+Erro 404 not found nginx - API
+
+Nesta Wiki, será abordado como realizar a verificação e se necessária correção no servidor nginx do cliente caso a consulta através da API do IXC retorne erro 404 Not Found.
+1 - Primeiramente é necessário realizar uma consulta de teste para verificar o retorno recebido.
+
+
+
+
+
+
+2 - Se o retorno apresentado for o seguinte:
+
+
+
+
+
+
+3 - É preciso acessar o arquivo de configuração do nginx.
+
+
+
+
+
+
+4 - Logo após verificar a existência da seguinte linha de código. Caso a mesma não conste no arquivo ou conste incorretamente, implementa-lá. try_files $uri $uri /webservice/index.php?$query_string;
+
+
+
+
+
+
+5 - Após inserir a linha que estava faltando basta apenas restartar o servidor nginx.
+
+
+
+
+
+
+Esse foi um breve tutorial de como podemos fazer a verificação do erro em questão, caso haja alguma dúvida referente ao processo, ou algo ainda assim não esteja de acordo com o processo que esteja sendo solicitado, é de extrema importância que entre em contato com o suporte através do SAC - Instalação sistema para que possamos esclarecer todas as suas dúvidas.
+
+Erro 401 Authorization Required
+
+O código de resposta de status de erro 401 Authorization Required ou Unauthorized, indica que a solicitação não foi aplicada porque não possui credenciais de autenticação válidas para o recurso do destino, ou seja, o Token do usuário do IXC que está utilizando foi alterado ou o usuário deletado.
+
+
+
+
+
+Erro 400 Bad Request
+
+O erro ocorre quando o navegador tenta acessar uma página não segura (http), mas o link de acesso requer os protocolos de segurança (https), para corrigir basta colocar "https://" no começo do link para forçar o acesso com os protocolos de segurança. Esse erro é mais comum em servidores Nginx.
+
+
+
+
+
+
+Erro 400 Bad Request por conta do Protocolo de Transferência de Hipertexto (http) não seguro.
+
+ Erro 401 Authorization Required
+
+Erros comuns API
+Erro 404 not found nginx - API
+
+Nesta Wiki, será abordado como realizar a verificação e se necessária correção no servidor nginx do cliente caso a consulta através da API do IXC retorne erro 404 Not Found.
+1 - Primeiramente é necessário realizar uma consulta de teste para verificar o retorno recebido.
+
+
+
+
+
+
+2 - Se o retorno apresentado for o seguinte:
+
+
+
+
+
+
+3 - É preciso acessar o arquivo de configuração do nginx.
+
+
+
+
+
+
+4 - Logo após verificar a existência da seguinte linha de código. Caso a mesma não conste no arquivo ou conste incorretamente, implementa-lá. try_files $uri $uri /webservice/index.php?$query_string;
+
+
+
+
+
+
+5 - Após inserir a linha que estava faltando basta apenas restartar o servidor nginx.
+
+
+
+
+
+
+Esse foi um breve tutorial de como podemos fazer a verificação do erro em questão, caso haja alguma dúvida referente ao processo, ou algo ainda assim não esteja de acordo com o processo que esteja sendo solicitado, é de extrema importância que entre em contato com o suporte através do SAC - Instalação sistema para que possamos esclarecer todas as suas dúvidas.
+
+Erro 401 Authorization Required
+
+O código de resposta de status de erro 401 Authorization Required ou Unauthorized, indica que a solicitação não foi aplicada porque não possui credenciais de autenticação válidas para o recurso do destino, ou seja, o Token do usuário do IXC que está utilizando foi alterado ou o usuário deletado.
+
+
+
+
+
+Erro 400 Bad Request
+
+O erro ocorre quando o navegador tenta acessar uma página não segura (http), mas o link de acesso requer os protocolos de segurança (https), para corrigir basta colocar "https://" no começo do link para forçar o acesso com os protocolos de segurança. Esse erro é mais comum em servidores Nginx.
+
+
+
+
+
+
+Erro 400 Bad Request por conta do Protocolo de Transferência de Hipertexto (http) não seguro.
+
+ Erro 400 Bad Request
+
+Erros comuns API
+Erro 404 not found nginx - API
+
+Nesta Wiki, será abordado como realizar a verificação e se necessária correção no servidor nginx do cliente caso a consulta através da API do IXC retorne erro 404 Not Found.
+1 - Primeiramente é necessário realizar uma consulta de teste para verificar o retorno recebido.
+
+
+
+
+
+
+2 - Se o retorno apresentado for o seguinte:
+
+
+
+
+
+
+3 - É preciso acessar o arquivo de configuração do nginx.
+
+
+
+
+
+
+4 - Logo após verificar a existência da seguinte linha de código. Caso a mesma não conste no arquivo ou conste incorretamente, implementa-lá. try_files $uri $uri /webservice/index.php?$query_string;
+
+
+
+
+
+
+5 - Após inserir a linha que estava faltando basta apenas restartar o servidor nginx.
+
+
+
+
+
+
+Esse foi um breve tutorial de como podemos fazer a verificação do erro em questão, caso haja alguma dúvida referente ao processo, ou algo ainda assim não esteja de acordo com o processo que esteja sendo solicitado, é de extrema importância que entre em contato com o suporte através do SAC - Instalação sistema para que possamos esclarecer todas as suas dúvidas.
+
+Erro 401 Authorization Required
+
+O código de resposta de status de erro 401 Authorization Required ou Unauthorized, indica que a solicitação não foi aplicada porque não possui credenciais de autenticação válidas para o recurso do destino, ou seja, o Token do usuário do IXC que está utilizando foi alterado ou o usuário deletado.
+
+
+
+
+
+Erro 400 Bad Request
+
+O erro ocorre quando o navegador tenta acessar uma página não segura (http), mas o link de acesso requer os protocolos de segurança (https), para corrigir basta colocar "https://" no começo do link para forçar o acesso com os protocolos de segurança. Esse erro é mais comum em servidores Nginx.
+
+
+
+
+
+
+Erro 400 Bad Request por conta do Protocolo de Transferência de Hipertexto (http) não seguro.
+
+ 3. Recursos da API (Exemplos de Código)
+
+ Alterar Status de Acesso do contrato - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Analisar Ordem de Serviço - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Ativar Contrato - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Buscar os produtos de um contrato - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Cadastrar novo fornecedor - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Como inserir um novo atendimento - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Como inserir um novo atendimento com novo protocolo valido - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Como utilizar o operador Like - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Consultar dados do Boleto - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Criar nova tarefa para um processo - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Desbloqueio de Confiança - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Desconectar Login - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Desconto adicional - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Disparar e Finalizar processos de Atendimento - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Enviar boleto por E-MAIL - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Enviar boleto por SMS - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Filtros da grid - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Finalizar Ordem de Serviço - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Gerar novo protocolo de atendimento - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Inserir comodato na finalização de Ordem de Serviço - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Inserir interações no atendimento - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Inserir LEAD - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Inserir novo produto a um contrato - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Inserir novo ramal SIP - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Liberar Temporariamente - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Limpar MAC - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar boletos abertos - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar boletos pagos filtrando a data - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar clientes fibra - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar clientes por CPF - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar clientes por telefone - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar comodatos - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar Contas - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar contratos pelo status de acesso - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar Ocorrências/Soluções - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar Pedidos de Venda - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar projetos - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar Registros de chamadas VoIP - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Listar Serviços Adicionais de um contrato - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Ordem de serviço - Encaminhar (alterar setor) - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Receber título - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Retornar arquivo do Boleto - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Transferir atendimento - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Verificar viabilidade por endereço ou coordenada - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Imprimir Nota - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+
+ Liberação de redução de velocidade - API
+
+
+//requerindo arquivo do webservice
+require(__DIR__ . DIRECTORY_SEPARATOR . 'WebserviceClient.php');
+//url do sistema
+$host = 'https://SEUIP/webservice/v1';
+//token gerado no cadastro do usuario (verificar permissões)
+$token = 'SEUTOKEN';
+//true para certificado auto assinado
+$selfSigned = true;
+//instanciando api requerida na primeira linha do código
+$api = new IXCsoft\WebserviceClient($host, $token, $selfSigned);
+//array de parâmetros do método
+$params = array(
+    'id_contrato' => '2806'
+);
+$api->get('cliente_contrato_15464', $params);//Faz o GET na API na tabela desbloqueio_confianca
+$retorno = $api->getRespostaConteudo(false);// false para json | true para array
+var_dump($retorno); //Imprime o retorno
+
+

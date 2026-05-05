@@ -1,0 +1,71 @@
+services:
+  web:
+    build:
+      context: .
+      target: web
+    ports:
+      - "80:3000"
+    environment:
+      - NODE_ENV=production
+      - API_INTERNAL_URL=http://api:3001
+      - API_BASE_URL=${API_BASE_URL:-http://localhost/api}
+    depends_on:
+      - api
+    restart: always
+
+  api:
+    build:
+      context: .
+      target: api
+    ports:
+      - "3001:3001"
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
+      - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  worker:
+    build:
+      context: .
+      target: worker
+    environment:
+      - NODE_ENV=production
+      - DATABASE_URL=${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
+      - REDIS_URL=redis://redis:6379
+      - IXC_RECONCILE_INTERVAL_MS=300000
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: always
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ajust_erp
+      POSTGRES_USER: ajust
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ajust123}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ajust -d ajust_erp"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: always
+
+  redis:
+    image: redis:7-alpine
+    restart: always
+
+volumes:
+  postgres_data:

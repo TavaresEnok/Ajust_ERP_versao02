@@ -9,12 +9,12 @@ import {
   Param,
   Patch,
   Post,
-  Query,
   Req,
   Res,
   UploadedFile,
   UseGuards,
-  UseInterceptors
+  UseInterceptors,
+  UnauthorizedException
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
 import { UserStatus } from '@prisma/client';
@@ -23,6 +23,7 @@ import type { Express, Response } from 'express';
 import { assertAnyRole } from '../common/role-utils';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { AuthGuard } from '../auth/auth.guard';
+import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { IamService } from './iam.service';
 
 const CreateTenantSchema = z.object({
@@ -38,12 +39,18 @@ const CreateTenantSchema = z.object({
   status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional()
 });
 
+const UserSectorSchema = z.string().min(2).max(64);
+const TenantSectorSchema = z.object({
+  name: z.string().min(2).max(64)
+});
+
 const CreateUserSchema = z.object({
   name: z.string().min(2),
   email: z.string().email(),
   password: z.string().min(8),
   tenantId: z.string().uuid(),
-  roleCode: z.string().min(2)
+  roleCode: z.string().min(2),
+  sector: UserSectorSchema.optional()
 });
 
 const UpdateTenantSchema = z
@@ -70,7 +77,8 @@ const UpdateUserSchema = z
     email: z.string().email().optional(),
     password: z.string().min(8).optional(),
     status: z.nativeEnum(UserStatus).optional(),
-    roleCode: z.string().min(2).optional()
+    roleCode: z.string().min(2).optional(),
+    sector: UserSectorSchema.optional()
   })
   .refine(
     (data) =>
@@ -78,17 +86,27 @@ const UpdateUserSchema = z
       data.email !== undefined ||
       data.password !== undefined ||
       data.status !== undefined ||
-      data.roleCode !== undefined,
+      data.roleCode !== undefined ||
+      data.sector !== undefined,
     {
       message: 'At least one user field must be provided.'
     }
   );
 
-const MANAGER_ASSIGNABLE_ROLES = new Set(['analista', 'tecnico', 'cliente', 'leitura']);
+const MANAGER_ASSIGNABLE_ROLES = new Set(['gerente', 'analista', 'tecnico', 'cliente', 'leitura']);
 const CLIENT_ASSIGNABLE_ROLES = new Set(['cliente', 'leitura']);
 
+const SlaPolicySchema = z.object({
+  id: z.string().uuid().optional(),
+  priority: z.enum(['BAIXA', 'NORMAL', 'ALTA', 'CRITICA']),
+  serviceOrderType: z.string().nullable().optional(),
+  hours: z.number().positive(),
+  active: z.boolean().optional(),
+  isOverride: z.boolean().optional(),
+});
+
 @Controller('iam')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, TenantIsolationGuard)
 export class IamController {
   constructor(@Inject(IamService) private readonly iamService: IamService) {}
 
@@ -114,11 +132,19 @@ export class IamController {
     return this.iamService.listTenants(req.auth.tenantId);
   }
 
+  @Get('tenants/:tenantId/audit')
+  async listAuditLogs(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
+    if (req.auth!.role !== 'super_admin' && req.auth!.tenantId !== tenantId) {
+      throw new ForbiddenException();
+    }
+    return this.iamService.listAuditLogs(tenantId);
+  }
+
   @Post('tenants')
   async createTenant(@Body() body: unknown, @Req() req: RequestWithAuth) {
     assertAnyRole(req.auth, ['super_admin']);
     const input = CreateTenantSchema.parse(body);
-    return this.iamService.createTenant(input);
+    return this.iamService.createTenant(req.auth!.userId, input);
   }
 
   @Patch('tenants/:tenantId')
@@ -126,7 +152,7 @@ export class IamController {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
     this.assertTenantScope(req, tenantId);
     const patch = UpdateTenantSchema.parse(body);
-    return this.iamService.updateTenant(tenantId, patch);
+    return this.iamService.updateTenant(req.auth!.userId, tenantId, patch);
   }
 
   @Post('users')
@@ -135,56 +161,52 @@ export class IamController {
     const input = CreateUserSchema.parse(body);
     this.assertTenantScope(req, input.tenantId);
     this.assertRoleAssignment(req.auth?.role || '', input.roleCode);
-    return this.iamService.createUser(input);
+    return this.iamService.createUser(req.auth!.userId, input);
   }
 
   @Get('users')
-  async listUsersByTenant(@Query('tenantId') tenantIdParam: string | undefined, @Req() req: RequestWithAuth) {
+  async listUsersByTenant(@Req() req: RequestWithAuth) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required.');
+    if (!req.auth?.tenantId) {
+      throw new UnauthorizedException('Missing tenantId');
     }
-    this.assertTenantScope(req, tenantId);
-    return this.iamService.listUsersByTenant(tenantId);
+    this.assertTenantScope(req, req.auth.tenantId);
+    return this.iamService.listUsersByTenant(req.auth.tenantId);
   }
 
   @Patch('users/:userId')
   async updateUser(@Param('userId') userId: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const patch = UpdateUserSchema.parse(body);
-    const tenantId = patch.tenantId || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required.');
-    }
-    this.assertTenantScope(req, tenantId);
+    this.assertTenantScope(req, req.auth.tenantId);
     if (patch.roleCode) {
-      this.assertRoleAssignment(req.auth?.role || '', patch.roleCode);
+      this.assertRoleAssignment(req.auth.role || '', patch.roleCode);
     }
 
-    return this.iamService.updateUserInTenant({
+    return this.iamService.updateUserInTenant(req.auth.userId, {
       userId,
-      tenantId,
+      tenantId: req.auth.tenantId,
       name: patch.name,
       email: patch.email,
       password: patch.password,
       status: patch.status,
-      roleCode: patch.roleCode
+      roleCode: patch.roleCode,
+      sector: patch.sector
     });
   }
 
   @Delete('users/:userId')
-  async deleteUser(@Param('userId') userId: string, @Query('tenantId') tenantIdParam: string | undefined, @Req() req: RequestWithAuth) {
+  async deleteUser(@Param('userId') userId: string, @Req() req: RequestWithAuth) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required.');
+    if (!req.auth?.tenantId) {
+      throw new UnauthorizedException('Missing tenantId');
     }
-    this.assertTenantScope(req, tenantId);
-    if (req.auth?.userId === userId) {
+    this.assertTenantScope(req, req.auth.tenantId);
+    if (req.auth.userId === userId) {
       throw new BadRequestException('You cannot remove your own active account.');
     }
-    return this.iamService.removeUserFromTenant(tenantId, userId);
+    return this.iamService.removeUserFromTenant(req.auth.userId, req.auth.tenantId, userId);
   }
 
   @Get('tenants/:tenantId/logo')
@@ -212,12 +234,81 @@ export class IamController {
     if (!file) {
       throw new BadRequestException('Logo file is required.');
     }
-    return this.iamService.saveTenantLogo(tenantId, file);
+    return this.iamService.saveTenantLogo(req.auth!.userId, tenantId, file);
+  }
+
+  @Get('tenants/:tenantId/sectors')
+  async listTenantSectors(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura']);
+    this.assertTenantScope(req, tenantId);
+    return this.iamService.listTenantSectors(tenantId);
+  }
+
+  @Post('tenants/:tenantId/sectors')
+  async createTenantSector(@Param('tenantId') tenantId: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    this.assertTenantScope(req, tenantId);
+    const input = TenantSectorSchema.parse(body);
+    return this.iamService.createTenantSector(req.auth!.userId, {
+      tenantId,
+      name: input.name
+    });
+  }
+
+  @Patch('tenants/:tenantId/sectors/:sectorId')
+  async updateTenantSector(
+    @Param('tenantId') tenantId: string,
+    @Param('sectorId') sectorId: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth
+  ) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    this.assertTenantScope(req, tenantId);
+    const input = TenantSectorSchema.parse(body);
+    return this.iamService.updateTenantSector(req.auth!.userId, {
+      tenantId,
+      sectorId,
+      name: input.name
+    });
+  }
+
+  @Delete('tenants/:tenantId/sectors/:sectorId')
+  async deleteTenantSector(
+    @Param('tenantId') tenantId: string,
+    @Param('sectorId') sectorId: string,
+    @Req() req: RequestWithAuth
+  ) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    this.assertTenantScope(req, tenantId);
+    return this.iamService.deleteTenantSector(req.auth!.userId, tenantId, sectorId);
+  }
+
+  @Get('tenants/:tenantId/sla')
+  async listSlaPolicies(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
+    if (req.auth!.role !== 'super_admin' && req.auth!.tenantId !== tenantId) {
+      throw new ForbiddenException();
+    }
+    return this.iamService.listSlaPolicies(tenantId);
+  }
+
+  @Post('tenants/:tenantId/sla')
+  async saveSlaPolicy(
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth
+  ) {
+    if (req.auth!.role !== 'super_admin' && req.auth!.tenantId !== tenantId) {
+      throw new ForbiddenException();
+    }
+    assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    const input = SlaPolicySchema.parse(body);
+    return this.iamService.saveSlaPolicy(req.auth!.userId, tenantId, input as any);
   }
 
   private assertTenantScope(req: RequestWithAuth, targetTenantId: string) {
     const role = req.auth?.role;
-    if (role === 'super_admin') return;
+    // super_admin, gerente and analista from Consultoria have cross-tenant access
+    if (role === 'super_admin' || role === 'gerente' || role === 'analista') return;
     if (!req.auth?.tenantId || req.auth.tenantId !== targetTenantId) {
       throw new ForbiddenException('This action is outside of your tenant scope.');
     }

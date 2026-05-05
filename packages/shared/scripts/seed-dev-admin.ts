@@ -68,13 +68,11 @@ async function main() {
     }
   });
 
-  // eslint-disable-next-line no-console
   console.log(`[seed] dev admin ready: ${email} tenant=${tenant.slug}`);
 }
 
 main()
   .catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
   })

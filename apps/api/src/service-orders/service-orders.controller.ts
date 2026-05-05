@@ -12,7 +12,8 @@ import {
   Res,
   Req,
   UseInterceptors,
-  UseGuards
+  UseGuards,
+  UnauthorizedException
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
@@ -25,6 +26,7 @@ import {
 import { z } from 'zod';
 import type { Response } from 'express';
 import { AuthGuard } from '../auth/auth.guard';
+import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { ServiceOrdersService } from './service-orders.service';
 
@@ -142,29 +144,24 @@ const ExportHistorySchema = z.object({
 });
 
 @Controller('service-orders')
-@UseGuards(AuthGuard)
+@UseGuards(AuthGuard, TenantIsolationGuard)
 export class ServiceOrdersController {
   constructor(@Inject(ServiceOrdersService) private readonly serviceOrdersService: ServiceOrdersService) {}
 
   @Post()
   async create(@Body() body: unknown, @Req() req: RequestWithAuth) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const input = CreateOrderSchema.parse(body);
-    const tenantId = input.tenantId || req.auth?.tenantId;
 
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for creating service order.');
-    }
-
-    return this.serviceOrdersService.create(req.auth!.userId, req.auth!.role || '', {
+    return this.serviceOrdersService.create(req.auth.userId, req.auth.role || '', {
       ...input,
-      tenantId
+      tenantId: req.auth.tenantId
     });
   }
 
   @Get()
   async list(
     @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string,
     @Query('status') status?: ServiceOrderStatus,
     @Query('priority') priority?: Priority,
     @Query('type') type?: ServiceOrderType,
@@ -176,10 +173,7 @@ export class ServiceOrdersController {
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for listing service orders.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListSchema.parse({ status, priority, type, search, from, to, limit, offset, orderBy, orderDir });
 
@@ -187,13 +181,12 @@ export class ServiceOrdersController {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    return this.serviceOrdersService.list(tenantId, input);
+    return this.serviceOrdersService.list(req.auth.tenantId, input);
   }
 
   @Get('summary')
   async summary(
     @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string,
     @Query('status') status?: ServiceOrderStatus,
     @Query('priority') priority?: Priority,
     @Query('type') type?: ServiceOrderType,
@@ -203,10 +196,7 @@ export class ServiceOrdersController {
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for summary.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListSchema.parse({ status, priority, type, search, from, to, orderBy, orderDir });
 
@@ -214,13 +204,12 @@ export class ServiceOrdersController {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    return this.serviceOrdersService.summary(tenantId, input);
+    return this.serviceOrdersService.summary(req.auth.tenantId, input);
   }
 
   @Get('occurrences')
   async listOccurrences(
     @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string,
     @Query('provider') provider?: string,
     @Query('search') search?: string,
     @Query('status') status?: OccurrenceStatus,
@@ -228,10 +217,7 @@ export class ServiceOrdersController {
     @Query('offset') offset?: string,
     @Query('includeOrders') includeOrders?: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for listing occurrences.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListOccurrencesSchema.parse({
       provider,
@@ -242,33 +228,26 @@ export class ServiceOrdersController {
       includeOrders
     });
 
-    return this.serviceOrdersService.listOccurrences(tenantId, input);
+    return this.serviceOrdersService.listOccurrences(req.auth.tenantId, input);
   }
 
   @Get('occurrences/:occurrenceId')
   async getOccurrenceById(
     @Req() req: RequestWithAuth,
-    @Param('occurrenceId') occurrenceId: string,
-    @Query('tenantId') tenantIdParam?: string
+    @Param('occurrenceId') occurrenceId: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for reading occurrence.');
-    }
-    return this.serviceOrdersService.getOccurrenceById(tenantId, occurrenceId);
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    return this.serviceOrdersService.getOccurrenceById(req.auth.tenantId, occurrenceId);
   }
 
   @Post('occurrences')
   async createOccurrence(@Body() body: unknown, @Req() req: RequestWithAuth) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const input = CreateOccurrenceSchema.parse(body);
-    const tenantId = input.tenantId || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for creating occurrence.');
-    }
 
-    return this.serviceOrdersService.createOccurrenceWithFirstOrder(req.auth!.userId, req.auth!.role || '', {
+    return this.serviceOrdersService.createOccurrenceWithFirstOrder(req.auth.userId, req.auth.role || '', {
       ...input,
-      tenantId
+      tenantId: req.auth.tenantId
     });
   }
 
@@ -276,36 +255,28 @@ export class ServiceOrdersController {
   async patchOccurrence(
     @Req() req: RequestWithAuth,
     @Param('occurrenceId') occurrenceId: string,
-    @Body() body: unknown,
-    @Query('tenantId') tenantIdParam?: string
+    @Body() body: unknown
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for updating occurrence.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = UpdateOccurrenceSchema.parse(body);
-    return this.serviceOrdersService.updateOccurrence(tenantId, occurrenceId, req.auth!.userId, req.auth!.role || '', input);
+    return this.serviceOrdersService.updateOccurrence(req.auth.tenantId, occurrenceId, req.auth.userId, req.auth.role || '', input);
   }
 
   @Post('occurrences/:occurrenceId/annotations')
   async annotateOccurrence(
     @Req() req: RequestWithAuth,
     @Param('occurrenceId') occurrenceId: string,
-    @Body() body: unknown,
-    @Query('tenantId') tenantIdParam?: string
+    @Body() body: unknown
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for annotating occurrence.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = CreateAnnotationSchema.parse(body);
     return this.serviceOrdersService.addOccurrenceAnnotation(
-      tenantId,
+      req.auth.tenantId,
       occurrenceId,
-      req.auth!.userId,
-      req.auth!.role || '',
+      req.auth.userId,
+      req.auth.role || '',
       input.message
     );
   }
@@ -314,20 +285,16 @@ export class ServiceOrdersController {
   async createOrderInOccurrence(
     @Req() req: RequestWithAuth,
     @Param('occurrenceId') occurrenceId: string,
-    @Body() body: unknown,
-    @Query('tenantId') tenantIdParam?: string
+    @Body() body: unknown
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for creating order in occurrence.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = OccurrenceOrderSchema.parse(body);
     return this.serviceOrdersService.createOrderInOccurrence(
-      tenantId,
+      req.auth.tenantId,
       occurrenceId,
-      req.auth!.userId,
-      req.auth!.role || '',
+      req.auth.userId,
+      req.auth.role || '',
       input
     );
   }
@@ -336,7 +303,6 @@ export class ServiceOrdersController {
   async exportCsv(
     @Req() req: RequestWithAuth,
     @Res({ passthrough: true }) res: Response,
-    @Query('tenantId') tenantIdParam?: string,
     @Query('status') status?: ServiceOrderStatus,
     @Query('priority') priority?: Priority,
     @Query('type') type?: ServiceOrderType,
@@ -346,17 +312,14 @@ export class ServiceOrdersController {
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for exporting service orders.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListSchema.parse({ status, priority, type, search, from, to, orderBy, orderDir });
     if (input.from && input.to && new Date(input.from).getTime() > new Date(input.to).getTime()) {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    const csv = await this.serviceOrdersService.exportCsv(tenantId, req.auth!.userId, input);
+    const csv = await this.serviceOrdersService.exportCsv(req.auth.tenantId, req.auth.userId, input);
 
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${csv.fileName}"`);
@@ -369,19 +332,15 @@ export class ServiceOrdersController {
   @Get('export/history')
   async exportHistory(
     @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for export history.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ExportHistorySchema.parse({ limit, offset });
     return this.serviceOrdersService.listExportHistory(
-      tenantId,
-      req.auth!.role || '',
+      req.auth.tenantId,
+      req.auth.role || '',
       input.limit || 20,
       input.offset || 0
     );
@@ -391,19 +350,15 @@ export class ServiceOrdersController {
   async downloadExport(
     @Req() req: RequestWithAuth,
     @Res({ passthrough: true }) res: Response,
-    @Param('exportId') exportId: string,
-    @Query('tenantId') tenantIdParam?: string
+    @Param('exportId') exportId: string
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for export download.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const result = await this.serviceOrdersService.downloadExportCsv(
-      tenantId,
+      req.auth.tenantId,
       exportId,
-      req.auth!.userId,
-      req.auth!.role || ''
+      req.auth.userId,
+      req.auth.role || ''
     );
 
     res.setHeader('content-type', 'text/csv; charset=utf-8');
@@ -413,49 +368,37 @@ export class ServiceOrdersController {
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string, @Req() req: RequestWithAuth, @Query('tenantId') tenantIdParam?: string) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for reading service order.');
-    }
-
-    return this.serviceOrdersService.getById(tenantId, id);
+  async getById(@Param('id') id: string, @Req() req: RequestWithAuth) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    return this.serviceOrdersService.getById(req.auth.tenantId, id);
   }
 
   @Patch(':id')
   async patchOrder(
     @Param('id') id: string,
     @Body() body: unknown,
-    @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string
+    @Req() req: RequestWithAuth
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for updating service order.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = UpdateOrderSchema.parse(body);
-    return this.serviceOrdersService.updateOrder(tenantId, id, req.auth!.userId, req.auth!.role || '', input);
+    return this.serviceOrdersService.updateOrder(req.auth.tenantId, id, req.auth.userId, req.auth.role || '', input);
   }
 
   @Post(':id/annotations')
   async annotateOrder(
     @Param('id') id: string,
     @Body() body: unknown,
-    @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string
+    @Req() req: RequestWithAuth
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for annotating service order.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = CreateAnnotationSchema.parse(body);
     return this.serviceOrdersService.addOrderAnnotation(
-      tenantId,
+      req.auth.tenantId,
       id,
-      req.auth!.userId,
-      req.auth!.role || '',
+      req.auth.userId,
+      req.auth.role || '',
       input.message
     );
   }
@@ -464,38 +407,30 @@ export class ServiceOrdersController {
   async transition(
     @Param('id') id: string,
     @Body() body: unknown,
-    @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string
+    @Req() req: RequestWithAuth
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for transitioning service order.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = TransitionSchema.parse(body);
 
-    return this.serviceOrdersService.transition(tenantId, id, req.auth!.userId, req.auth!.role || '', input);
+    return this.serviceOrdersService.transition(req.auth.tenantId, id, req.auth.userId, req.auth.role || '', input);
   }
 
   @Post(':id/approvals')
   async approve(
     @Param('id') id: string,
     @Body() body: unknown,
-    @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string
+    @Req() req: RequestWithAuth
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for approving service order.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ApprovalSchema.parse(body);
 
     return this.serviceOrdersService.approve(
-      tenantId,
+      req.auth.tenantId,
       id,
-      req.auth!.userId,
-      req.auth!.role || '',
+      req.auth.userId,
+      req.auth.role || '',
       input.decision,
       input.reason
     );
@@ -510,19 +445,15 @@ export class ServiceOrdersController {
   async uploadAttachments(
     @Param('id') id: string,
     @UploadedFiles() files: Array<Express.Multer.File>,
-    @Req() req: RequestWithAuth,
-    @Query('tenantId') tenantIdParam?: string
+    @Req() req: RequestWithAuth
   ) {
-    const tenantId = tenantIdParam || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for uploading attachments.');
-    }
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     return this.serviceOrdersService.uploadAttachments(
-      tenantId,
+      req.auth.tenantId,
       id,
-      req.auth!.userId,
-      req.auth!.role || '',
+      req.auth.userId,
+      req.auth.role || '',
       files || []
     );
   }

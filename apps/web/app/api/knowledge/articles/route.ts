@@ -1,16 +1,13 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiBaseUrl } from '../../auth/_lib';
 import { applyRefreshIfNeeded, resolveAuthSession } from '../../_proxy';
+import { omitTenantIdFromBody, omitTenantIdFromSearchParams } from '../../../../lib/strip-tenant-upstream';
 
 export async function GET(request: NextRequest) {
   const session = await resolveAuthSession(request);
   if (session instanceof NextResponse) return session;
 
-  const params = new URLSearchParams(request.nextUrl.searchParams);
-  if (!params.get('tenantId')) {
-    params.set('tenantId', session.me.tenant!.id);
-  }
-
+  const params = omitTenantIdFromSearchParams(new URLSearchParams(request.nextUrl.searchParams));
   const response = await fetch(`${apiBaseUrl()}/knowledge/articles?${params.toString()}`, {
     method: 'GET',
     headers: { authorization: `Bearer ${session.accessToken}` },
@@ -31,10 +28,7 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const body = (await request.json()) as Record<string, unknown>;
-  const payload = {
-    ...body,
-    tenantId: String(body.tenantId || session.me.tenant!.id)
-  };
+  const payload = omitTenantIdFromBody(body);
 
   const response = await fetch(`${apiBaseUrl()}/knowledge/articles`, {
     method: 'POST',
@@ -54,3 +48,4 @@ export async function POST(request: NextRequest) {
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }
+

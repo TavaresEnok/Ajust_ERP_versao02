@@ -3,7 +3,8 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
-  NotFoundException
+  NotFoundException,
+  Optional
 } from '@nestjs/common';
 import {
   ApprovalStatus,
@@ -17,8 +18,10 @@ import {
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { validatePathWithinBase } from '../common/path-security';
 import { EventsGateway } from '../events.gateway';
 import { PrismaService } from '../prisma/prisma.service';
+import { CsatService } from '../csat/csat.service';
 
 type CreateOrderInput = {
   tenantId: string;
@@ -198,6 +201,7 @@ const ALLOWED_MIME = new Set([
   'audio/aac',
   'audio/mp4'
 ]);
+const MAX_CREATE_RETRIES = 5;
 
 type Role = string;
 
@@ -220,7 +224,8 @@ function computeSlaHours(type: ServiceOrderType, priority: Priority) {
 export class ServiceOrdersService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(EventsGateway) private readonly eventsGateway: EventsGateway
+    @Inject(EventsGateway) private readonly eventsGateway: EventsGateway,
+    @Optional() private readonly csatService?: CsatService,
   ) {}
 
   async create(authUserId: string, role: string, input: CreateOrderInput) {
@@ -239,54 +244,55 @@ export class ServiceOrdersService {
     }
 
     const now = new Date();
-    const protocol = await this.buildProtocol(input.tenantId);
-
     const slaHours = computeSlaHours(input.type, input.priority);
     const deadlineAt = input.deadlineAt ? new Date(input.deadlineAt) : new Date(now.getTime() + slaHours * 3600000);
 
-    const created = await this.prisma.serviceOrder.create({
-      data: {
-        tenantId: input.tenantId,
-        occurrenceId: input.occurrenceId,
-        protocol,
-        sourceSystem: 'ERP',
-        type: input.type,
-        priority: input.priority,
-        status: 'ABERTA',
-        title: input.title,
-        description: input.description,
-        ownerUserId: input.ownerUserId,
-        ownerName: input.ownerName,
-        assigneeUserId: input.assigneeUserId,
-        analystName: input.analystName,
-        requester: input.requester,
-        sector: input.sector,
-        origin: input.origin,
-        deadlineAt,
-        tags: input.tags || [],
-        internalNotes: input.internalNotes,
-        occurrences: {
-          create: {
-            actorUserId: authUserId,
-            sourceSystem: 'ERP',
-            message: 'OS criada manualmente no ERP.'
+    const created = await this.withCreateRetry(async () => {
+      const protocol = await this.buildProtocol(input.tenantId);
+      return this.prisma.serviceOrder.create({
+        data: {
+          tenantId: input.tenantId,
+          occurrenceId: input.occurrenceId,
+          protocol,
+          sourceSystem: 'ERP',
+          type: input.type,
+          priority: input.priority,
+          status: 'ABERTA',
+          title: input.title,
+          description: input.description,
+          ownerUserId: input.ownerUserId,
+          ownerName: input.ownerName,
+          assigneeUserId: input.assigneeUserId,
+          analystName: input.analystName,
+          requester: input.requester,
+          sector: input.sector,
+          origin: input.origin,
+          deadlineAt,
+          tags: input.tags || [],
+          internalNotes: input.internalNotes,
+          occurrences: {
+            create: {
+              actorUserId: authUserId,
+              sourceSystem: 'ERP',
+              message: 'OS criada manualmente no ERP.'
+            }
           }
-        }
-      },
-      include: {
-        occurrences: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            actorUser: {
-              select: { id: true, name: true, email: true }
+        },
+        include: {
+          occurrences: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              actorUser: {
+                select: { id: true, name: true, email: true }
+              }
             }
           }
         }
-      }
+      });
     });
 
     await this.logAudit(input.tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
-      protocol,
+      protocol: created.protocol,
       type: input.type,
       priority: input.priority
     });
@@ -629,8 +635,13 @@ export class ServiceOrdersService {
       throw new NotFoundException('Export file not found.');
     }
 
-    const content = await readFile(report.fileUrl, 'utf-8');
-    const fileName = basename(report.fileUrl);
+    // ✅ SECURITY: Validar que arquivo está dentro de UPLOAD_ROOT
+    // Previne path traversal attacks (../../etc/passwd)
+    const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
+    const safePath = validatePathWithinBase(uploadRoot, report.fileUrl);
+
+    const content = await readFile(safePath, 'utf-8');
+    const fileName = basename(safePath);
 
     await this.logAudit(tenantId, authUserId, 'EXPORT', 'report_export', report.id, {
       reportType: 'service_orders_csv',
@@ -640,7 +651,7 @@ export class ServiceOrdersService {
     return { fileName, content };
   }
 
-  async getById(tenantId: string, id: string) {
+  async getById(tenantId: string, id: string, role?: string) {
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id, tenantId, deletedAt: null },
       include: {
@@ -765,8 +776,6 @@ export class ServiceOrdersService {
       throw new ForbiddenException('Role is not allowed to create occurrence.');
     }
 
-    const protocol = await this.buildProtocol(input.tenantId);
-    const occurrenceNumber = await this.buildOccurrenceNumber(input.tenantId);
     const now = new Date();
     const occurrenceCreatedAt = input.createdAt ? new Date(input.createdAt) : now;
     const firstOrderPriority = input.firstOrder.priority || 'NORMAL';
@@ -775,54 +784,59 @@ export class ServiceOrdersService {
       : new Date(now.getTime() + computeSlaHours(input.firstOrder.type, firstOrderPriority) * 3600000);
     const firstOrderStatus = input.firstOrder.status || 'ABERTA';
 
-    const created = await this.prisma.$transaction(async (tx) => {
-      const occurrence = await tx.occurrence.create({
-        data: {
-          tenantId: input.tenantId,
-          number: occurrenceNumber,
-          provider: input.provider,
-          type: input.type,
-          status: input.status || 'ABERTA',
-          sector: input.sector,
-          origin: input.origin,
-          openedByName: input.openedByName,
-          analystResponsible: input.analystResponsible,
-          description: input.description,
-          createdAt: occurrenceCreatedAt
-        }
-      });
+    const created = await this.withCreateRetry(() =>
+      this.prisma.$transaction(async (tx) => {
+        const protocol = await this.buildProtocol(input.tenantId);
+        const occurrenceNumber = await this.buildOccurrenceNumber(input.tenantId);
 
-      const order = await tx.serviceOrder.create({
-        data: {
-          tenantId: input.tenantId,
-          occurrenceId: occurrence.id,
-          protocol,
-          sourceSystem: 'ERP',
-          type: input.firstOrder.type,
-          priority: firstOrderPriority,
-          status: firstOrderStatus,
-          title: input.firstOrder.title || `O.S ${input.firstOrder.type} - ${input.provider}`,
-          description: input.firstOrder.description,
-          requester: input.firstOrder.requester,
-          sector: input.firstOrder.sector || input.sector,
-          origin: input.firstOrder.origin || input.origin,
-          ownerName: input.firstOrder.analystName || input.analystResponsible,
-          analystName: input.firstOrder.analystName || input.analystResponsible,
-          deadlineAt: firstOrderDeadline,
-          tags: input.firstOrder.tags || [],
-          internalNotes: input.firstOrder.internalNotes,
-          occurrences: {
-            create: {
-              actorUserId: authUserId,
-              sourceSystem: 'ERP',
-              message: `O.S criada na ocorrencia ${occurrence.number}.`
+        const occurrence = await tx.occurrence.create({
+          data: {
+            tenantId: input.tenantId,
+            number: occurrenceNumber,
+            provider: input.provider,
+            type: input.type,
+            status: input.status || 'ABERTA',
+            sector: input.sector,
+            origin: input.origin,
+            openedByName: input.openedByName,
+            analystResponsible: input.analystResponsible,
+            description: input.description,
+            createdAt: occurrenceCreatedAt
+          }
+        });
+
+        const order = await tx.serviceOrder.create({
+          data: {
+            tenantId: input.tenantId,
+            occurrenceId: occurrence.id,
+            protocol,
+            sourceSystem: 'ERP',
+            type: input.firstOrder.type,
+            priority: firstOrderPriority,
+            status: firstOrderStatus,
+            title: input.firstOrder.title || `O.S ${input.firstOrder.type} - ${input.provider}`,
+            description: input.firstOrder.description,
+            requester: input.firstOrder.requester,
+            sector: input.firstOrder.sector || input.sector,
+            origin: input.firstOrder.origin || input.origin,
+            ownerName: input.firstOrder.analystName || input.analystResponsible,
+            analystName: input.firstOrder.analystName || input.analystResponsible,
+            deadlineAt: firstOrderDeadline,
+            tags: input.firstOrder.tags || [],
+            internalNotes: input.firstOrder.internalNotes,
+            occurrences: {
+              create: {
+                actorUserId: authUserId,
+                sourceSystem: 'ERP',
+                message: `O.S criada na ocorrencia ${occurrence.number}.`
+              }
             }
           }
-        }
-      });
+        });
 
-      return { occurrence, order };
-    });
+        return { occurrence, order };
+      })
+    );
 
     await this.logAudit(input.tenantId, authUserId, 'OS_CREATE', 'occurrence', created.occurrence.id, {
       occurrenceNumber: created.occurrence.number,
@@ -1063,51 +1077,53 @@ export class ServiceOrdersService {
       throw new NotFoundException('Occurrence not found.');
     }
 
-    const protocol = await this.buildProtocol(tenantId);
     const priority = input.priority || 'NORMAL';
     const deadlineAt = input.deadlineAt
       ? new Date(input.deadlineAt)
       : new Date(Date.now() + computeSlaHours(input.type, priority) * 3600000);
     const status = input.status || 'ABERTA';
 
-    const created = await this.prisma.serviceOrder.create({
-      data: {
-        tenantId,
-        occurrenceId: occurrence.id,
-        protocol,
-        sourceSystem: 'ERP',
-        type: input.type,
-        priority,
-        status,
-        title: input.title || `O.S ${input.type} - ${occurrence.provider}`,
-        description: input.description,
-        requester: input.requester,
-        sector: input.sector || occurrence.sector,
-        origin: input.origin || occurrence.origin,
-        ownerName: input.analystName || occurrence.analystResponsible,
-        analystName: input.analystName || occurrence.analystResponsible,
-        deadlineAt,
-        tags: input.tags || [],
-        internalNotes: input.internalNotes,
-        occurrences: {
-          create: {
-            actorUserId: authUserId,
-            sourceSystem: 'ERP',
-            message: `O.S criada na ocorrencia ${occurrence.number}.`
+    const created = await this.withCreateRetry(async () => {
+      const protocol = await this.buildProtocol(tenantId);
+      return this.prisma.serviceOrder.create({
+        data: {
+          tenantId,
+          occurrenceId: occurrence.id,
+          protocol,
+          sourceSystem: 'ERP',
+          type: input.type,
+          priority,
+          status,
+          title: input.title || `O.S ${input.type} - ${occurrence.provider}`,
+          description: input.description,
+          requester: input.requester,
+          sector: input.sector || occurrence.sector,
+          origin: input.origin || occurrence.origin,
+          ownerName: input.analystName || occurrence.analystResponsible,
+          analystName: input.analystName || occurrence.analystResponsible,
+          deadlineAt,
+          tags: input.tags || [],
+          internalNotes: input.internalNotes,
+          occurrences: {
+            create: {
+              actorUserId: authUserId,
+              sourceSystem: 'ERP',
+              message: `O.S criada na ocorrencia ${occurrence.number}.`
+            }
           }
-        }
-      },
-      include: {
-        attachments: { orderBy: { uploadedAt: 'desc' } },
-        occurrences: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            actorUser: {
-              select: { id: true, name: true, email: true }
+        },
+        include: {
+          attachments: { orderBy: { uploadedAt: 'desc' } },
+          occurrences: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              actorUser: {
+                select: { id: true, name: true, email: true }
+              }
             }
           }
         }
-      }
+      });
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
@@ -1290,6 +1306,11 @@ export class ServiceOrdersService {
       byUserId: authUserId,
       at: new Date().toISOString()
     });
+
+    // Auto-trigger CSAT survey when order is resolved
+    if (to === 'RESOLVIDA') {
+      this.csatService?.createForOrder(tenantId, order.id).catch(() => {/* non-fatal */});
+    }
 
     return updated;
   }
@@ -1482,6 +1503,26 @@ export class ServiceOrdersService {
       where: { tenantId }
     });
     return `${year}${String(260000 + count + 1).padStart(6, '0')}`;
+  }
+
+  private async withCreateRetry<T>(operation: () => Promise<T>): Promise<T> {
+    let lastError: unknown;
+    for (let attempt = 1; attempt <= MAX_CREATE_RETRIES; attempt++) {
+      try {
+        return await operation();
+      } catch (error) {
+        lastError = error;
+        if (!this.isRetryableUniqueCollision(error) || attempt === MAX_CREATE_RETRIES) {
+          throw error;
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  private isRetryableUniqueCollision(error: unknown): boolean {
+    const known = error as Prisma.PrismaClientKnownRequestError | undefined;
+    return known?.code === 'P2002';
   }
 
   private buildWhere(tenantId: string, input: ListInput): Prisma.ServiceOrderWhereInput {

@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
+import { omitTenantIdFromBody, omitTenantIdFromSearchParams } from '../../../../lib/strip-tenant-upstream';
 import { apiBaseUrl } from '../../auth/_lib';
 import { applyRefreshIfNeeded, resolveAuthSession } from '../../_proxy';
 
@@ -6,11 +7,7 @@ export async function GET(request: NextRequest) {
   const session = await resolveAuthSession(request);
   if (session instanceof NextResponse) return session;
 
-  const params = new URLSearchParams(request.nextUrl.searchParams);
-  if (!params.get('tenantId')) {
-    params.set('tenantId', session.me.tenant!.id);
-  }
-
+  const params = omitTenantIdFromSearchParams(new URLSearchParams(request.nextUrl.searchParams));
   const response = await fetch(`${apiBaseUrl()}/iam/users?${params.toString()}`, {
     method: 'GET',
     headers: { authorization: `Bearer ${session.accessToken}` },
@@ -32,8 +29,8 @@ export async function POST(request: NextRequest) {
 
   const body = (await request.json()) as Record<string, unknown>;
   const payload = {
-    ...body,
-    tenantId: String(body.tenantId || session.me.tenant!.id)
+    ...omitTenantIdFromBody(body),
+    tenantId: String(body.tenantId ?? session.me.tenant!.id)
   };
 
   const response = await fetch(`${apiBaseUrl()}/iam/users`, {

@@ -18,6 +18,7 @@ services:
       - "${WEB_PORT:-8070}:${INTERNAL_WEB_PORT:-3000}"
     depends_on:
       - api
+    restart: unless-stopped
 
   api:
     image: node:20-alpine
@@ -30,7 +31,6 @@ services:
       PORT: ${INTERNAL_API_PORT:-3001}
       DATABASE_URL: ${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
       JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret}
@@ -47,8 +47,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_started
-      rabbitmq:
-        condition: service_started
+    restart: unless-stopped
 
   worker:
     image: node:20-alpine
@@ -61,7 +60,6 @@ services:
       PORT: ${INTERNAL_WORKER_PORT:-3002}
       DATABASE_URL: ${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
-      RABBITMQ_URL: ${RABBITMQ_URL:-amqp://guest:guest@rabbitmq:5672}
       IXC_RECONCILE_INTERVAL_MS: ${IXC_RECONCILE_INTERVAL_MS:-300000}
       EXPORT_RETENTION_DAYS: ${EXPORT_RETENTION_DAYS:-30}
       EXPORT_RETENTION_INTERVAL_MS: ${EXPORT_RETENTION_INTERVAL_MS:-3600000}
@@ -74,8 +72,7 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
-      rabbitmq:
-        condition: service_started
+    restart: unless-stopped
 
   postgres:
     image: postgres:16-alpine
@@ -92,17 +89,14 @@ services:
       interval: 5s
       timeout: 5s
       retries: 10
+    restart: unless-stopped
 
   redis:
     image: redis:7-alpine
     ports:
       - "${REDIS_PORT:-8073}:6379"
+    restart: unless-stopped
 
-  rabbitmq:
-    image: rabbitmq:3.13-management-alpine
-    ports:
-      - "${RABBITMQ_PORT:-8074}:5672"
-      - "${RABBITMQ_MGMT_PORT:-8075}:15672"
 
   pgadmin:
     image: dpage/pgadmin4:8
@@ -113,6 +107,7 @@ services:
       - "${PGADMIN_PORT:-8077}:80"
     depends_on:
       - postgres
+    restart: unless-stopped
 
 volumes:
   postgres_data:

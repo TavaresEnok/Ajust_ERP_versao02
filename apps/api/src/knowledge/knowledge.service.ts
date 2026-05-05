@@ -1,7 +1,8 @@
 import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { AuditAction, Prisma } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { decryptSecret, encryptSecret } from '../common/secrets.crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../common/audit.service';
 
 type ListArticleInput = {
   tenantId: string;
@@ -35,6 +36,17 @@ type CreateCredentialInput = {
   username: string;
   secret: string;
   notes?: string;
+};
+
+type UpdateCredentialInput = {
+  provider?: string;
+  equipmentType?: string;
+  equipmentName?: string;
+  environment?: string;
+  host?: string;
+  username?: string;
+  secret?: string;
+  notes?: string | null;
 };
 
 type ListCredentialInput = {
@@ -79,7 +91,10 @@ type UpdateNoteInput = {
 
 @Injectable()
 export class KnowledgeService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AuditService) private readonly audit: AuditService
+  ) {}
 
   async listArticles(authRole: string, authUserId: string, input: ListArticleInput) {
     if (!['super_admin', 'gerente', 'analista', 'tecnico', 'leitura'].includes(authRole)) {
@@ -478,6 +493,85 @@ export class KnowledgeService {
     };
   }
 
+  async updateCredential(
+    authRole: string,
+    authUserId: string,
+    tenantId: string,
+    credentialId: string,
+    patch: UpdateCredentialInput
+  ) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
+      throw new ForbiddenException('Role is not allowed to update credentials.');
+    }
+
+    const credential = await this.prisma.knowledgeCredential.findFirst({
+      where: { id: credentialId, tenantId },
+    });
+    if (!credential) {
+      throw new NotFoundException('Credential not found.');
+    }
+
+    const data: Prisma.KnowledgeCredentialUpdateInput = {};
+    if (patch.provider !== undefined) data.provider = patch.provider.trim();
+    if (patch.equipmentType !== undefined) data.equipmentType = patch.equipmentType.trim() || 'OUTROS';
+    if (patch.equipmentName !== undefined) data.equipmentName = patch.equipmentName.trim();
+    if (patch.environment !== undefined) data.environment = patch.environment.trim();
+    if (patch.host !== undefined) data.host = patch.host.trim();
+    if (patch.username !== undefined) data.username = patch.username.trim();
+    if (patch.secret !== undefined && patch.secret.trim() !== '') data.secretEnc = encryptSecret(patch.secret);
+    if (patch.notes !== undefined) data.notes = patch.notes ? patch.notes.trim() : null;
+
+    const updated = await this.prisma.knowledgeCredential.update({
+      where: { id: credential.id },
+      data,
+      select: {
+        id: true,
+        provider: true,
+        equipmentType: true,
+        equipmentName: true,
+        environment: true,
+        host: true,
+        username: true,
+        notes: true,
+        createdAt: true,
+        updatedAt: true
+      }
+    });
+
+    await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_credential', updated.id, {
+      op: 'update',
+      provider: updated.provider,
+      environment: updated.environment
+    });
+
+    return updated;
+  }
+
+  async deleteCredential(authRole: string, authUserId: string, tenantId: string, credentialId: string) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
+      throw new ForbiddenException('Role is not allowed to delete credentials.');
+    }
+
+    const credential = await this.prisma.knowledgeCredential.findFirst({
+      where: { id: credentialId, tenantId },
+    });
+    if (!credential) {
+      throw new NotFoundException('Credential not found.');
+    }
+
+    await this.prisma.knowledgeCredential.delete({
+      where: { id: credential.id }
+    });
+
+    await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_credential', credential.id, {
+      op: 'delete',
+      provider: credential.provider,
+      environment: credential.environment
+    });
+
+    return { deleted: true, id: credential.id };
+  }
+
   async listNotes(authRole: string, authUserId: string, input: ListNotesInput) {
     if (!['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to read notes.');
@@ -702,23 +796,23 @@ export class KnowledgeService {
     }
   }
 
+  /** Elimina duplicação — delega ao AuditService central. */
   private async logAudit(
-    tenantId: string,
-    actorUserId: string,
-    action: AuditAction,
+    tenantId: string | null,
+    actorUserId: string | null,
+    action: string,
     resourceType: string,
     resourceId: string | null,
     metadata: Record<string, unknown>
   ) {
-    await this.prisma.auditLog.create({
-      data: {
-        tenantId,
-        actorUserId,
-        action,
-        resourceType,
-        resourceId,
-        metadata: metadata as any
-      }
-    });
+    // Mapeia strings de ação para o enum correto
+    const actionMap: Record<string, import('@prisma/client').AuditAction> = {
+      OS_UPDATE: 'OS_UPDATE',
+      CREDENTIAL_ACCESS: 'CREDENTIAL_ACCESS',
+      EXPORT: 'EXPORT',
+      SYNC: 'SYNC',
+    };
+    const auditAction = actionMap[action] ?? 'OS_UPDATE';
+    await this.audit.log(tenantId, actorUserId, auditAction, resourceType, resourceId, metadata);
   }
 }

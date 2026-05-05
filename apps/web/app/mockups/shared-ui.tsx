@@ -270,14 +270,57 @@ export function ErpModal({
 
 /* ═══════════════════════════ Toast ═══════════════════════════ */
 
-export function ErpToast({ message, dark = true }: { message: string; dark?: boolean }) {
+type ToastType = 'info' | 'success' | 'error' | 'warning';
+
+const TOAST_STYLES: Record<ToastType, { dark: string; light: string; icon: string }> = {
+  info:    { dark: 'bg-[#161b22] border-blue-500/30 text-white',         light: 'bg-white border-blue-200 text-slate-800',          icon: 'ℹ️' },
+  success: { dark: 'bg-emerald-950/90 border-emerald-500/40 text-emerald-100', light: 'bg-emerald-50 border-emerald-300 text-emerald-900', icon: '✓' },
+  error:   { dark: 'bg-rose-950/90 border-rose-500/40 text-rose-100',    light: 'bg-rose-50 border-rose-300 text-rose-900',         icon: '✕' },
+  warning: { dark: 'bg-amber-950/90 border-amber-500/40 text-amber-100', light: 'bg-amber-50 border-amber-300 text-amber-900',      icon: '⚠' },
+};
+
+const TOAST_ICON_COLOR: Record<ToastType, string> = {
+  info: 'text-blue-400',
+  success: 'text-emerald-400',
+  error: 'text-rose-400',
+  warning: 'text-amber-400',
+};
+
+const TOAST_BAR_COLOR: Record<ToastType, string> = {
+  info: 'bg-blue-500',
+  success: 'bg-emerald-500',
+  error: 'bg-rose-500',
+  warning: 'bg-amber-500',
+};
+
+export function ErpToast({
+  message,
+  dark = true,
+  type = 'info',
+  duration = 2500,
+}: {
+  message: string;
+  dark?: boolean;
+  type?: ToastType;
+  duration?: number;
+}) {
   if (!message) return null;
+  const styles = TOAST_STYLES[type] || TOAST_STYLES.info;
   return (
     <div className={cn(
-      'fixed bottom-5 right-5 z-[95] px-5 py-3 rounded-xl text-sm shadow-2xl backdrop-blur-md animate-slide-up border',
-      dark ? 'bg-[#161b22] border-white/10 text-white' : 'bg-white border-slate-200 text-slate-800 shadow-lg'
+      'fixed bottom-5 right-5 z-[95] min-w-[260px] max-w-sm rounded-xl text-sm shadow-2xl backdrop-blur-md animate-slide-up border overflow-hidden',
+      dark ? styles.dark : styles.light
     )}>
-      {message}
+      <div className="flex items-start gap-3 px-4 py-3">
+        <span className={cn('text-base font-bold shrink-0 mt-px', TOAST_ICON_COLOR[type])}>{styles.icon}</span>
+        <span className="flex-1 leading-snug">{message}</span>
+      </div>
+      <div className="relative h-[3px] w-full overflow-hidden opacity-60">
+        <div
+          className={cn('absolute left-0 top-0 h-full', TOAST_BAR_COLOR[type])}
+          style={{ animation: `toastBar ${duration}ms linear forwards` }}
+        />
+      </div>
     </div>
   );
 }
@@ -391,6 +434,9 @@ export const SHARED_CSS = `
   .animate-slide-up{animation:slideUp .25s ease}
   @keyframes pulse{0%,100%{opacity:1}50%{opacity:.5}}
   .animate-pulse{animation:pulse 2s cubic-bezier(.4,0,.6,1) infinite}
+  @keyframes toastBar{from{width:100%}to{width:0}}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .animate-spin{animation:spin 1s linear infinite}
   .custom-scrollbar::-webkit-scrollbar{width:6px;height:6px}
   .custom-scrollbar::-webkit-scrollbar-track{background:transparent}
   .custom-scrollbar::-webkit-scrollbar-thumb{border-radius:3px}

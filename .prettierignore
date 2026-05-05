@@ -1,0 +1,10 @@
+pnpm-lock.yaml
+node_modules
+**/node_modules
+dist
+.next
+.next-dev
+coverage
+*.min.js
+prisma/migrations
+**/mockups/**

@@ -1,7 +1,10 @@
-import { Body, Controller, Get, Inject, Patch, Post, Req, UseGuards } from '@nestjs/common';
+import { Body, Controller, Get, HttpCode, Inject, Patch, Post, Req, UseGuards } from '@nestjs/common';
 import { z } from 'zod';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { AuthGuard } from './auth.guard';
+import { RateLimitGuard } from './rate-limit.guard';
+import { ForgotPasswordRateLimitGuard } from './forgot-password-rate-limit.guard';
+import { TwoFactorRateLimitGuard } from './two-factor-rate-limit.guard';
 import { AuthService } from './auth.service';
 
 const LoginSchema = z.object({
@@ -31,11 +34,26 @@ const UpdateMeSchema = z.object({
   path: ['currentPassword']
 });
 
+const ForgotPasswordSchema = z.object({
+  email: z.string().email()
+});
+
+const ResetPasswordSchema = z.object({
+  token: z.string().min(20),
+  newPassword: z.string().min(8)
+});
+
+const Verify2FASchema = z.object({
+  temporaryToken: z.string().min(20),
+  code: z.string().regex(/^\d{6}$/, 'Code must be 6 digits')
+});
+
 @Controller('auth')
 export class AuthController {
   constructor(@Inject(AuthService) private readonly authService: AuthService) { }
 
   @Post('login')
+  @UseGuards(RateLimitGuard)
   async login(@Body() body: unknown, @Req() req: RequestWithAuth) {
     const input = LoginSchema.parse(body);
     return this.authService.login({
@@ -46,6 +64,7 @@ export class AuthController {
   }
 
   @Post('refresh')
+  @HttpCode(200)
   async refresh(@Body() body: unknown) {
     const input = RefreshSchema.parse(body);
     return this.authService.refresh(input);
@@ -75,5 +94,30 @@ export class AuthController {
   async updateMe(@Req() req: RequestWithAuth, @Body() body: unknown) {
     const input = UpdateMeSchema.parse(body);
     return this.authService.updateMe(req.auth!.userId, req.auth!.tenantId, input);
+  }
+
+  @Post('forgot-password')
+  @UseGuards(ForgotPasswordRateLimitGuard)
+  async forgotPassword(@Body() body: unknown) {
+    const input = ForgotPasswordSchema.parse(body);
+    return this.authService.forgotPassword(input.email);
+  }
+
+  @Post('reset-password')
+  async resetPassword(@Body() body: unknown) {
+    const input = ResetPasswordSchema.parse(body);
+    return this.authService.resetPassword(input.token, input.newPassword);
+  }
+
+  @Post('verify-2fa')
+  @UseGuards(TwoFactorRateLimitGuard)
+  async verify2FA(@Body() body: unknown, @Req() req: RequestWithAuth) {
+    const input = Verify2FASchema.parse(body);
+    return this.authService.verify2FA(
+      input.temporaryToken,
+      input.code,
+      req.ip,
+      req.headers['user-agent']
+    );
   }
 }

@@ -39,12 +39,44 @@ async function refreshSession(refreshToken: string): Promise<RefreshApiResponse 
   return (await response.json()) as RefreshApiResponse;
 }
 
+function jwtIsLikelyValid(token: string): boolean {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return false;
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64url').toString('utf-8'));
+    if (!payload.exp) return false;
+    return payload.exp * 1000 > Date.now() + 30_000;
+  } catch {
+    return false;
+  }
+}
+
 export async function resolveAuthSession(request: NextRequest): Promise<AuthSession | NextResponse> {
   let accessToken = request.cookies.get('erp_access_token')?.value || '';
   const refreshToken = request.cookies.get('erp_refresh_token')?.value || '';
   let refreshPayload: RefreshApiResponse | null = null;
+  let me: ApiMeResponse | null = null;
 
-  let me = accessToken ? await fetchMe(accessToken) : null;
+  if (accessToken && jwtIsLikelyValid(accessToken)) {
+    const tenantId = request.cookies.get('erp_tenant_id')?.value;
+    const role = request.cookies.get('erp_role')?.value;
+    const userId = request.cookies.get('erp_user_id')?.value;
+    if (tenantId && role && userId) {
+      me = {
+        id: userId,
+        name: decodeURIComponent(request.cookies.get('erp_user_name')?.value || ''),
+        email: decodeURIComponent(request.cookies.get('erp_user_email')?.value || ''),
+        tenant: {
+          id: tenantId,
+          role: role,
+          tradeName: decodeURIComponent(request.cookies.get('erp_trade_name')?.value || 'Ajust ERP')
+        }
+      };
+    } else {
+      me = await fetchMe(accessToken);
+    }
+  }
+
   if (!me && refreshToken) {
     refreshPayload = await refreshSession(refreshToken);
     if (refreshPayload) {

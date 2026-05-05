@@ -1,0 +1,98 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master, develop]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ajust_ci?schema=public
+  JWT_ACCESS_SECRET: ci_access_secret_minimum_thirty_two_characters_x
+  JWT_REFRESH_SECRET: ci_refresh_secret_minimum_thirty_two_characters_x
+  SECRETS_ENCRYPTION_KEY: ci_encryption_secret_minimum_thirty_two_characters_x
+
+jobs:
+  api:
+    runs-on: ubuntu-latest
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: ajust_ci
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d ajust_ci"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'pnpm'
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level=moderate
+
+      - name: Prisma generate
+        run: pnpm exec prisma generate --schema prisma/schema.prisma
+
+      - name: Lint (workspaces)
+        run: pnpm lint
+
+      - name: Prettier check
+        run: pnpm format:check
+
+      - name: Typecheck (monorepo)
+        run: pnpm typecheck
+
+      - name: Prisma migrate deploy
+        run: pnpm exec prisma migrate deploy --schema prisma/schema.prisma
+
+      - name: Build API
+        run: pnpm --filter @ajust/api build
+
+      - name: E2E smoke (seeds database via Prisma)
+        run: pnpm --filter @ajust/api test:e2e
+
+      - name: Start API server
+        working-directory: apps/api
+        run: |
+          node dist/main.js &
+          echo $! > /tmp/ajust-api.pid
+          for i in $(seq 1 90); do
+            if curl -sf http://127.0.0.1:3001/monitoring/health >/dev/null; then
+              echo "API ready after ${i}s"
+              exit 0
+            fi
+            sleep 1
+          done
+          echo "API failed to become healthy"
+          exit 1
+
+      - name: E2E security (HTTP against running API)
+        run: pnpm --filter @ajust/api test:e2e:security
+        env:
+          API_URL: http://127.0.0.1:3001
+
+      - name: Stop API
+        if: always()
+        run: kill $(cat /tmp/ajust-api.pid) 2>/dev/null || true

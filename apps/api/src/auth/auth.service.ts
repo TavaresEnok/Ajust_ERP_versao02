@@ -12,6 +12,10 @@ import { compare, hash } from 'bcryptjs';
 import { createHash, randomUUID } from 'crypto';
 import { sign, verify } from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
+import { AuditService } from '../common/audit.service';
+import { EmailService } from '../common/email.service';
+import { TotpService } from './totp.service';
+import { BootstrapTokenService } from './bootstrap-token.service';
 
 type LoginInput = {
   identifier: string;
@@ -44,12 +48,19 @@ type AccessPayload = {
 type RefreshPayload = {
   sub: string;
   sid: string;
+  jti: string;
   typ: 'refresh';
 };
 
 @Injectable()
 export class AuthService {
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) { }
+  constructor(
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(EmailService) private readonly emailService: EmailService,
+    @Inject(TotpService) private readonly totpService: TotpService,
+    @Inject(BootstrapTokenService) private readonly bootstrapTokenService: BootstrapTokenService
+  ) {}
 
   async login(input: LoginInput) {
     const rawId = input.identifier.trim();
@@ -59,7 +70,7 @@ export class AuthService {
     // 1) Preferencia por e-mail exato.
     let user = await this.prisma.user.findUnique({
       where: { email: lId },
-      include: { tenants: { include: { role: true } } }
+      include: { tenants: { include: { role: true, tenant: true } } }
     });
 
     // 2) Fallback de "usuario": nome exato (case-insensitive)
@@ -72,7 +83,7 @@ export class AuthService {
             { email: { startsWith: `${lId}@`, mode: 'insensitive' } }
           ]
         },
-        include: { tenants: { include: { role: true } } }
+        include: { tenants: { include: { role: true, tenant: true } } }
       });
     }
 
@@ -86,7 +97,7 @@ export class AuthService {
           where: {
             OR: [{ taxId: numericId }, { taxId: rawId }]
           },
-          include: { users: { include: { user: { include: { tenants: { include: { role: true } } } }, role: true } } }
+          include: { users: { include: { user: { include: { tenants: { include: { role: true, tenant: true } } } }, role: true } } }
         });
 
         if (tenant && tenant.users.length > 0) {
@@ -172,12 +183,69 @@ export class AuthService {
     const selectedMembership = memberships[0];
     const roleCode = selectedMembership.role.code;
 
+    // ✅ Check 2FA requirement for super_admin
     if (roleCode === 'super_admin' && !user.twoFactorEnabled) {
-      throw new ForbiddenException('2FA is required for super_admin accounts.');
+      // Log warning but don't block (UI will guide setup)
+      await this.logAudit(selectedMembership.tenantId, user.id, 'LOGIN', 'auth', null, {
+        reason: '2FA required for super_admin but not configured',
+        status: 'pending_setup'
+      }, input.ip, input.userAgent);
     }
 
+    // ✅ If 2FA is enabled, return temporary 2FA session token instead of full access
+    if (user.twoFactorEnabled && user.twoFactorSecretEnc) {
+      const tempSessionId = randomUUID();
+      const temp2faToken = sign(
+        {
+          sub: user.id,
+          sid: tempSessionId,
+          tenantId: selectedMembership.tenantId,
+          typ: '2fa-pending',
+          iat: Math.floor(Date.now() / 1000),
+          exp: Math.floor(Date.now() / 1000) + 300 // 5 minutes for 2FA verification
+        },
+        process.env.JWT_ACCESS_SECRET || 'dev-access-secret'
+      );
+
+      // Create temporary session (marked as 2FA pending)
+      await this.prisma.session.create({
+        data: {
+          id: tempSessionId,
+          userId: user.id,
+          tenantId: selectedMembership.tenantId,
+          refreshTokenHash: this.hashToken(temp2faToken),
+          device: input.device,
+          ip: input.ip,
+          userAgent: input.userAgent,
+          expiresAt: new Date(Date.now() + 5 * 60 * 1000) // 5 minutes
+        }
+      });
+
+      await this.logAudit(selectedMembership.tenantId, user.id, 'LOGIN', 'auth', null, {
+        sessionId: tempSessionId,
+        status: '2fa_challenge'
+      }, input.ip, input.userAgent);
+
+      return {
+        accessToken: null,
+        refreshToken: null,
+        sessionId: tempSessionId,
+        twoFactorRequired: true,
+        temporaryToken: temp2faToken,
+        user: {
+          id: user.id,
+          name: user.name,
+          email: user.email,
+          tenantId: selectedMembership.tenantId,
+          role: roleCode,
+          tradeName: selectedMembership.tenant.tradeName
+        }
+      };
+    }
+
+    // ✅ Normal login flow (no 2FA required)
     const sessionId = randomUUID();
-    const refreshToken = this.signRefreshToken({ sub: user.id, sid: sessionId, typ: 'refresh' });
+    const refreshToken = this.signRefreshToken({ sub: user.id, sid: sessionId, jti: randomUUID(), typ: 'refresh' });
 
     const expiresAt = this.refreshExpiresAt();
 
@@ -221,7 +289,8 @@ export class AuthService {
         name: user.name,
         email: user.email,
         tenantId: selectedMembership.tenantId,
-        role: roleCode
+        role: roleCode,
+        tradeName: selectedMembership.tenant.tradeName
       }
     };
   }
@@ -255,7 +324,7 @@ export class AuthService {
 
     const roleCode = membership?.role.code ?? null;
 
-    const nextRefreshToken = this.signRefreshToken({ sub: session.userId, sid: session.id, typ: 'refresh' });
+    const nextRefreshToken = this.signRefreshToken({ sub: session.userId, sid: session.id, jti: randomUUID(), typ: 'refresh' });
     const nextExpiresAt = this.refreshExpiresAt();
 
     await this.prisma.session.update({
@@ -418,7 +487,7 @@ export class AuthService {
 
     try {
       const payload = verify(token, secret) as RefreshPayload;
-      if (payload.typ !== 'refresh' || !payload.sub || !payload.sid) {
+      if (payload.typ !== 'refresh' || !payload.sub || !payload.sid || !payload.jti) {
         throw new UnauthorizedException('Invalid refresh token payload.');
       }
       return payload;
@@ -445,6 +514,7 @@ export class AuthService {
     return Number.isFinite(numeric) && numeric > 0 ? numeric : 15 * 60;
   }
 
+  /** Delega ao AuditService centralizado — única fonte de verdade para logs de auditoria. */
   async logAudit(
     tenantId: string | null,
     actorUserId: string | null,
@@ -455,17 +525,189 @@ export class AuthService {
     ip?: string,
     userAgent?: string
   ) {
-    await this.prisma.auditLog.create({
+    await this.audit.log(tenantId, actorUserId, action, resourceType, resourceId, metadata, { ip, userAgent });
+  }
+
+  private verifyResetToken(token: string): { sub: string } {
+    try {
+      const secret = process.env.JWT_ACCESS_SECRET || 'dev_secret_key_123';
+      const payload = verify(token, secret) as { sub: string, typ: string };
+      if (payload.typ !== 'reset') throw new Error();
+      return payload;
+    } catch {
+      throw new UnauthorizedException('Invalid or expired reset token.');
+    }
+  }
+
+  async forgotPassword(email: string) {
+    const user = await this.prisma.user.findUnique({
+      where: { email: email.toLowerCase() }
+    });
+
+    if (user && user.status === 'ACTIVE') {
+      const resetToken = sign({ sub: user.id, typ: 'reset' }, process.env.JWT_ACCESS_SECRET || 'dev_secret_key_123', {
+        expiresIn: '1h'
+      });
+
+      const resetLink = `${process.env.WEB_BASE_URL || 'http://localhost:8070'}/reset-password?token=${resetToken}`;
+      await this.emailService.sendEmail(
+        user.email,
+        'Ajust ERP - Recuperação de Senha',
+        `Você solicitou a recuperação de senha. Acesse o link para redefinir: ${resetLink}`
+      );
+      
+      await this.logAudit(null, user.id, 'ROLE_CHANGE', 'user', user.id, {
+        action: 'forgot_password_requested'
+      });
+    }
+
+    return { message: 'Se o e-mail existir e estiver ativo, um link de recuperação foi enviado.' };
+  }
+
+  async resetPassword(token: string, newPassword: string) {
+    const payload = this.verifyResetToken(token);
+    
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub }
+    });
+
+    if (!user || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Invalid user.');
+    }
+
+    const passwordHash = await hash(newPassword, 12);
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { passwordHash }
+    });
+
+    await this.logAudit(null, user.id, 'ROLE_CHANGE', 'user', user.id, {
+      action: 'password_reset_completed'
+    });
+
+    return { success: true };
+  }
+
+  /**
+   * Complete 2FA verification and return actual login tokens
+   * Called after user provides valid TOTP code in temporary 2FA session
+   */
+  async verify2FA(temporaryToken: string, totpCode: string, ip?: string, userAgent?: string) {
+    let payload: any;
+    try {
+      const secret = process.env.JWT_ACCESS_SECRET || 'dev-access-secret';
+      payload = verify(temporaryToken, secret) as { sub: string; sid: string; tenantId: string; typ: string };
+      
+      if (payload.typ !== '2fa-pending') {
+        throw new UnauthorizedException('Invalid token type. Expected 2FA pending token.');
+      }
+    } catch (error) {
+      throw new UnauthorizedException('Invalid or expired 2FA token.');
+    }
+
+    const user = await this.prisma.user.findUnique({
+      where: { id: payload.sub },
+      include: { tenants: { include: { role: true, tenant: true } } }
+    });
+
+    if (!user || !user.twoFactorEnabled || !user.twoFactorSecretEnc) {
+      throw new UnauthorizedException('2FA not enabled for this user.');
+    }
+
+    // Decrypt secret and verify TOTP code
+    try {
+      const decryptedSecret = this.decryptSecret2FA(user.twoFactorSecretEnc);
+      const isValidCode = this.totpService.verifyCode(decryptedSecret, totpCode);
+      
+      if (!isValidCode) {
+        await this.logAudit(payload.tenantId, user.id, 'LOGIN_FAILED', 'auth', null, {
+          reason: 'invalid_totp_code'
+        }, ip, userAgent);
+        throw new UnauthorizedException('Invalid 2FA code.');
+      }
+    } catch (error) {
+      if (error instanceof UnauthorizedException) throw error;
+      throw new UnauthorizedException('Failed to verify 2FA code.');
+    }
+
+    // Create full session (replace temporary 2FA session)
+    const sessionId = randomUUID();
+    const refreshToken = this.signRefreshToken({ sub: user.id, sid: sessionId, jti: randomUUID(), typ: 'refresh' });
+    const expiresAt = this.refreshExpiresAt();
+
+    // Delete temporary 2FA session
+    await this.prisma.session.delete({
+      where: { id: payload.sid }
+    }).catch(() => {}); // Ignore if not found
+
+    // Create real session
+    const membership = user.tenants.find(t => t.tenantId === payload.tenantId);
+    if (!membership) {
+      throw new ForbiddenException('User has no tenant membership.');
+    }
+
+    await this.prisma.session.create({
       data: {
-        tenantId,
-        actorUserId,
-        action,
-        resourceType,
-        resourceId,
-        metadata: metadata as any,
+        id: sessionId,
+        userId: user.id,
+        tenantId: payload.tenantId,
+        refreshTokenHash: this.hashToken(refreshToken),
         ip,
-        userAgent
+        userAgent,
+        expiresAt
       }
     });
+
+    // Update last login
+    await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() }
+    });
+
+    const accessToken = this.signAccessToken({
+      sub: user.id,
+      sid: sessionId,
+      tenantId: payload.tenantId,
+      role: membership.role.code,
+      typ: 'access'
+    });
+
+    await this.logAudit(payload.tenantId, user.id, 'LOGIN', 'auth', null, {
+      sessionId,
+      method: '2fa'
+    }, ip, userAgent);
+
+    return {
+      accessToken,
+      refreshToken,
+      sessionId,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        tenantId: payload.tenantId,
+        role: membership.role.code,
+        tradeName: membership.tenant.tradeName
+      }
+    };
+  }
+
+  /**
+   * Decrypt 2FA secret (using AES-256-GCM)
+   */
+  private decryptSecret2FA(encrypted: string): string {
+    const { createDecipheriv } = require('crypto');
+    const encryptionKey = Buffer.from(process.env.SECRETS_ENCRYPTION_KEY || 'change-this-secret-key-in-production', 'utf-8');
+    const [ivHex, encryptedHex, authTagHex] = encrypted.split(':');
+
+    const iv = Buffer.from(ivHex, 'hex');
+    const authTag = Buffer.from(authTagHex, 'hex');
+    const decipher = createDecipheriv('aes-256-gcm', encryptionKey.subarray(0, 32), iv);
+
+    decipher.setAuthTag(authTag);
+    let decrypted = decipher.update(encryptedHex, 'hex', 'utf-8');
+    decrypted += decipher.final('utf-8');
+
+    return decrypted;
   }
 }

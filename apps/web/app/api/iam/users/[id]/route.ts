@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiBaseUrl } from '../../../auth/_lib';
 import { applyRefreshIfNeeded, resolveAuthSession } from '../../../_proxy';
+import { omitTenantIdFromBody } from '../../../../../lib/strip-tenant-upstream';
 
 export async function PATCH(request: NextRequest, context: { params: Promise<{ id: string }> }) {
   const session = await resolveAuthSession(request);
@@ -8,10 +9,7 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
   const { id } = await context.params;
   const body = (await request.json()) as Record<string, unknown>;
-  const payload = {
-    ...body,
-    tenantId: String(body.tenantId || session.me.tenant!.id)
-  };
+  const payload = omitTenantIdFromBody(body);
 
   const response = await fetch(`${apiBaseUrl()}/iam/users/${encodeURIComponent(id)}`, {
     method: 'PATCH',
@@ -37,9 +35,7 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   if (session instanceof NextResponse) return session;
 
   const { id } = await context.params;
-  const tenantId = request.nextUrl.searchParams.get('tenantId') || session.me.tenant!.id;
-
-  const response = await fetch(`${apiBaseUrl()}/iam/users/${encodeURIComponent(id)}?tenantId=${encodeURIComponent(tenantId)}`, {
+    const response = await fetch(`${apiBaseUrl()}/iam/users/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: { authorization: `Bearer ${session.accessToken}` },
     cache: 'no-store'

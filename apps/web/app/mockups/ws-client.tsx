@@ -49,8 +49,8 @@ export function useErpWebSocket({
         if (!enabled || typeof window === 'undefined') return;
 
         // Note: url can be an absolute URL like http://SERVIDOR_IP:8071
-        // If not provided, default to standard hostname logic over HTTP/WS
-        const socketUrl = url || `http://${window.location.hostname}:8071`;
+        // If not provided, default to API socket endpoint on port 8071.
+        const socketUrl = url || `${window.location.protocol}//${window.location.hostname}:8071`;
 
         try {
             setStatus('connecting');

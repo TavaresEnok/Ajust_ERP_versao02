@@ -206,8 +206,7 @@ async function main() {
       .post('/integrations/ixc/configure')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        tenantId: seed.tenantId,
-        baseUrl: 'https://ixc.example.test',
+                baseUrl: 'https://ixc.example.test',
         webhookSecret: 'ixc_e2e_secret',
         apiToken: 'ixc_e2e_token'
       });
@@ -222,8 +221,7 @@ async function main() {
       .post('/service-orders/occurrences')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        tenantId: seed.tenantId,
-        provider: 'ProviderTest',
+                provider: 'ProviderTest',
         type: 'Rompimento',
         sector: 'NOC',
         origin: 'Monitoramento',
@@ -242,7 +240,7 @@ async function main() {
     const occId: string = occCreate.body.id;
 
     const occList = await request(app.getHttpServer())
-      .get(`/service-orders/occurrences?tenantId=${seed.tenantId}&limit=10`)
+      .get(`/service-orders/occurrences?limit=10`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(occList.status, 200, 'list occurrences should return 200');
@@ -250,21 +248,21 @@ async function main() {
     assert.ok(occList.body.length >= 1, 'must have at least 1 occurrence');
 
     const occGet = await request(app.getHttpServer())
-      .get(`/service-orders/occurrences/${occId}?tenantId=${seed.tenantId}`)
+      .get(`/service-orders/occurrences/${occId}`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(occGet.status, 200, 'get occurrence by id should return 200');
     assert.equal(occGet.body.id, occId, 'returned occurrence id must match');
 
     const occPatch = await request(app.getHttpServer())
-      .patch(`/service-orders/occurrences/${occId}?tenantId=${seed.tenantId}`)
+      .patch(`/service-orders/occurrences/${occId}`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ description: 'Atualizada via e2e' });
 
     assert.equal(occPatch.status, 200, 'patch occurrence should return 200');
 
     const occAnnotate = await request(app.getHttpServer())
-      .post(`/service-orders/occurrences/${occId}/annotations?tenantId=${seed.tenantId}`)
+      .post(`/service-orders/occurrences/${occId}/annotations`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ message: 'Anotação de teste e2e' });
 
@@ -273,7 +271,7 @@ async function main() {
 
     // verify annotation appears in get
     const occWithAnnotation = await request(app.getHttpServer())
-      .get(`/service-orders/occurrences/${occId}?tenantId=${seed.tenantId}`)
+      .get(`/service-orders/occurrences/${occId}`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.ok(
@@ -286,7 +284,7 @@ async function main() {
     /* ════════════════ ORDER IN OCCURRENCE ════════════════ */
 
     const occOrder = await request(app.getHttpServer())
-      .post(`/service-orders/occurrences/${occId}/orders?tenantId=${seed.tenantId}`)
+      .post(`/service-orders/occurrences/${occId}/orders`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
         type: 'LENTIDAO',
@@ -306,8 +304,7 @@ async function main() {
       .post('/service-orders')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        tenantId: seed.tenantId,
-        type: 'ROMPIMENTO',
+                type: 'ROMPIMENTO',
         priority: 'CRITICA',
         title: 'OS e2e atraso',
         description: 'Teste de aprovacao obrigatoria',
@@ -319,7 +316,7 @@ async function main() {
     assert.ok(orderId, 'created order id missing');
 
     const summary = await request(app.getHttpServer())
-      .get(`/service-orders/summary?tenantId=${seed.tenantId}&status=ABERTA`)
+      .get(`/service-orders/summary?status=ABERTA`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(summary.status, 200, 'summary endpoint should return 200');
@@ -330,7 +327,7 @@ async function main() {
 
     const filteredList = await request(app.getHttpServer())
       .get(
-        `/service-orders?tenantId=${seed.tenantId}&priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`
+        `/service-orders?priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`
       )
       .set('Authorization', `Bearer ${accessToken}`);
 
@@ -339,16 +336,16 @@ async function main() {
 
     const csvExport = await request(app.getHttpServer())
       .get(
-        `/service-orders/export/csv?tenantId=${seed.tenantId}&priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`
+        `/service-orders/export/csv?priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`
       )
       .set('Authorization', `Bearer ${accessToken}`);
 
-    assert.equal(csvExport.status, 200, 'csv export should return 200');
+    if (csvExport.status !== 200) console.log("CSV ERROR:", csvExport.body); assert.equal(csvExport.status, 200, 'csv export should return 200');
     assert.match(csvExport.headers['content-type'] || '', /text\/csv/, 'csv export should return text/csv');
     assert.match(csvExport.text || '', /protocol,externalProtocol,title,description/, 'csv export header missing');
 
     const exportHistory = await request(app.getHttpServer())
-      .get(`/service-orders/export/history?tenantId=${seed.tenantId}&limit=5`)
+      .get(`/service-orders/export/history?limit=5`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(exportHistory.status, 200, 'export history should return 200');
@@ -358,7 +355,7 @@ async function main() {
 
     const exportId: string = exportHistory.body[0].id;
     const exportDownload = await request(app.getHttpServer())
-      .get(`/service-orders/export/${exportId}/download?tenantId=${seed.tenantId}`)
+      .get(`/service-orders/export/${exportId}/download`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(exportDownload.status, 200, 'export download should return 200');
@@ -421,9 +418,9 @@ async function main() {
 
     /* ════════════════ WEBHOOK IXC ════════════════ */
 
-    const webhookPayloadObject = {
-      tenantId: seed.tenantId,
-      eventType: 'ticket.updated',
+	    const webhookPayloadObject = {
+	      tenantId: seed.tenantId,
+	            eventType: 'ticket.updated',
       externalProtocol: `IXC-${randomUUID()}`,
       status: 'em analise',
       title: 'Webhook IXC E2E',
@@ -450,8 +447,7 @@ async function main() {
       .post('/knowledge/articles')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        tenantId: seed.tenantId,
-        title: 'Artigo E2E de Teste',
+                title: 'Artigo E2E de Teste',
         content: 'Conteúdo do artigo criado automaticamente no e2e.',
         tags: ['e2e', 'teste'],
         isPublished: true
@@ -462,7 +458,7 @@ async function main() {
     const articleId: string = articleCreate.body.id;
 
     const articleList = await request(app.getHttpServer())
-      .get(`/knowledge/articles?tenantId=${seed.tenantId}`)
+      .get(`/knowledge/articles`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(articleList.status, 200, 'list articles should return 200');
@@ -470,7 +466,7 @@ async function main() {
     assert.ok(articleList.body.length >= 1, 'must have at least 1 article');
 
     const articleUpdate = await request(app.getHttpServer())
-      .patch(`/knowledge/articles/${articleId}?tenantId=${seed.tenantId}`)
+      .patch(`/knowledge/articles/${articleId}`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ title: 'Artigo E2E Atualizado' });
 
@@ -485,8 +481,7 @@ async function main() {
       .post('/knowledge/credentials')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        tenantId: seed.tenantId,
-        provider: 'IXC Soft',
+                provider: 'IXC Soft',
         equipmentType: 'OLT',
         equipmentName: 'Huawei MA5800',
         environment: 'production',
@@ -501,7 +496,7 @@ async function main() {
     const credId: string = credCreate.body.id;
 
     const credList = await request(app.getHttpServer())
-      .get(`/knowledge/credentials?tenantId=${seed.tenantId}`)
+      .get(`/knowledge/credentials`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(credList.status, 200, 'list credentials should return 200');
@@ -514,7 +509,7 @@ async function main() {
     assert.equal(createdCredentialOnList?.equipmentName, 'Huawei MA5800', 'credential equipmentName must match');
 
     const providerList = await request(app.getHttpServer())
-      .get(`/knowledge/credentials/providers?tenantId=${seed.tenantId}`)
+      .get(`/knowledge/credentials/providers`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(providerList.status, 200, 'list credential providers should return 200');
@@ -522,7 +517,7 @@ async function main() {
     assert.ok(providerList.body.items.length >= 1, 'provider list must have at least 1 provider');
 
     const credReveal = await request(app.getHttpServer())
-      .post(`/knowledge/credentials/${credId}/reveal?tenantId=${seed.tenantId}`)
+      .post(`/knowledge/credentials/${credId}/reveal`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(credReveal.status, 201, 'reveal credential should return 201');
@@ -538,8 +533,7 @@ async function main() {
       .post('/knowledge/notes')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-        tenantId: seed.tenantId,
-        title: 'Nota E2E',
+                title: 'Nota E2E',
         content: 'Conteúdo da nota e2e',
         pinned: true
       });
@@ -549,7 +543,7 @@ async function main() {
     const noteId: string = noteCreate.body.id;
 
     const noteList = await request(app.getHttpServer())
-      .get(`/knowledge/notes?tenantId=${seed.tenantId}`)
+      .get(`/knowledge/notes`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(noteList.status, 200, 'list notes should return 200');
@@ -557,21 +551,21 @@ async function main() {
     assert.ok(noteList.body.length >= 1, 'must have at least 1 note');
 
     const noteUpdate = await request(app.getHttpServer())
-      .patch(`/knowledge/notes/${noteId}?tenantId=${seed.tenantId}`)
+      .patch(`/knowledge/notes/${noteId}`)
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ title: 'Nota E2E Updated', pinned: false });
 
     assert.equal(noteUpdate.status, 200, 'update note should return 200');
 
     const noteDelete = await request(app.getHttpServer())
-      .delete(`/knowledge/notes/${noteId}?tenantId=${seed.tenantId}`)
+      .delete(`/knowledge/notes/${noteId}`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(noteDelete.status, 200, 'delete note should return 200');
 
     // verify deletion
     const noteListAfterDelete = await request(app.getHttpServer())
-      .get(`/knowledge/notes?tenantId=${seed.tenantId}`)
+      .get(`/knowledge/notes`)
       .set('Authorization', `Bearer ${accessToken}`);
 
     const deletedNote = (noteListAfterDelete.body as Array<{ id: string }>).find((n) => n.id === noteId);
@@ -579,12 +573,39 @@ async function main() {
 
     console.log('[e2e] knowledge: notes create/list/update/delete ✓');
 
+    /* ════════════════ CALENDAR ════════════════ */
+
+    const calendarEvtRes = await request(app.getHttpServer())
+      .post('/calendar/events')
+      .set('authorization', `Bearer ${accessToken}`)
+      .send({
+                title: 'Smoke Test Event',
+        startAt: new Date().toISOString(),
+        endAt: new Date(Date.now() + 3600000).toISOString(),
+        isGlobal: true
+      });
+    assert.strictEqual(calendarEvtRes.status, 201, 'calendar evt create should be 201');
+    const calendarEvtId = calendarEvtRes.body.id;
+    assert.ok(calendarEvtId, 'calendar event id should exist');
+
+    const calendarListRes = await request(app.getHttpServer())
+      .get(`/calendar/events`)
+      .set('authorization', `Bearer ${accessToken}`);
+    assert.strictEqual(calendarListRes.status, 200, 'calendar evt list should be 200');
+    assert.ok(calendarListRes.body.length > 0, 'calendar event should be in list');
+
+    const calendarDelRes = await request(app.getHttpServer())
+      .delete(`/calendar/events/${calendarEvtId}`)
+      .set('authorization', `Bearer ${accessToken}`);
+    assert.strictEqual(calendarDelRes.status, 200, 'calendar evt delete should be 200');
+
+    console.log('[e2e] calendar: create/list/delete ✓');
+
     /* ════════════════ AUDIT TRAIL ════════════════ */
 
     const exportLog = await prisma.auditLog.findFirst({
       where: {
-        tenantId: seed.tenantId,
-        action: 'EXPORT',
+                action: 'EXPORT',
         resourceType: 'report_export'
       },
       orderBy: { createdAt: 'desc' }
@@ -593,8 +614,7 @@ async function main() {
 
     const reportExport = await prisma.reportExport.findFirst({
       where: {
-        tenantId: seed.tenantId,
-        reportType: 'service_orders_csv'
+                reportType: 'service_orders_csv'
       },
       orderBy: { createdAt: 'desc' }
     });

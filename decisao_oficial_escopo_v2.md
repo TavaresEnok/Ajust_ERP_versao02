@@ -130,7 +130,6 @@ Arquitetura obrigatoria:
 - NestJS Gateway (WebSocket)
 - PostgreSQL
 - Redis
-- RabbitMQ ou NATS (Kafka apenas se escala massiva exigir)
 - Prisma
 - JWT + Refresh
 - Zod ou class-validator
@@ -140,8 +139,6 @@ Portas Docker (Slot 4):
 - `8071` api/ws
 - `8072` postgres
 - `8073` redis
-- `8074` rabbitmq amqp
-- `8075` rabbitmq management
 - `8076` worker
 - `8077-8079` servicos auxiliares
 - `8080-8089` reserva

@@ -37,11 +37,22 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Invalid access token payload.');
     }
 
+    // ─── 1 query: session + user (antes eram 3 queries separadas) ────────────
     const session = await this.prisma.session.findUnique({
-      where: { id: payload.sid }
+      where: { id: payload.sid },
+      include: {
+        user: {
+          select: { id: true, status: true, deletedAt: true },
+        },
+      },
     });
 
-    if (!session || session.userId !== payload.sub || session.revokedAt || session.expiresAt < new Date()) {
+    if (
+      !session ||
+      session.userId !== payload.sub ||
+      session.revokedAt ||
+      session.expiresAt < new Date()
+    ) {
       throw new UnauthorizedException('Session is revoked, invalid, or expired.');
     }
 
@@ -49,25 +60,22 @@ export class AuthGuard implements CanActivate {
       throw new UnauthorizedException('Tenant scope mismatch for session.');
     }
 
-    const user = await this.prisma.user.findUnique({
-      where: { id: payload.sub },
-      select: { id: true, status: true, deletedAt: true }
-    });
-
+    const { user } = session;
     if (!user || user.deletedAt || user.status !== 'ACTIVE') {
       throw new UnauthorizedException('User is inactive or not found.');
     }
 
+    // Resolve papel atual do banco (garante papel atualizado mesmo com token antigo)
     let role = payload.role ?? null;
     if (session.tenantId) {
       const membership = await this.prisma.userTenant.findUnique({
         where: {
           userId_tenantId: {
             userId: payload.sub,
-            tenantId: session.tenantId
-          }
+            tenantId: session.tenantId,
+          },
         },
-        include: { role: true }
+        select: { role: { select: { code: true } } },
       });
 
       if (!membership) {
@@ -81,7 +89,7 @@ export class AuthGuard implements CanActivate {
       userId: payload.sub,
       sessionId: payload.sid,
       tenantId: payload.tenantId ?? null,
-      role
+      role,
     };
 
     return true;

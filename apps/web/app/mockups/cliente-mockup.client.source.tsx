@@ -471,7 +471,7 @@ const ClientSettingsView = ({ logo, users, roles, tenantId, userRole, notify, on
 
       {/* Add modal */}
       {showAdd && (
-        <DarkModal title="Adicionar Usuário" onClose={() => { setShowAdd(false); setErr(''); }}
+        <ErpModal title="Adicionar Usuário" onClose={() => { setShowAdd(false); setErr(''); }}
           actions={<>
             <button onClick={() => setShowAdd(false)} className={cn('px-4 py-2.5 rounded-xl text-sm font-semibold border transition-colors', dark ? 'border-slate-700/50 text-slate-400 hover:bg-white/5' : 'border-slate-200 text-slate-500 hover:bg-slate-100')}>Cancelar</button>
             <button onClick={add} disabled={submitting} className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 rounded-xl text-sm font-semibold text-white disabled:opacity-50 transition-colors">{submitting ? 'Salvando...' : 'Salvar'}</button>
@@ -492,7 +492,7 @@ const ClientSettingsView = ({ logo, users, roles, tenantId, userRole, notify, on
             </div>
             {err && <div className="text-sm text-rose-400 bg-rose-500/10 border border-rose-500/20 rounded-xl px-3 py-2">{err}</div>}
           </div>
-        </DarkModal>
+        </ErpModal>
       )}
     </>
   );

@@ -16,10 +16,13 @@ export function RealtimeEvents() {
   const [lastError, setLastError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
-  const wsUrl = useMemo(
-    () => process.env.NEXT_PUBLIC_WS_URL || process.env.API_BASE_URL || 'http://localhost:8071',
-    []
-  );
+  const wsUrl = useMemo(() => {
+    if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
+    if (typeof window !== 'undefined') {
+      return `${window.location.protocol}//${window.location.hostname}:8071`;
+    }
+    return 'http://localhost:8071';
+  }, []);
 
   useEffect(() => {
     return () => {

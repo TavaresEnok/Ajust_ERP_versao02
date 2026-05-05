@@ -227,6 +227,10 @@ export default function LoginPage() {
               </div>
             </label>
 
+            <div className="flex justify-end mt-2">
+              <a href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Esqueci minha senha</a>
+            </div>
+
             {error && (
               <div className="flex items-center gap-2 rounded-xl border border-rose-900/60 bg-rose-950/40 px-3 py-2.5 text-xs text-rose-300">
                 <AlertCircle size={14} />
@@ -244,28 +248,30 @@ export default function LoginPage() {
             </button>
           </form>
 
-          <div className="mt-7 border-t border-white/10 pt-4">
-            <p className="text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">Logins de exemplo</p>
-            <div className="mt-3 grid grid-cols-1 gap-2">
-              {EXAMPLE_ACCOUNTS.map((account) => (
-                <button
-                  key={account.label}
-                  type="button"
-                  onClick={() => {
-                    setIdentifier(account.identifier);
-                    setPassword(account.password);
-                    setError('');
-                  }}
-                  className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.07]"
-                >
-                  <p className="text-xs font-bold text-white">{account.label}</p>
-                  <p className="mt-0.5 text-[11px] text-slate-400">{account.identifier}</p>
-                  <p className="text-[11px] text-slate-500">{account.password}</p>
-                </button>
-              ))}
+          {process.env.NODE_ENV !== 'production' && (
+            <div className="mt-7 border-t border-white/10 pt-4">
+              <p className="text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">Logins de exemplo</p>
+              <div className="mt-3 grid grid-cols-1 gap-2">
+                {EXAMPLE_ACCOUNTS.map((account) => (
+                  <button
+                    key={account.label}
+                    type="button"
+                    onClick={() => {
+                      setIdentifier(account.identifier);
+                      setPassword(account.password);
+                      setError('');
+                    }}
+                    className="rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2.5 text-left transition hover:bg-white/[0.07]"
+                  >
+                    <p className="text-xs font-bold text-white">{account.label}</p>
+                    <p className="mt-0.5 text-[11px] text-slate-400">{account.identifier}</p>
+                    <p className="text-[11px] text-slate-500">{account.password}</p>
+                  </button>
+                ))}
+              </div>
+              <p className="mt-2 text-[11px] text-slate-500">Clique em um exemplo para preencher automaticamente.</p>
             </div>
-            <p className="mt-2 text-[11px] text-slate-500">Clique em um exemplo para preencher automaticamente.</p>
-          </div>
+          )}
         </div>
       </section>
 

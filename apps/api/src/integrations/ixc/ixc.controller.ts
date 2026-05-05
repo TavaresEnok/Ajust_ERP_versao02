@@ -5,12 +5,13 @@ import {
   Headers,
   Inject,
   Post,
-  Query,
   Req,
-  UseGuards
+  UseGuards,
+  UnauthorizedException
 } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard } from '../../auth/auth.guard';
+import { TenantIsolationGuard } from '../../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../../common/request-with-auth';
 import { assertAnyRole } from '../../common/role-utils';
 import { IxcService } from './ixc.service';
@@ -61,21 +62,17 @@ export class IxcController {
     return this.ixcService.receiveWebhook({ ...input, rawBody, signature: signatureHeader });
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantIsolationGuard)
   @Post('configure')
   async configure(
     @Req() req: RequestWithAuth,
-    @Body() body: unknown,
-    @Query('tenantId') tenantIdParam?: string
+    @Body() body: unknown
   ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const input = ConfigureSchema.parse(body);
-    const tenantId = tenantIdParam || input.tenantId || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for configure.');
-    }
     return this.ixcService.upsertIntegration({
-      tenantId,
+      tenantId: req.auth.tenantId,
       baseUrl: input.baseUrl,
       status: input.status,
       webhookSecret: input.webhookSecret,
@@ -83,18 +80,14 @@ export class IxcController {
     });
   }
 
-  @UseGuards(AuthGuard)
+  @UseGuards(AuthGuard, TenantIsolationGuard)
   @Post('reconcile')
   async reconcile(
     @Req() req: RequestWithAuth,
-    @Body() body: { tenantId?: string },
-    @Query('tenantId') tenantIdParam?: string
+    @Body() body: { tenantId?: string }
   ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
-    const tenantId = tenantIdParam || body?.tenantId || req.auth?.tenantId;
-    if (!tenantId) {
-      throw new BadRequestException('tenantId is required for reconcile.');
-    }
-    return this.ixcService.runManualReconciliation(tenantId);
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    return this.ixcService.runManualReconciliation(req.auth.tenantId);
   }
 }

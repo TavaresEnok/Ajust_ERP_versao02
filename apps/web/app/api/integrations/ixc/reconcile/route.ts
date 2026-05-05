@@ -7,9 +7,7 @@ export async function POST(request: NextRequest) {
   if (session instanceof NextResponse) return session;
 
   const body = (await request.json().catch(() => ({}))) as Record<string, unknown>;
-  const payload = {
-    tenantId: String(body.tenantId || session.me.tenant!.id)
-  };
+  const payload = {};
 
   const response = await fetch(`${apiBaseUrl()}/integrations/ixc/reconcile`, {
     method: 'POST',

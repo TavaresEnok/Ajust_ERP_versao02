@@ -9,7 +9,7 @@ import {
   PRIORITY_OPTIONS,
   STATUS_OPTIONS,
   TYPE_OPTIONS
-} from '../../lib/erp-data';
+} from '../../lib/query-builders';
 
 export function OrderFilters({ path, filters }: { path: '/gerencia' | '/analista' | '/cliente'; filters: DashboardFilters }) {
   const exportHref = `/api/service-orders/export?${buildDashboardQuery(filters, { page: 1 })}`;

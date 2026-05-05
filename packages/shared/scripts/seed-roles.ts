@@ -23,13 +23,11 @@ async function main() {
     });
   }
 
-  // eslint-disable-next-line no-console
   console.log(`[seed] roles upserted: ${roles.length}`);
 }
 
 main()
   .catch((err) => {
-    // eslint-disable-next-line no-console
     console.error(err);
     process.exit(1);
   })

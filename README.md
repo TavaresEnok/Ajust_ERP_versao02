@@ -12,10 +12,7 @@ Monorepo inicial com:
 - Web: `8070`
 - API/WS: `8071`
 - PostgreSQL: `8072`
-- Redis: `8073`
-- RabbitMQ AMQP: `8074`
-- RabbitMQ Management: `8075`
-- Worker Health: `8076`
+- Redis: Sistema de cache (porta `8073`)
 - pgAdmin: `8077`
 
 ## Subir ambiente

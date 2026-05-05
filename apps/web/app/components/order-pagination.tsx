@@ -1,4 +1,4 @@
-import { buildDashboardQuery, DashboardFilters, DashboardPagination } from '../../lib/erp-data';
+import { buildDashboardQuery, DashboardFilters, DashboardPagination } from '../../lib/query-builders';
 
 type Path = '/gerencia' | '/analista' | '/cliente';
 

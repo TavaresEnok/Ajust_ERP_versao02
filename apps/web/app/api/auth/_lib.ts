@@ -10,6 +10,7 @@ export type LoginApiResponse = {
     email: string;
     tenantId: string;
     role: string;
+    tradeName?: string;
   };
 };
 
@@ -39,11 +40,21 @@ export function authCookieOptions(maxAgeSeconds: number) {
 export function applyLoginCookies(response: NextResponse, payload: LoginApiResponse | RefreshApiResponse) {
   const role = 'user' in payload ? payload.user.role : payload.role || '';
   const tenantId = 'user' in payload ? payload.user.tenantId : payload.tenantId || '';
+  const userId = 'user' in payload ? payload.user.id : '';
+  const userName = 'user' in payload ? encodeURIComponent(payload.user.name || '') : '';
+  const userEmail = 'user' in payload ? encodeURIComponent(payload.user.email || '') : '';
+  const tradeName = 'user' in payload && payload.user.tradeName ? encodeURIComponent(payload.user.tradeName) : '';
+
   response.cookies.set('erp_access_token', payload.accessToken, authCookieOptions(15 * 60));
   response.cookies.set('erp_refresh_token', payload.refreshToken, authCookieOptions(7 * 24 * 60 * 60));
   response.cookies.set('erp_session_id', payload.sessionId, authCookieOptions(7 * 24 * 60 * 60));
   response.cookies.set('erp_role', role, authCookieOptions(7 * 24 * 60 * 60));
   response.cookies.set('erp_tenant_id', tenantId, authCookieOptions(7 * 24 * 60 * 60));
+
+  if (userId) response.cookies.set('erp_user_id', userId, authCookieOptions(7 * 24 * 60 * 60));
+  if (userName) response.cookies.set('erp_user_name', userName, authCookieOptions(7 * 24 * 60 * 60));
+  if (userEmail) response.cookies.set('erp_user_email', userEmail, authCookieOptions(7 * 24 * 60 * 60));
+  if (tradeName) response.cookies.set('erp_trade_name', tradeName, authCookieOptions(7 * 24 * 60 * 60));
 }
 
 export function clearAuthCookies(response: NextResponse) {
@@ -53,4 +64,8 @@ export function clearAuthCookies(response: NextResponse) {
   response.cookies.set('erp_session_id', '', expired);
   response.cookies.set('erp_role', '', expired);
   response.cookies.set('erp_tenant_id', '', expired);
+  response.cookies.set('erp_user_id', '', expired);
+  response.cookies.set('erp_user_name', '', expired);
+  response.cookies.set('erp_user_email', '', expired);
+  response.cookies.set('erp_trade_name', '', expired);
 }
