@@ -1,5 +1,5 @@
+import { ApiTags, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import {
-  BadRequestException,
   Body,
   Controller,
   Delete,
@@ -11,7 +11,7 @@ import {
   Query,
   Req,
   UseGuards,
-  UnauthorizedException
+  UnauthorizedException,
 } from '@nestjs/common';
 import { z } from 'zod';
 import { AuthGuard } from '../auth/auth.guard';
@@ -22,7 +22,7 @@ import { KnowledgeService } from './knowledge.service';
 const ListArticlesSchema = z.object({
   search: z.string().trim().min(2).optional(),
   tag: z.string().trim().min(2).optional(),
-  includeDrafts: z.coerce.boolean().optional()
+  includeDrafts: z.coerce.boolean().optional(),
 });
 
 const CreateArticleSchema = z.object({
@@ -30,14 +30,14 @@ const CreateArticleSchema = z.object({
   title: z.string().min(3),
   content: z.string().min(3),
   tags: z.array(z.string()).optional(),
-  isPublished: z.boolean().optional()
+  isPublished: z.boolean().optional(),
 });
 
 const UpdateArticleSchema = z.object({
   title: z.string().min(3).optional(),
   content: z.string().min(3).optional(),
   tags: z.array(z.string()).optional(),
-  isPublished: z.boolean().optional()
+  isPublished: z.boolean().optional(),
 });
 
 const CreateCredentialSchema = z.object({
@@ -49,7 +49,7 @@ const CreateCredentialSchema = z.object({
   host: z.string().min(2),
   username: z.string().min(2),
   secret: z.string().min(1),
-  notes: z.string().optional()
+  notes: z.string().optional(),
 });
 
 const UpdateCredentialSchema = z.object({
@@ -60,7 +60,7 @@ const UpdateCredentialSchema = z.object({
   host: z.string().min(2).optional(),
   username: z.string().optional(),
   secret: z.string().min(1).optional(),
-  notes: z.string().nullable().optional()
+  notes: z.string().nullable().optional(),
 });
 
 const ListCredentialsSchema = z.object({
@@ -68,10 +68,22 @@ const ListCredentialsSchema = z.object({
   provider: z.string().trim().min(2).optional(),
   equipmentType: z.string().trim().min(2).optional(),
   environment: z.string().trim().min(2).optional(),
-  sortBy: z.enum(['provider', 'equipmentType', 'equipmentName', 'environment', 'host', 'username', 'notes', 'updatedAt', 'createdAt']).optional(),
+  sortBy: z
+    .enum([
+      'provider',
+      'equipmentType',
+      'equipmentName',
+      'environment',
+      'host',
+      'username',
+      'notes',
+      'updatedAt',
+      'createdAt',
+    ])
+    .optional(),
   sortDir: z.enum(['asc', 'desc']).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
-  offset: z.coerce.number().int().min(0).optional()
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
 const ListCredentialProvidersSchema = z.object({
@@ -79,29 +91,38 @@ const ListCredentialProvidersSchema = z.object({
   equipmentType: z.string().trim().min(2).optional(),
   environment: z.string().trim().min(2).optional(),
   limit: z.coerce.number().int().min(1).max(1000).optional(),
-  offset: z.coerce.number().int().min(0).optional()
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
 const ListNotesSchema = z.object({
   search: z.string().trim().min(2).optional(),
-  pinned: z.coerce.boolean().optional()
+  pinned: z.coerce.boolean().optional(),
 });
 
 const CreateNoteSchema = z.object({
   tenantId: z.string().uuid().optional(),
   title: z.string().min(1),
   content: z.string().optional(),
-  pinned: z.boolean().optional()
+  pinned: z.boolean().optional(),
 });
 
-const UpdateNoteSchema = z.object({
-  title: z.string().min(1).optional(),
-  content: z.string().optional(),
-  pinned: z.boolean().optional()
-}).refine((data) => data.title !== undefined || data.content !== undefined || data.pinned !== undefined, {
-  message: 'At least one note field must be provided.'
-});
+const UpdateNoteSchema = z
+  .object({
+    title: z.string().min(1).optional(),
+    content: z.string().optional(),
+    pinned: z.boolean().optional(),
+  })
+  .refine(
+    (data) => data.title !== undefined || data.content !== undefined || data.pinned !== undefined,
+    {
+      message: 'At least one note field must be provided.',
+    },
+  );
 
+@ApiTags('Base de Conhecimento')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'Não autenticado' })
+@ApiResponse({ status: 403, description: 'Permissão insuficiente' })
 @Controller('knowledge')
 @UseGuards(AuthGuard, TenantIsolationGuard)
 export class KnowledgeController {
@@ -112,7 +133,7 @@ export class KnowledgeController {
     @Req() req: RequestWithAuth,
     @Query('search') search?: string,
     @Query('tag') tag?: string,
-    @Query('includeDrafts') includeDrafts?: string
+    @Query('includeDrafts') includeDrafts?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -120,7 +141,7 @@ export class KnowledgeController {
 
     return this.knowledgeService.listArticles(req.auth.role || '', req.auth.userId, {
       tenantId: req.auth.tenantId,
-      ...input
+      ...input,
     });
   }
 
@@ -131,30 +152,34 @@ export class KnowledgeController {
 
     return this.knowledgeService.createArticle(req.auth.role || '', req.auth.userId, {
       ...input,
-      tenantId: req.auth.tenantId
+      tenantId: req.auth.tenantId,
     });
   }
 
   @Patch('articles/:id')
-  async patchArticle(
-    @Req() req: RequestWithAuth,
-    @Param('id') id: string,
-    @Body() body: unknown
-  ) {
+  async patchArticle(@Req() req: RequestWithAuth, @Param('id') id: string, @Body() body: unknown) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const patch = UpdateArticleSchema.parse(body);
-    return this.knowledgeService.updateArticle(req.auth.role || '', req.auth.userId, req.auth.tenantId, id, patch);
+    return this.knowledgeService.updateArticle(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+      patch,
+    );
   }
 
   @Delete('articles/:id')
-  async deleteArticle(
-    @Req() req: RequestWithAuth,
-    @Param('id') id: string
-  ) {
+  async deleteArticle(@Req() req: RequestWithAuth, @Param('id') id: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    return this.knowledgeService.deleteArticle(req.auth.role || '', req.auth.userId, req.auth.tenantId, id);
+    return this.knowledgeService.deleteArticle(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+    );
   }
 
   @Get('credentials')
@@ -167,14 +192,23 @@ export class KnowledgeController {
     @Query('sortBy') sortBy?: string,
     @Query('sortDir') sortDir?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string
+    @Query('offset') offset?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    const input = ListCredentialsSchema.parse({ search, provider, equipmentType, environment, sortBy, sortDir, limit, offset });
+    const input = ListCredentialsSchema.parse({
+      search,
+      provider,
+      equipmentType,
+      environment,
+      sortBy,
+      sortDir,
+      limit,
+      offset,
+    });
     return this.knowledgeService.listCredentials(req.auth.role || '', req.auth.userId, {
       tenantId: req.auth.tenantId,
-      ...input
+      ...input,
     });
   }
 
@@ -185,14 +219,20 @@ export class KnowledgeController {
     @Query('equipmentType') equipmentType?: string,
     @Query('environment') environment?: string,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string
+    @Query('offset') offset?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    const input = ListCredentialProvidersSchema.parse({ search, equipmentType, environment, limit, offset });
+    const input = ListCredentialProvidersSchema.parse({
+      search,
+      equipmentType,
+      environment,
+      limit,
+      offset,
+    });
     return this.knowledgeService.listCredentialProviders(req.auth.role || '', req.auth.userId, {
       tenantId: req.auth.tenantId,
-      ...input
+      ...input,
     });
   }
 
@@ -203,54 +243,64 @@ export class KnowledgeController {
 
     return this.knowledgeService.createCredential(req.auth.role || '', req.auth.userId, {
       ...input,
-      tenantId: req.auth.tenantId
+      tenantId: req.auth.tenantId,
     });
   }
 
   @Post('credentials/:id/reveal')
-  async revealCredential(
-    @Req() req: RequestWithAuth,
-    @Param('id') id: string
-  ) {
+  async revealCredential(@Req() req: RequestWithAuth, @Param('id') id: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    return this.knowledgeService.revealCredential(req.auth.role || '', req.auth.userId, req.auth.tenantId, id);
+    return this.knowledgeService.revealCredential(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+    );
   }
 
   @Patch('credentials/:id')
   async patchCredential(
     @Req() req: RequestWithAuth,
     @Param('id') id: string,
-    @Body() body: unknown
+    @Body() body: unknown,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const patch = UpdateCredentialSchema.parse(body);
-    return this.knowledgeService.updateCredential(req.auth.role || '', req.auth.userId, req.auth.tenantId, id, patch);
+    return this.knowledgeService.updateCredential(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+      patch,
+    );
   }
 
   @Delete('credentials/:id')
-  async deleteCredential(
-    @Req() req: RequestWithAuth,
-    @Param('id') id: string
-  ) {
+  async deleteCredential(@Req() req: RequestWithAuth, @Param('id') id: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    return this.knowledgeService.deleteCredential(req.auth.role || '', req.auth.userId, req.auth.tenantId, id);
+    return this.knowledgeService.deleteCredential(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+    );
   }
 
   @Get('notes')
   async listNotes(
     @Req() req: RequestWithAuth,
     @Query('search') search?: string,
-    @Query('pinned') pinned?: string
+    @Query('pinned') pinned?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListNotesSchema.parse({ search, pinned });
     return this.knowledgeService.listNotes(req.auth.role || '', req.auth.userId, {
       tenantId: req.auth.tenantId,
-      ...input
+      ...input,
     });
   }
 
@@ -261,29 +311,33 @@ export class KnowledgeController {
 
     return this.knowledgeService.createNote(req.auth.role || '', req.auth.userId, {
       ...input,
-      tenantId: req.auth.tenantId
+      tenantId: req.auth.tenantId,
     });
   }
 
   @Patch('notes/:id')
-  async patchNote(
-    @Req() req: RequestWithAuth,
-    @Param('id') id: string,
-    @Body() body: unknown
-  ) {
+  async patchNote(@Req() req: RequestWithAuth, @Param('id') id: string, @Body() body: unknown) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const patch = UpdateNoteSchema.parse(body);
-    return this.knowledgeService.updateNote(req.auth.role || '', req.auth.userId, req.auth.tenantId, id, patch);
+    return this.knowledgeService.updateNote(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+      patch,
+    );
   }
 
   @Delete('notes/:id')
-  async deleteNote(
-    @Req() req: RequestWithAuth,
-    @Param('id') id: string
-  ) {
+  async deleteNote(@Req() req: RequestWithAuth, @Param('id') id: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    return this.knowledgeService.deleteNote(req.auth.role || '', req.auth.userId, req.auth.tenantId, id);
+    return this.knowledgeService.deleteNote(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+    );
   }
 }

@@ -1,0 +1,116 @@
+services:
+  web:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/web:${IMAGE_TAG:-latest}
+    ports:
+      - "8080:3000"
+    env_file:
+      - .env.staging.example
+    environment:
+      - NODE_ENV=staging
+      - API_INTERNAL_URL=http://api:3001
+      - API_BASE_URL=${API_BASE_URL}
+      - WS_PUBLIC_URL=${API_BASE_URL}
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+    restart: unless-stopped
+
+  api:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/api:${IMAGE_TAG:-latest}
+    ports:
+      - "8081:3001"
+    env_file:
+      - .env.staging.example
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
+      - UPLOAD_ROOT=/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/monitoring/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  worker:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/worker:${IMAGE_TAG:-latest}
+    ports:
+      - "8086:3002"
+    env_file:
+      - .env.staging.example
+    environment:
+      - NODE_ENV=staging
+      - DATABASE_URL=${DATABASE_URL}
+      - REDIS_URL=redis://redis:6379
+      - IXC_RECONCILE_INTERVAL_MS=300000
+      - EXPORT_RETENTION_DAYS=30
+      - EXPORT_RETENTION_INTERVAL_MS=3600000
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM}
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    ports:
+      - "8082:5432"
+    env_file:
+      - .env.staging.example
+    environment:
+      POSTGRES_DB: ajust_staging
+      POSTGRES_USER: ajust_staging
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_staging_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ajust_staging -d ajust_staging"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "8083:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    restart: unless-stopped
+
+volumes:
+  postgres_staging_data:

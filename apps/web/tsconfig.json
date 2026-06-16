@@ -1,6 +1,10 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["./*"]
+    },
     "plugins": [
       {
         "name": "next"
@@ -18,10 +22,5 @@
     "next-env.d.ts",
     ".next-dev/types/**/*.ts"
   ],
-  "exclude": [
-    "node_modules",
-    ".next-dev",
-    "app/mockups/analista-mockup.impl.runtime.client.source.tsx",
-    "app/mockups/cliente-mockup.client.source.tsx"
-  ]
+  "exclude": ["node_modules", ".next", ".next-dev", ".next-local", "tmp", "app/_lab", "app/**/_lab"]
 }

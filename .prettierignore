@@ -8,3 +8,4 @@ coverage
 *.min.js
 prisma/migrations
 **/mockups/**
+.gitleaks.toml

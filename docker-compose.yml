@@ -18,6 +18,12 @@ services:
       - "${WEB_PORT:-8070}:${INTERNAL_WEB_PORT:-3000}"
     depends_on:
       - api
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
     restart: unless-stopped
 
   api:
@@ -29,7 +35,7 @@ services:
     environment:
       CI: "true"
       PORT: ${INTERNAL_API_PORT:-3001}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ajust}:${POSTGRES_PASSWORD:-ajust123}@postgres:5432/${POSTGRES_DB:-ajust_erp}?schema=public
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
@@ -38,6 +44,9 @@ services:
       UPLOAD_ROOT: ${UPLOAD_ROOT:-/workspace/uploads}
       IXC_WEBHOOK_REQUIRE_SIGNATURE: ${IXC_WEBHOOK_REQUIRE_SIGNATURE:-true}
       SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-change-this-secret-key-in-production}
+      LOKI_URL: ${LOKI_URL:-http://loki:3100}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
+      OTEL_SERVICE_NAME: ajust-api
     volumes:
       - ./:/workspace
     ports:
@@ -46,7 +55,15 @@ services:
       postgres:
         condition: service_healthy
       redis:
+        condition: service_healthy
+      loki:
         condition: service_started
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/monitoring/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   worker:
@@ -58,7 +75,7 @@ services:
     environment:
       CI: "true"
       PORT: ${INTERNAL_WORKER_PORT:-3002}
-      DATABASE_URL: ${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ajust}:${POSTGRES_PASSWORD:-ajust123}@postgres:5432/${POSTGRES_DB:-ajust_erp}?schema=public
       REDIS_URL: ${REDIS_URL:-redis://redis:6379}
       IXC_RECONCILE_INTERVAL_MS: ${IXC_RECONCILE_INTERVAL_MS:-300000}
       EXPORT_RETENTION_DAYS: ${EXPORT_RETENTION_DAYS:-30}
@@ -72,6 +89,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
     restart: unless-stopped
 
   postgres:
@@ -95,13 +120,18 @@ services:
     image: redis:7-alpine
     ports:
       - "${REDIS_PORT:-8073}:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
     restart: unless-stopped
 
 
   pgadmin:
     image: dpage/pgadmin4:8
     environment:
-      PGADMIN_DEFAULT_EMAIL: admin@ajust.local
+      PGADMIN_DEFAULT_EMAIL: admin@example.com
       PGADMIN_DEFAULT_PASSWORD: admin123
     ports:
       - "${PGADMIN_PORT:-8077}:80"
@@ -109,5 +139,23 @@ services:
       - postgres
     restart: unless-stopped
 
+  # Centralized log aggregation — accessible at http://localhost:3100
+  # Connect Grafana to http://loki:3100 as a Loki datasource to query logs.
+  loki:
+    image: grafana/loki:3.0.0
+    ports:
+      - "${LOKI_PORT:-3100}:3100"
+    command: -config.file=/etc/loki/local-config.yaml
+    volumes:
+      - loki_data:/loki
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://localhost:3100/ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    restart: unless-stopped
+
 volumes:
   postgres_data:
+  loki_data:

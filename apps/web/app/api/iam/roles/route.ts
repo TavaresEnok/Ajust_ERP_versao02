@@ -9,12 +9,15 @@ export async function GET(request: NextRequest) {
   const response = await fetch(`${apiBaseUrl()}/iam/roles`, {
     method: 'GET',
     headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao listar perfis.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao listar perfis.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : []);

@@ -1,11 +1,12 @@
-import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger } from '@nestjs/common';
 import { unlink } from 'node:fs/promises';
+import { join } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
+import { validatePathWithinBase } from '../path-security';
 
 @Injectable()
-export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
+export class ExportRetentionService {
   private readonly logger = new Logger(ExportRetentionService.name);
-  private timer: NodeJS.Timeout | null = null;
   private running = false;
   private lastRunAt: string | null = null;
   private lastProcessed = 0;
@@ -14,22 +15,6 @@ export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
-  onModuleInit() {
-    const intervalMs = Number(process.env.EXPORT_RETENTION_INTERVAL_MS || 3600000);
-    void this.runOnce();
-    this.timer = setInterval(() => {
-      void this.runOnce();
-    }, intervalMs);
-    this.logger.log(`Export retention loop started. intervalMs=${intervalMs}`);
-  }
-
-  onModuleDestroy() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
-  }
-
   getStatus() {
     return {
       running: this.running,
@@ -37,7 +22,7 @@ export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
       lastRunAt: this.lastRunAt,
       lastProcessed: this.lastProcessed,
       lastErrors: this.lastErrors,
-      lastErrorMessage: this.lastErrorMessage
+      lastErrorMessage: this.lastErrorMessage,
     };
   }
 
@@ -51,14 +36,14 @@ export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
         where: {
           reportType: 'service_orders_csv',
           fileUrl: { not: null },
-          createdAt: { lt: cutoff }
+          createdAt: { lt: cutoff },
         },
         select: {
           id: true,
           tenantId: true,
-          fileUrl: true
+          fileUrl: true,
         },
-        take: 500
+        take: 500,
       });
 
       let processed = 0;
@@ -67,7 +52,9 @@ export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
       for (const target of targets) {
         if (!target.fileUrl) continue;
         try {
-          await unlink(target.fileUrl).catch((error: NodeJS.ErrnoException) => {
+          const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
+          const safePath = validatePathWithinBase(uploadRoot, target.fileUrl);
+          await unlink(safePath).catch((error: NodeJS.ErrnoException) => {
             if (error?.code !== 'ENOENT') throw error;
           });
 
@@ -75,8 +62,8 @@ export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
             where: { id: target.id },
             data: {
               fileUrl: null,
-              status: 'EXPIRED'
-            }
+              status: 'EXPIRED',
+            },
           });
 
           await this.prisma.auditLog.create({
@@ -88,9 +75,9 @@ export class ExportRetentionService implements OnModuleInit, OnModuleDestroy {
               resourceId: target.id,
               metadata: {
                 operation: 'retention_cleanup',
-                retentionDays: this.retentionDays()
-              }
-            }
+                retentionDays: this.retentionDays(),
+              },
+            },
           });
 
           processed += 1;

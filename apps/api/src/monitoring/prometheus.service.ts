@@ -22,6 +22,11 @@ export class PrometheusService {
   private tenantIsolationViolations: number = 0;
   private rateLimitExceeded: Counter = {};
 
+  private ordersCreatedCounter: Counter = {};
+  private slaBreachesCounter: Counter = {};
+  private activeSessions: Gauge = { value: 0 };
+  private workflowExecutionsCounter: Counter = {};
+
   recordHttpRequest(method: string, route: string, status: number, duration: number): void {
     const key = `${method}:${route}:${status}`;
     this.httpRequestCounter[key] = (this.httpRequestCounter[key] || 0) + 1;
@@ -59,6 +64,32 @@ export class PrometheusService {
 
   recordRateLimitExceeded(endpoint: string): void {
     this.rateLimitExceeded[endpoint] = (this.rateLimitExceeded[endpoint] || 0) + 1;
+  }
+
+  incrementOrdersCreated(priority: string, type: string): void {
+    const key = `${priority}:${type}`;
+    this.ordersCreatedCounter[key] = (this.ordersCreatedCounter[key] || 0) + 1;
+  }
+
+  incrementSlaBreaches(tenant: string): void {
+    this.slaBreachesCounter[tenant] = (this.slaBreachesCounter[tenant] || 0) + 1;
+  }
+
+  setActiveSessions(count: number): void {
+    this.activeSessions.value = Math.max(0, count);
+  }
+
+  incrementActiveSessions(): void {
+    this.activeSessions.value++;
+  }
+
+  decrementActiveSessions(): void {
+    this.activeSessions.value = Math.max(0, this.activeSessions.value - 1);
+  }
+
+  incrementWorkflowExecutions(rule: string, status: string): void {
+    const key = `${rule}:${status}`;
+    this.workflowExecutionsCounter[key] = (this.workflowExecutionsCounter[key] || 0) + 1;
   }
 
   private calculateMean(values: number[]): number {
@@ -116,6 +147,30 @@ export class PrometheusService {
     metrics += `\n# Rate Limit Violations\n`;
     for (const [endpoint, count] of Object.entries(this.rateLimitExceeded)) {
       metrics += `rate_limit_exceeded_total{endpoint="${endpoint}"} ${count}\n`;
+    }
+
+    // Orders Created
+    metrics += `\n# Orders Created\n`;
+    for (const [key, count] of Object.entries(this.ordersCreatedCounter)) {
+      const [priority, type] = key.split(':');
+      metrics += `ajust_orders_created_total{priority="${priority}",type="${type}"} ${count}\n`;
+    }
+
+    // SLA Breaches
+    metrics += `\n# SLA Breaches\n`;
+    for (const [tenant, count] of Object.entries(this.slaBreachesCounter)) {
+      metrics += `ajust_sla_breaches_total{tenant="${tenant}"} ${count}\n`;
+    }
+
+    // Active Sessions
+    metrics += `\n# Active Sessions\n`;
+    metrics += `ajust_active_sessions ${this.activeSessions.value}\n`;
+
+    // Workflow Executions
+    metrics += `\n# Workflow Executions\n`;
+    for (const [key, count] of Object.entries(this.workflowExecutionsCounter)) {
+      const [rule, status] = key.split(':');
+      metrics += `ajust_workflow_executions_total{rule="${rule}",status="${status}"} ${count}\n`;
     }
 
     return metrics;

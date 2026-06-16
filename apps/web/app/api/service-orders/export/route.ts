@@ -1,6 +1,14 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { buildServiceOrderApiQuery, normalizeDashboardFilters } from '../../../../lib/query-builders';
-import { apiBaseUrl, applyLoginCookies, clearAuthCookies, RefreshApiResponse } from '../../auth/_lib';
+import {
+  buildServiceOrderApiQuery,
+  normalizeDashboardFilters,
+} from '../../../../lib/query-builders';
+import {
+  apiBaseUrl,
+  applyLoginCookies,
+  clearAuthCookies,
+  RefreshApiResponse,
+} from '../../auth/_lib';
 
 type ApiMeResponse = {
   tenant: {
@@ -8,7 +16,9 @@ type ApiMeResponse = {
   } | null;
 };
 
-function searchParamsToRecord(params: URLSearchParams): Record<string, string | string[] | undefined> {
+function searchParamsToRecord(
+  params: URLSearchParams,
+): Record<string, string | string[] | undefined> {
   const record: Record<string, string | string[] | undefined> = {};
   for (const [key, value] of params.entries()) {
     const current = record[key];
@@ -36,7 +46,7 @@ async function fetchMe(accessToken: string) {
   const response = await fetch(`${apiBaseUrl()}/auth/me`, {
     method: 'GET',
     headers: { authorization: `Bearer ${accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
   if (!response.ok) return null;
   return (await response.json()) as ApiMeResponse;
@@ -47,7 +57,7 @@ async function refreshSession(refreshToken: string) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ refreshToken }),
-    cache: 'no-store'
+    cache: 'no-store',
   });
   if (!response.ok) return null;
   return (await response.json()) as RefreshApiResponse;
@@ -70,23 +80,31 @@ export async function GET(request: NextRequest) {
     }
 
     if (!me?.tenant?.id || !accessToken) {
-      const response = NextResponse.json({ error: 'Sessao expirada para exportacao.' }, { status: 401 });
+      const response = NextResponse.json(
+        { error: 'Sessao expirada para exportacao.' },
+        { status: 401 },
+      );
       clearAuthCookies(response);
       return response;
     }
 
-    const exportQuery = buildServiceOrderApiQuery(me.tenant.id, filters, { includePagination: false });
+    const exportQuery = buildServiceOrderApiQuery(me.tenant.id, filters, {
+      includePagination: false,
+    });
     const exportResponse = await fetch(`${apiBaseUrl()}/service-orders/export/csv?${exportQuery}`, {
       method: 'GET',
       headers: {
-        authorization: `Bearer ${accessToken}`
+        authorization: `Bearer ${accessToken}`,
       },
-      cache: 'no-store'
+      cache: 'no-store',
     });
 
     if (!exportResponse.ok) {
       const message = await exportResponse.text();
-      return NextResponse.json({ error: message || 'Falha ao exportar CSV.' }, { status: exportResponse.status });
+      return NextResponse.json(
+        { error: message || 'Falha ao exportar CSV.' },
+        { status: exportResponse.status },
+      );
     }
 
     const csv = await exportResponse.text();
@@ -95,8 +113,8 @@ export async function GET(request: NextRequest) {
       status: 200,
       headers: {
         'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': `attachment; filename="${fileName}"`
-      }
+        'content-disposition': `attachment; filename="${fileName}"`,
+      },
     });
 
     if (refreshPayload) {
@@ -108,4 +126,3 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

@@ -9,21 +9,27 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
 
   const { id } = await context.params;
   const body = (await request.json()) as Record<string, unknown>;
-  const payload = omitTenantIdFromBody(body);
+  const payload = {
+    ...omitTenantIdFromBody(body),
+    ...(body.tenantId ? { targetTenantId: String(body.tenantId) } : {}),
+  };
 
   const response = await fetch(`${apiBaseUrl()}/iam/users/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
     body: JSON.stringify(payload),
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao atualizar usuario.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao atualizar usuario.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});
@@ -35,15 +41,20 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   if (session instanceof NextResponse) return session;
 
   const { id } = await context.params;
-    const response = await fetch(`${apiBaseUrl()}/iam/users/${encodeURIComponent(id)}`, {
+  const tenantId = request.nextUrl.searchParams.get('tenantId');
+  const query = tenantId ? `?targetTenantId=${encodeURIComponent(tenantId)}` : '';
+  const response = await fetch(`${apiBaseUrl()}/iam/users/${encodeURIComponent(id)}${query}`, {
     method: 'DELETE',
     headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao remover usuario.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao remover usuario.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});

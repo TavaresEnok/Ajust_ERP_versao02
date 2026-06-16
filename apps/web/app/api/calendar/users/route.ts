@@ -6,11 +6,13 @@ export async function GET(request: NextRequest) {
   const session = await resolveAuthSession(request);
   if (session instanceof NextResponse) return session;
 
-    const response = await fetch(`${apiBaseUrl()}/calendar/users`, {
+  const response = await fetch(`${apiBaseUrl()}/calendar/users`, {
     headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
-  const proxied = NextResponse.json(await response.json().catch(() => ([])), { status: response.status });
+  const proxied = NextResponse.json(await response.json().catch(() => []), {
+    status: response.status,
+  });
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }

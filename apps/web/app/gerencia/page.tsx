@@ -1,18 +1,19 @@
 'use client';
 
 import nextDynamic from 'next/dynamic';
+import { SkeletonDashboard } from '@/components/ui/skeleton';
 
-const GerenciaMockup = nextDynamic(() => import('../mockups/gerencia-mockup'), {
+const GerenciaPortal = nextDynamic(() => import('./portal'), {
   ssr: false,
   loading: () => (
-    <div className="min-h-screen flex items-center justify-center bg-gray-50/50 dark:bg-gray-900/50 text-gray-500">
-      Carregando portal Gerência...
+    <div className="min-h-screen bg-gray-50/50 dark:bg-gray-900/50">
+      <div className="max-w-7xl mx-auto px-6 py-8">
+        <SkeletonDashboard />
+      </div>
     </div>
-  )
+  ),
 });
 
-
 export default function GerenciaPage() {
-  return <GerenciaMockup />;
+  return <GerenciaPortal />;
 }
-

@@ -1,6 +1,7 @@
-import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
+import { WorkflowActionExecutor } from './action-executor.service';
 
 export interface WorkflowNode {
   id: string;
@@ -37,42 +38,51 @@ export interface WorkflowDefinition {
   }>;
 }
 
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-type DB = any;
+export interface WorkflowContext {
+  tenantId: string;
+  order?: Record<string, any>;
+  workflow?: {
+    ruleId: string;
+    ruleName: string;
+  };
+  event: { type: string; timestamp: string };
+}
 
 @Injectable()
 export class WorkflowsService {
-  private get db(): DB {
-    // Cast to any until Prisma client is regenerated with the WorkflowRule model
-    return this.prisma as DB;
-  }
+  private readonly logger = new Logger(WorkflowsService.name);
 
   constructor(
-    private prisma: PrismaService,
-    private readonly audit: AuditService
+    @Inject(PrismaService) private prisma: PrismaService,
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Inject(WorkflowActionExecutor) private readonly executor: WorkflowActionExecutor,
   ) {}
 
   async list(tenantId: string) {
-    return this.db.workflowRule.findMany({
+    return this.prisma.workflowRule.findMany({
       where: { tenantId },
       orderBy: { createdAt: 'desc' },
     });
   }
 
   async findOne(tenantId: string, id: string) {
-    const rule = await this.db.workflowRule.findFirst({ where: { id, tenantId } });
+    const rule = await this.prisma.workflowRule.findFirst({ where: { id, tenantId } });
     if (!rule) throw new NotFoundException('Workflow not found');
     return rule;
   }
 
-  async create(tenantId: string, _userId: string, data: {
-    name: string;
-    description?: string;
-    enabled?: boolean;
-    definition: WorkflowDefinition;
-  }) {
+  async create(
+    tenantId: string,
+    _userId: string,
+    data: {
+      name: string;
+      description?: string;
+      enabled?: boolean;
+      definition: WorkflowDefinition;
+    },
+  ) {
     this.validateDefinition(data.definition);
-    const created = await this.db.workflowRule.create({
+    const created = await this.prisma.workflowRule.create({
       data: {
         tenantId,
         name: data.name,
@@ -90,21 +100,27 @@ export class WorkflowsService {
     return created;
   }
 
-  async update(tenantId: string, actorUserId: string, id: string, data: {
-    name?: string;
-    description?: string;
-    enabled?: boolean;
-    definition?: WorkflowDefinition;
-  }) {
+  async update(
+    tenantId: string,
+    actorUserId: string,
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      enabled?: boolean;
+      definition?: WorkflowDefinition;
+    },
+  ) {
     const current = await this.findOne(tenantId, id);
     if (data.definition !== undefined) {
       this.validateDefinition(data.definition);
     }
-    const nextDefinition = data.definition !== undefined
-      ? this.withVersionHistory(current, data.definition, actorUserId)
-      : undefined;
+    const nextDefinition =
+      data.definition !== undefined
+        ? this.withVersionHistory(current, data.definition, actorUserId)
+        : undefined;
 
-    const updated = await this.db.workflowRule.update({
+    const updated = await this.prisma.workflowRule.update({
       where: { id },
       data: {
         ...(data.name !== undefined && { name: data.name }),
@@ -125,7 +141,7 @@ export class WorkflowsService {
 
   async remove(tenantId: string, actorUserId: string, id: string) {
     const current = await this.findOne(tenantId, id);
-    const deleted = await this.db.workflowRule.delete({ where: { id } });
+    const deleted = await this.prisma.workflowRule.delete({ where: { id } });
     await this.audit.log(tenantId, actorUserId, 'OS_UPDATE', 'workflow_rule', id, {
       op: 'delete',
       name: current.name,
@@ -135,7 +151,7 @@ export class WorkflowsService {
 
   async toggle(tenantId: string, actorUserId: string, id: string) {
     const rule = await this.findOne(tenantId, id);
-    const toggled = await this.db.workflowRule.update({
+    const toggled = await this.prisma.workflowRule.update({
       where: { id },
       data: { enabled: !rule.enabled },
     });
@@ -146,14 +162,9 @@ export class WorkflowsService {
     return toggled;
   }
 
-  async rollbackToVersion(
-    tenantId: string,
-    actorUserId: string,
-    id: string,
-    version: number
-  ) {
+  async rollbackToVersion(tenantId: string, actorUserId: string, id: string, version: number) {
     const current = await this.findOne(tenantId, id);
-    const def = (current.definition || {}) as WorkflowDefinition;
+    const def = (current.definition || {}) as unknown as WorkflowDefinition;
     const versions = Array.isArray(def.versions) ? def.versions : [];
     const selected = versions.find((v) => v.version === version);
     if (!selected) {
@@ -167,10 +178,10 @@ export class WorkflowsService {
         edges: selected.definition.edges || [],
         governance: selected.definition.governance || {},
       },
-      actorUserId
+      actorUserId,
     );
 
-    const updated = await this.db.workflowRule.update({
+    const updated = await this.prisma.workflowRule.update({
       where: { id },
       data: { definition: restored as any },
     });
@@ -184,20 +195,39 @@ export class WorkflowsService {
   }
 
   /**
+   * Whether workflow actions should be executed. Default: true.
+   * To disable temporarily (e.g. during an incident), set
+   * WORKFLOW_EXECUTION_ENABLED=false. Any other value (including unset) means ON.
+   */
+  isExecutionEnabled(): boolean {
+    return process.env.WORKFLOW_EXECUTION_ENABLED !== 'false';
+  }
+
+  /**
    * Execute all enabled workflows for a tenant when an event fires.
    * Returns list of triggered workflow names.
    */
-  async executeForEvent(tenantId: string, event: {
-    type: 'order_created' | 'order_updated' | 'order_closed' | 'sla_breach';
-    order?: Record<string, any>;
-  }): Promise<string[]> {
+  async executeForEvent(
+    tenantId: string,
+    event: {
+      type: 'order_created' | 'order_updated' | 'order_closed' | 'sla_breach';
+      order?: Record<string, any>;
+    },
+  ): Promise<string[]> {
+    if (!this.isExecutionEnabled()) {
+      this.logger.warn(
+        `Workflow execution is DISABLED (WORKFLOW_EXECUTION_ENABLED=false). ` +
+          `Event ${event.type} for tenant ${tenantId} will not trigger any rule.`,
+      );
+      return [];
+    }
+
     let rules: any[] = [];
     try {
-      rules = await this.db.workflowRule.findMany({
+      rules = await this.prisma.workflowRule.findMany({
         where: { tenantId, enabled: true },
       });
     } catch {
-      // Table may not exist yet before migration — fail silently
       return [];
     }
 
@@ -209,36 +239,142 @@ export class WorkflowsService {
       if (!triggerNode) continue;
 
       if (!this.evaluateTrigger(triggerNode, event)) continue;
-      const executedActions = this.evaluateGraph(def, event.order || {});
-      if (executedActions === 0) continue;
+      const governanceReason = await this.getGovernanceBlockReason(
+        tenantId,
+        rule.id,
+        def.governance,
+        event.order || {},
+      );
+      if (governanceReason) {
+        this.logger.warn(`Workflow ${rule.name} skipped by governance: ${governanceReason}`);
+        continue;
+      }
 
-      await this.db.workflowRule.update({
+      const ctx: WorkflowContext = {
+        tenantId,
+        order: event.order || {},
+        workflow: {
+          ruleId: rule.id,
+          ruleName: rule.name,
+        },
+        event: { type: event.type, timestamp: new Date().toISOString() },
+      };
+
+      await this.prisma.workflowExecutionLog
+        .create({
+          data: {
+            tenantId,
+            ruleId: rule.id,
+            ruleName: rule.name,
+            nodeId: '__run__',
+            nodeType: 'workflow',
+            nodeSubtype: event.type,
+            context: ctx as any,
+            result: { status: 'STARTED' },
+            status: 'STARTED',
+          },
+        })
+        .catch(() => this.logger.warn(`Failed to log workflow start for rule ${rule.id}`));
+
+      const results = await this.executeGraph(def, ctx, def.governance);
+
+      let successCount = 0;
+      let failureCount = 0;
+      for (const r of results) {
+        if (r.status === 'SUCCESS') successCount++;
+        else if (r.status === 'FAILED') failureCount++;
+      }
+
+      await this.prisma.workflowRule.update({
         where: { id: rule.id },
         data: { runCount: { increment: 1 }, lastRunAt: new Date() },
       });
 
-      triggered.push(rule.name);
+      if (successCount > 0 || failureCount > 0) {
+        triggered.push(rule.name);
+      }
+
+      for (const r of results) {
+        try {
+          await this.prisma.workflowExecutionLog.create({
+            data: {
+              tenantId,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              nodeId: r.nodeId,
+              nodeType: 'action',
+              nodeSubtype: r.subtype,
+              context: ctx as any,
+              result: r,
+              status: r.status,
+              error: r.error || null,
+            },
+          });
+        } catch {
+          this.logger.warn(`Failed to log workflow execution for rule ${rule.id}`);
+        }
+      }
+
+      if (def.governance?.stopOnFailure && failureCount > 0) {
+        this.logger.warn(`Workflow ${rule.name} stopped due to failure (stopOnFailure=true)`);
+      }
     }
 
     return triggered;
   }
 
+  private async getGovernanceBlockReason(
+    tenantId: string,
+    ruleId: string,
+    governance: WorkflowDefinition['governance'],
+    order: Record<string, any>,
+  ): Promise<string | null> {
+    if (!governance) return null;
+    if (governance.requiresApproval && order.approvalCompleted !== true) {
+      return 'required approval is not completed';
+    }
+    if (governance.changeTicketRequired && !order.changeRequestId && !order.changeTicketId) {
+      return 'required change ticket is missing';
+    }
+
+    const maxPerHour = governance.maxExecutionsPerHour || 0;
+    if (maxPerHour > 0) {
+      const executions = await this.prisma.workflowExecutionLog.count({
+        where: {
+          tenantId,
+          ruleId,
+          nodeType: 'workflow',
+          nodeId: '__run__',
+          createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+        },
+      });
+      if (executions >= maxPerHour) {
+        return `hourly execution limit reached (${maxPerHour})`;
+      }
+    }
+    return null;
+  }
+
   private evaluateTrigger(node: WorkflowNode, event: { type: string }): boolean {
     const triggerMap: Record<string, string[]> = {
-      'start_implantacao': ['order_created', 'order_updated'],
-      'start_os_criada': ['order_created'],
-      'os_criada':    ['order_created'],
-      'os_fechada':   ['order_closed'],
-      'os_atualizada':['order_updated'],
-      'sla_breach':   ['sla_breach'],
-      'os_critica':   ['order_created', 'order_updated'],
+      start_implantacao: ['order_created', 'order_updated'],
+      start_os_criada: ['order_created'],
+      os_criada: ['order_created'],
+      os_fechada: ['order_closed'],
+      os_atualizada: ['order_updated'],
+      sla_breach: ['sla_breach'],
+      os_critica: ['order_created', 'order_updated'],
     };
     return (triggerMap[node.subtype] || []).includes(event.type);
   }
 
-  private evaluateGraph(def: WorkflowDefinition, order: Record<string, any>): number {
+  private async executeGraph(
+    def: WorkflowDefinition,
+    ctx: WorkflowContext,
+    governance?: WorkflowDefinition['governance'],
+  ): Promise<{ nodeId: string; subtype: string; status: string; error?: string }[]> {
     const trigger = def.nodes.find((n) => n.type === 'trigger');
-    if (!trigger) return 0;
+    if (!trigger) return [];
 
     const edgesBySource = new Map<string, WorkflowEdge[]>();
     const incomingByTarget = new Map<string, WorkflowEdge[]>();
@@ -252,7 +388,7 @@ export class WorkflowsService {
       incomingByTarget.set(edge.target, incoming);
     }
 
-    let actionCount = 0;
+    const results: { nodeId: string; subtype: string; status: string; error?: string }[] = [];
     const queue = [trigger.id];
     const executed = new Set<string>();
     const deliveredTokens = new Map<string, Set<string>>();
@@ -275,7 +411,17 @@ export class WorkflowsService {
       executed.add(currentId);
 
       if (node.type === 'action') {
-        actionCount += 1;
+        const result = await this.executor.executeNode(node, ctx);
+        results.push({
+          nodeId: node.id,
+          subtype: node.subtype,
+          status: result.status,
+          error: result.error,
+        });
+
+        if (result.status === 'FAILED' && governance?.stopOnFailure) {
+          return results;
+        }
       }
 
       const outgoing = edgesBySource.get(currentId) || [];
@@ -291,7 +437,7 @@ export class WorkflowsService {
           }
           continue;
         }
-        const result = this.evaluateCondition(node, order);
+        const result = this.evaluateCondition(node, ctx.order || {});
         const label = result ? 'true' : 'false';
         const branch = outgoing.find((e) => (e.label || '').toLowerCase() === label);
         if (branch) {
@@ -311,7 +457,7 @@ export class WorkflowsService {
       }
     }
 
-    return actionCount;
+    return results;
   }
 
   private evaluateCondition(node: WorkflowNode, order: Record<string, any>): boolean {
@@ -319,10 +465,14 @@ export class WorkflowsService {
     if (!field) return true;
     const actual = order[field];
     switch (operator) {
-      case 'eq':       return actual === value;
-      case 'neq':      return actual !== value;
-      case 'contains': return String(actual ?? '').includes(value);
-      default:         return true;
+      case 'eq':
+        return actual === value;
+      case 'neq':
+        return actual !== value;
+      case 'contains':
+        return String(actual ?? '').includes(value);
+      default:
+        return true;
     }
   }
 
@@ -372,28 +522,40 @@ export class WorkflowsService {
       if (node.type === 'condition') {
         if (node.subtype === 'gateway_parallel') {
           if (incoming.length !== 1) {
-            throw new BadRequestException(`Parallel split gateway "${node.id}" must have exactly 1 incoming branch.`);
+            throw new BadRequestException(
+              `Parallel split gateway "${node.id}" must have exactly 1 incoming branch.`,
+            );
           }
           if (outgoing.length < 2) {
-            throw new BadRequestException(`Parallel gateway "${node.id}" must have at least 2 outgoing branches.`);
+            throw new BadRequestException(
+              `Parallel gateway "${node.id}" must have at least 2 outgoing branches.`,
+            );
           }
           continue;
         }
         if (node.subtype === 'gateway_parallel_join') {
           if (incoming.length < 2) {
-            throw new BadRequestException(`Parallel join gateway "${node.id}" must have at least 2 incoming branches.`);
+            throw new BadRequestException(
+              `Parallel join gateway "${node.id}" must have at least 2 incoming branches.`,
+            );
           }
           if (outgoing.length !== 1) {
-            throw new BadRequestException(`Parallel join gateway "${node.id}" must have exactly 1 outgoing branch.`);
+            throw new BadRequestException(
+              `Parallel join gateway "${node.id}" must have exactly 1 outgoing branch.`,
+            );
           }
           continue;
         }
         if (outgoing.length > 2) {
-          throw new BadRequestException(`Condition node "${node.id}" must have at most 2 branches.`);
+          throw new BadRequestException(
+            `Condition node "${node.id}" must have at most 2 branches.`,
+          );
         }
         const labels = new Set(outgoing.map((e) => (e.label || '').toLowerCase()).filter(Boolean));
         if (outgoing.length === 2 && (!labels.has('true') || !labels.has('false'))) {
-          throw new BadRequestException(`Condition node "${node.id}" with 2 branches must use labels "true" and "false".`);
+          throw new BadRequestException(
+            `Condition node "${node.id}" with 2 branches must use labels "true" and "false".`,
+          );
         }
       } else if (outgoing.length > 1) {
         throw new BadRequestException(`Node "${node.id}" must have at most one outgoing edge.`);
@@ -415,7 +577,12 @@ export class WorkflowsService {
     };
 
     if (node.type === 'condition') {
-      if (node.subtype === 'cond_no_analyst' || node.subtype === 'gateway_parallel' || node.subtype === 'gateway_parallel_join') return;
+      if (
+        node.subtype === 'cond_no_analyst' ||
+        node.subtype === 'gateway_parallel' ||
+        node.subtype === 'gateway_parallel_join'
+      )
+        return;
       requireFields(['field', 'operator', 'value']);
       return;
     }
@@ -426,7 +593,8 @@ export class WorkflowsService {
         action_assign: ['analystId'],
         action_escalate: ['to'],
         action_webhook: ['url', 'method'],
-        action_csat: ['delay'],
+        action_csat: [],
+        action_close_order: [],
         task_service: ['taskName', 'team'],
       };
       const fields = requiredByAction[node.subtype];
@@ -440,8 +608,10 @@ export class WorkflowsService {
     const diff: Record<string, unknown> = {};
 
     if (before?.name !== after?.name) diff.name = { from: before?.name, to: after?.name };
-    if (before?.description !== after?.description) diff.description = { from: before?.description, to: after?.description };
-    if (before?.enabled !== after?.enabled) diff.enabled = { from: before?.enabled, to: after?.enabled };
+    if (before?.description !== after?.description)
+      diff.description = { from: before?.description, to: after?.description };
+    if (before?.enabled !== after?.enabled)
+      diff.enabled = { from: before?.enabled, to: after?.enabled };
 
     const beforeNodes = Array.isArray(beforeDef.nodes) ? beforeDef.nodes.length : 0;
     const afterNodes = Array.isArray(afterDef.nodes) ? afterDef.nodes.length : 0;
@@ -453,20 +623,24 @@ export class WorkflowsService {
 
     const beforeGov = JSON.stringify(beforeDef.governance || {});
     const afterGov = JSON.stringify(afterDef.governance || {});
-    if (beforeGov !== afterGov) diff.governance = {
-      from: beforeDef.governance || {},
-      to: afterDef.governance || {},
-    };
+    if (beforeGov !== afterGov)
+      diff.governance = {
+        from: beforeDef.governance || {},
+        to: afterDef.governance || {},
+      };
 
     return diff;
   }
 
-  private withVersionHistory(current: any, next: WorkflowDefinition, actorUserId: string | null): WorkflowDefinition {
+  private withVersionHistory(
+    current: any,
+    next: WorkflowDefinition,
+    actorUserId: string | null,
+  ): WorkflowDefinition {
     const currentDef = (current?.definition || {}) as WorkflowDefinition;
     const existingVersions = Array.isArray(currentDef.versions) ? currentDef.versions : [];
-    const nextVersion = existingVersions.length > 0
-      ? Math.max(...existingVersions.map((v) => v.version)) + 1
-      : 1;
+    const nextVersion =
+      existingVersions.length > 0 ? Math.max(...existingVersions.map((v) => v.version)) + 1 : 1;
 
     type WorkflowVersionEntry = NonNullable<WorkflowDefinition['versions']>[number];
     const snapshot: WorkflowVersionEntry = {

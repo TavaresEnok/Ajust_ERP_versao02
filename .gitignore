@@ -4,10 +4,24 @@ node_modules
 dist
 coverage
 .env
+.env.*
+!.env.example
+!.env.prod.example
+!.env.staging.example
 *.log
 
 # local build/runtime artifacts
 apps/web/.next*
+apps/web/tmp/
+apps/web/test-results/
+apps/web/playwright-report/
 apps/api/uploads/
 uploads/
+backups/
 *.tsbuildinfo
+*.bak
+*.backup
+*.old
+*.orig
+*.tmp
+*~

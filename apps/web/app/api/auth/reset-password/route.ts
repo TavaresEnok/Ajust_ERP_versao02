@@ -8,7 +8,7 @@ export async function POST(request: NextRequest) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify(body),
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();

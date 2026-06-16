@@ -6,4 +6,11 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const compat = new FlatCompat({ baseDirectory: __dirname });
 
 /** @type {import('eslint').Linter.Config[]} */
-export default [...compat.extends('next/core-web-vitals')];
+const config = [
+  {
+    ignores: ['.next*/**', 'tmp/**', 'node_modules/**', 'playwright-report/**', 'test-results/**'],
+  },
+  ...compat.extends('next/core-web-vitals'),
+];
+
+export default config;

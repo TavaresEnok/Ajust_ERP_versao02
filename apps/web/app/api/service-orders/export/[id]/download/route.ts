@@ -1,5 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { apiBaseUrl, applyLoginCookies, clearAuthCookies, RefreshApiResponse } from '../../../../auth/_lib';
+import {
+  apiBaseUrl,
+  applyLoginCookies,
+  clearAuthCookies,
+  RefreshApiResponse,
+} from '../../../../auth/_lib';
 
 type ApiMeResponse = {
   tenant: {
@@ -17,7 +22,7 @@ async function fetchMe(accessToken: string) {
   const response = await fetch(`${apiBaseUrl()}/auth/me`, {
     method: 'GET',
     headers: { authorization: `Bearer ${accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
   if (!response.ok) return null;
   return (await response.json()) as ApiMeResponse;
@@ -28,7 +33,7 @@ async function refreshSession(refreshToken: string) {
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ refreshToken }),
-    cache: 'no-store'
+    cache: 'no-store',
   });
   if (!response.ok) return null;
   return (await response.json()) as RefreshApiResponse;
@@ -51,21 +56,26 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     }
 
     if (!me?.tenant?.id || !accessToken) {
-      const response = NextResponse.json({ error: 'Sessao expirada para download.' }, { status: 401 });
+      const response = NextResponse.json(
+        { error: 'Sessao expirada para download.' },
+        { status: 401 },
+      );
       clearAuthCookies(response);
       return response;
     }
 
     const response = await fetch(`${apiBaseUrl()}/service-orders/export/${id}/download`, {
-        method: 'GET',
-        headers: { authorization: `Bearer ${accessToken}` },
-        cache: 'no-store'
-      }
-    );
+      method: 'GET',
+      headers: { authorization: `Bearer ${accessToken}` },
+      cache: 'no-store',
+    });
 
     if (!response.ok) {
       const message = await response.text();
-      return NextResponse.json({ error: message || 'Falha ao baixar exportacao.' }, { status: response.status });
+      return NextResponse.json(
+        { error: message || 'Falha ao baixar exportacao.' },
+        { status: response.status },
+      );
     }
 
     const fileName = pickFileName(response.headers.get('content-disposition'), id);
@@ -74,8 +84,8 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
       status: 200,
       headers: {
         'content-type': 'text/csv; charset=utf-8',
-        'content-disposition': `attachment; filename="${fileName}"`
-      }
+        'content-disposition': `attachment; filename="${fileName}"`,
+      },
     });
 
     if (refreshPayload) {
@@ -87,4 +97,3 @@ export async function GET(request: NextRequest, context: { params: Promise<{ id:
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
-

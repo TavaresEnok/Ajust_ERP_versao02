@@ -7,19 +7,25 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   if (session instanceof NextResponse) return session;
 
   const { id } = await context.params;
-    const response = await fetch(`${apiBaseUrl()}/knowledge/credentials/${encodeURIComponent(id)}/reveal`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+  const response = await fetch(
+    `${apiBaseUrl()}/knowledge/credentials/${encodeURIComponent(id)}/reveal`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({}),
+      cache: 'no-store',
     },
-    body: JSON.stringify({}),
-    cache: 'no-store'
-  });
+  );
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao revelar credencial.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao revelar credencial.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});

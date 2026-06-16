@@ -1,3 +1,4 @@
+import { ApiTags, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import {
   BadRequestException,
   Body,
@@ -14,17 +15,33 @@ import {
   UploadedFile,
   UseGuards,
   UseInterceptors,
-  UnauthorizedException
+  UnauthorizedException,
+  Query,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { UserStatus } from '@prisma/client';
+import { Priority, ServiceOrderType, UserStatus } from '@prisma/client';
 import { z } from 'zod';
 import type { Express, Response } from 'express';
-import { assertAnyRole } from '../common/role-utils';
+import { assertAnyRole, assertManagerRole } from '../common/role-utils';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { IamService } from './iam.service';
+
+const TimezoneSchema = z
+  .string()
+  .min(2)
+  .refine(
+    (timezone) => {
+      try {
+        new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    { message: 'Invalid IANA timezone.' },
+  );
 
 const CreateTenantSchema = z.object({
   legalName: z.string().min(3),
@@ -32,16 +49,16 @@ const CreateTenantSchema = z.object({
   taxId: z.string().min(11),
   slug: z.string().min(2),
   domain: z.string().min(2),
-  timezone: z.string().min(2).default('America/Sao_Paulo'),
+  timezone: TimezoneSchema.default('America/Sao_Paulo'),
   techContactName: z.string().min(2),
   techContactEmail: z.string().email(),
   techContactPhone: z.string().min(8),
-  status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional()
+  status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
 });
 
 const UserSectorSchema = z.string().min(2).max(64);
 const TenantSectorSchema = z.object({
-  name: z.string().min(2).max(64)
+  name: z.string().min(2).max(64),
 });
 
 const CreateUserSchema = z.object({
@@ -50,7 +67,7 @@ const CreateUserSchema = z.object({
   password: z.string().min(8),
   tenantId: z.string().uuid(),
   roleCode: z.string().min(2),
-  sector: UserSectorSchema.optional()
+  sector: UserSectorSchema.optional(),
 });
 
 const UpdateTenantSchema = z
@@ -60,25 +77,25 @@ const UpdateTenantSchema = z
     taxId: z.string().min(11).optional(),
     slug: z.string().min(2).optional(),
     domain: z.string().min(2).optional(),
-    timezone: z.string().min(2).optional(),
+    timezone: TimezoneSchema.optional(),
     techContactName: z.string().min(2).optional(),
     techContactEmail: z.string().email().optional(),
     techContactPhone: z.string().min(8).optional(),
-    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional()
+    status: z.enum(['ACTIVE', 'INACTIVE', 'SUSPENDED']).optional(),
   })
   .refine((data) => Object.keys(data).length > 0, {
-    message: 'At least one tenant field must be provided.'
+    message: 'At least one tenant field must be provided.',
   });
 
 const UpdateUserSchema = z
   .object({
-    tenantId: z.string().uuid().optional(),
+    targetTenantId: z.string().uuid().optional(),
     name: z.string().min(2).optional(),
     email: z.string().email().optional(),
     password: z.string().min(8).optional(),
     status: z.nativeEnum(UserStatus).optional(),
     roleCode: z.string().min(2).optional(),
-    sector: UserSectorSchema.optional()
+    sector: UserSectorSchema.optional(),
   })
   .refine(
     (data) =>
@@ -89,22 +106,71 @@ const UpdateUserSchema = z
       data.roleCode !== undefined ||
       data.sector !== undefined,
     {
-      message: 'At least one user field must be provided.'
-    }
+      message: 'At least one user field must be provided.',
+    },
   );
 
 const MANAGER_ASSIGNABLE_ROLES = new Set(['gerente', 'analista', 'tecnico', 'cliente', 'leitura']);
 const CLIENT_ASSIGNABLE_ROLES = new Set(['cliente', 'leitura']);
 
-const SlaPolicySchema = z.object({
-  id: z.string().uuid().optional(),
-  priority: z.enum(['BAIXA', 'NORMAL', 'ALTA', 'CRITICA']),
-  serviceOrderType: z.string().nullable().optional(),
-  hours: z.number().positive(),
-  active: z.boolean().optional(),
-  isOverride: z.boolean().optional(),
-});
+const SlaPolicySchema = z
+  .object({
+    id: z.string().uuid().optional(),
+    priority: z.nativeEnum(Priority).optional(),
+    serviceOrderType: z.nativeEnum(ServiceOrderType).nullable().optional(),
+    hours: z.number().positive().max(8760).optional(),
+    active: z.boolean().optional(),
+    isOverride: z.boolean().optional(),
+  })
+  .superRefine((data, ctx) => {
+    if (data.id) {
+      if (data.hours === undefined && data.active === undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'At least one updatable SLA field must be provided.',
+        });
+      }
+      if (
+        data.priority !== undefined ||
+        data.serviceOrderType !== undefined ||
+        data.isOverride !== undefined
+      ) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: 'SLA priority, serviceOrderType and override mode cannot be changed in-place.',
+        });
+      }
+      return;
+    }
 
+    if (!data.priority || !data.hours) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: 'New SLA policies require priority and hours.',
+      });
+    }
+    if (data.isOverride && !data.serviceOrderType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['serviceOrderType'],
+        message: 'Override policies require a serviceOrderType.',
+      });
+    }
+    if (!data.isOverride && data.serviceOrderType) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['serviceOrderType'],
+        message: 'Base policies cannot target a serviceOrderType.',
+      });
+    }
+  });
+
+type SlaPolicyInput = z.infer<typeof SlaPolicySchema>;
+
+@ApiTags('IAM')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'Não autenticado' })
+@ApiResponse({ status: 403, description: 'Permissão insuficiente' })
 @Controller('iam')
 @UseGuards(AuthGuard, TenantIsolationGuard)
 export class IamController {
@@ -134,6 +200,7 @@ export class IamController {
 
   @Get('tenants/:tenantId/audit')
   async listAuditLogs(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     if (req.auth!.role !== 'super_admin' && req.auth!.tenantId !== tenantId) {
       throw new ForbiddenException();
     }
@@ -148,7 +215,11 @@ export class IamController {
   }
 
   @Patch('tenants/:tenantId')
-  async updateTenant(@Param('tenantId') tenantId: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+  async updateTenant(
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth,
+  ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
     this.assertTenantScope(req, tenantId);
     const patch = UpdateTenantSchema.parse(body);
@@ -165,53 +236,78 @@ export class IamController {
   }
 
   @Get('users')
-  async listUsersByTenant(@Req() req: RequestWithAuth) {
+  async listUsersByTenant(
+    @Req() req: RequestWithAuth,
+    @Query('targetTenantId') targetTenantId?: string,
+  ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
     if (!req.auth?.tenantId) {
       throw new UnauthorizedException('Missing tenantId');
     }
-    this.assertTenantScope(req, req.auth.tenantId);
-    return this.iamService.listUsersByTenant(req.auth.tenantId);
+    const tenantId = targetTenantId || req.auth.tenantId;
+    this.assertTenantScope(req, tenantId);
+    return this.iamService.listUsersByTenant(tenantId);
   }
 
   @Patch('users/:userId')
-  async updateUser(@Param('userId') userId: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+  async updateUser(
+    @Param('userId') userId: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth,
+  ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const patch = UpdateUserSchema.parse(body);
-    this.assertTenantScope(req, req.auth.tenantId);
+    const tenantId = patch.targetTenantId || req.auth.tenantId;
+    this.assertTenantScope(req, tenantId);
     if (patch.roleCode) {
       this.assertRoleAssignment(req.auth.role || '', patch.roleCode);
     }
 
     return this.iamService.updateUserInTenant(req.auth.userId, {
       userId,
-      tenantId: req.auth.tenantId,
+      tenantId,
       name: patch.name,
       email: patch.email,
       password: patch.password,
       status: patch.status,
       roleCode: patch.roleCode,
-      sector: patch.sector
+      sector: patch.sector,
     });
   }
 
   @Delete('users/:userId')
-  async deleteUser(@Param('userId') userId: string, @Req() req: RequestWithAuth) {
+  async deleteUser(
+    @Param('userId') userId: string,
+    @Req() req: RequestWithAuth,
+    @Query('targetTenantId') targetTenantId?: string,
+  ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
     if (!req.auth?.tenantId) {
       throw new UnauthorizedException('Missing tenantId');
     }
-    this.assertTenantScope(req, req.auth.tenantId);
+    const tenantId = targetTenantId || req.auth.tenantId;
+    this.assertTenantScope(req, tenantId);
     if (req.auth.userId === userId) {
       throw new BadRequestException('You cannot remove your own active account.');
     }
-    return this.iamService.removeUserFromTenant(req.auth.userId, req.auth.tenantId, userId);
+    return this.iamService.removeUserFromTenant(req.auth.userId, tenantId, userId);
   }
 
   @Get('tenants/:tenantId/logo')
-  async getTenantLogo(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth, @Res() res: Response) {
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura']);
+  async getTenantLogo(
+    @Param('tenantId') tenantId: string,
+    @Req() req: RequestWithAuth,
+    @Res() res: Response,
+  ) {
+    assertAnyRole(req.auth, [
+      'super_admin',
+      'gerente',
+      'analista',
+      'tecnico',
+      'cliente',
+      'leitura',
+    ]);
     this.assertTenantScope(req, tenantId);
     const logo = await this.iamService.readTenantLogo(tenantId);
     if (!logo) {
@@ -223,11 +319,11 @@ export class IamController {
   }
 
   @Post('tenants/:tenantId/logo')
-  @UseInterceptors(FileInterceptor('file'))
+  @UseInterceptors(FileInterceptor('file', { limits: { fileSize: 5 * 1024 * 1024 } }))
   async uploadTenantLogo(
     @Param('tenantId') tenantId: string,
     @UploadedFile() file: Express.Multer.File | undefined,
-    @Req() req: RequestWithAuth
+    @Req() req: RequestWithAuth,
   ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'cliente']);
     this.assertTenantScope(req, tenantId);
@@ -239,19 +335,30 @@ export class IamController {
 
   @Get('tenants/:tenantId/sectors')
   async listTenantSectors(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura']);
+    assertAnyRole(req.auth, [
+      'super_admin',
+      'gerente',
+      'analista',
+      'tecnico',
+      'cliente',
+      'leitura',
+    ]);
     this.assertTenantScope(req, tenantId);
     return this.iamService.listTenantSectors(tenantId);
   }
 
   @Post('tenants/:tenantId/sectors')
-  async createTenantSector(@Param('tenantId') tenantId: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+  async createTenantSector(
+    @Param('tenantId') tenantId: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth,
+  ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
     this.assertTenantScope(req, tenantId);
     const input = TenantSectorSchema.parse(body);
     return this.iamService.createTenantSector(req.auth!.userId, {
       tenantId,
-      name: input.name
+      name: input.name,
     });
   }
 
@@ -260,7 +367,7 @@ export class IamController {
     @Param('tenantId') tenantId: string,
     @Param('sectorId') sectorId: string,
     @Body() body: unknown,
-    @Req() req: RequestWithAuth
+    @Req() req: RequestWithAuth,
   ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
     this.assertTenantScope(req, tenantId);
@@ -268,7 +375,7 @@ export class IamController {
     return this.iamService.updateTenantSector(req.auth!.userId, {
       tenantId,
       sectorId,
-      name: input.name
+      name: input.name,
     });
   }
 
@@ -276,7 +383,7 @@ export class IamController {
   async deleteTenantSector(
     @Param('tenantId') tenantId: string,
     @Param('sectorId') sectorId: string,
-    @Req() req: RequestWithAuth
+    @Req() req: RequestWithAuth,
   ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
     this.assertTenantScope(req, tenantId);
@@ -295,14 +402,14 @@ export class IamController {
   async saveSlaPolicy(
     @Param('tenantId') tenantId: string,
     @Body() body: unknown,
-    @Req() req: RequestWithAuth
+    @Req() req: RequestWithAuth,
   ) {
     if (req.auth!.role !== 'super_admin' && req.auth!.tenantId !== tenantId) {
       throw new ForbiddenException();
     }
     assertAnyRole(req.auth, ['super_admin', 'gerente']);
-    const input = SlaPolicySchema.parse(body);
-    return this.iamService.saveSlaPolicy(req.auth!.userId, tenantId, input as any);
+    const input: SlaPolicyInput = SlaPolicySchema.parse(body);
+    return this.iamService.saveSlaPolicy(req.auth!.userId, tenantId, input);
   }
 
   private assertTenantScope(req: RequestWithAuth, targetTenantId: string) {

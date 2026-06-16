@@ -1,4 +1,12 @@
-import { CanActivate, ExecutionContext, Injectable, UnauthorizedException, ForbiddenException, Optional, Inject } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Injectable,
+  UnauthorizedException,
+  ForbiddenException,
+  Optional,
+  Inject,
+} from '@nestjs/common';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { PrometheusService } from '../monitoring/prometheus.service';
 
@@ -9,7 +17,9 @@ import { PrometheusService } from '../monitoring/prometheus.service';
  */
 @Injectable()
 export class TenantIsolationGuard implements CanActivate {
-  constructor(@Optional() @Inject(PrometheusService) private readonly prometheusService?: PrometheusService) {}
+  constructor(
+    @Optional() @Inject(PrometheusService) private readonly prometheusService?: PrometheusService,
+  ) {}
 
   canActivate(context: ExecutionContext): boolean {
     const request = context.switchToHttp().getRequest<RequestWithAuth>();
@@ -29,7 +39,7 @@ export class TenantIsolationGuard implements CanActivate {
         this.prometheusService.recordTenantIsolationViolation();
       }
       throw new ForbiddenException(
-        'tenantId cannot be passed as query parameter. Use authenticated token instead.'
+        'tenantId cannot be passed as query parameter. Use authenticated token instead.',
       );
     }
 
@@ -40,7 +50,7 @@ export class TenantIsolationGuard implements CanActivate {
           this.prometheusService.recordTenantIsolationViolation();
         }
         throw new ForbiddenException(
-          'tenantId cannot be passed in request body. Use authenticated token instead.'
+          'tenantId cannot be passed in request body. Use authenticated token instead.',
         );
       }
     }

@@ -22,7 +22,7 @@ async function fetchMe(accessToken: string): Promise<ApiMeResponse | null> {
   const response = await fetch(`${apiBaseUrl()}/auth/me`, {
     method: 'GET',
     headers: { authorization: `Bearer ${accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
   if (!response.ok) return null;
   return (await response.json()) as ApiMeResponse;
@@ -33,7 +33,7 @@ async function refreshSession(refreshToken: string): Promise<RefreshApiResponse 
     method: 'POST',
     headers: { 'content-type': 'application/json' },
     body: JSON.stringify({ refreshToken }),
-    cache: 'no-store'
+    cache: 'no-store',
   });
   if (!response.ok) return null;
   return (await response.json()) as RefreshApiResponse;
@@ -51,30 +51,16 @@ function jwtIsLikelyValid(token: string): boolean {
   }
 }
 
-export async function resolveAuthSession(request: NextRequest): Promise<AuthSession | NextResponse> {
+export async function resolveAuthSession(
+  request: NextRequest,
+): Promise<AuthSession | NextResponse> {
   let accessToken = request.cookies.get('erp_access_token')?.value || '';
   const refreshToken = request.cookies.get('erp_refresh_token')?.value || '';
   let refreshPayload: RefreshApiResponse | null = null;
   let me: ApiMeResponse | null = null;
 
   if (accessToken && jwtIsLikelyValid(accessToken)) {
-    const tenantId = request.cookies.get('erp_tenant_id')?.value;
-    const role = request.cookies.get('erp_role')?.value;
-    const userId = request.cookies.get('erp_user_id')?.value;
-    if (tenantId && role && userId) {
-      me = {
-        id: userId,
-        name: decodeURIComponent(request.cookies.get('erp_user_name')?.value || ''),
-        email: decodeURIComponent(request.cookies.get('erp_user_email')?.value || ''),
-        tenant: {
-          id: tenantId,
-          role: role,
-          tradeName: decodeURIComponent(request.cookies.get('erp_trade_name')?.value || 'Ajust ERP')
-        }
-      };
-    } else {
-      me = await fetchMe(accessToken);
-    }
+    me = await fetchMe(accessToken);
   }
 
   if (!me && refreshToken) {
@@ -94,7 +80,10 @@ export async function resolveAuthSession(request: NextRequest): Promise<AuthSess
   return { accessToken, me, refreshPayload };
 }
 
-export function applyRefreshIfNeeded(response: NextResponse, refreshPayload: RefreshApiResponse | null) {
+export function applyRefreshIfNeeded(
+  response: NextResponse,
+  refreshPayload: RefreshApiResponse | null,
+) {
   if (refreshPayload) {
     applyLoginCookies(response, refreshPayload);
   }

@@ -8,7 +8,7 @@ const roles = [
   { code: 'analista', name: 'Analista', isGlobal: false },
   { code: 'tecnico', name: 'Tecnico', isGlobal: false },
   { code: 'cliente', name: 'Cliente', isGlobal: false },
-  { code: 'leitura', name: 'Leitura', isGlobal: false }
+  { code: 'leitura', name: 'Leitura', isGlobal: false },
 ];
 
 async function main() {
@@ -17,9 +17,9 @@ async function main() {
       where: { code: role.code },
       update: {
         name: role.name,
-        isGlobal: role.isGlobal
+        isGlobal: role.isGlobal,
       },
-      create: role
+      create: role,
     });
   }
 

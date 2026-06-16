@@ -1,13 +1,14 @@
 import { Module } from '@nestjs/common';
 import { AuditService } from './audit.service';
 import { EmailService } from './email.service';
+import { RedisService } from './redis.service';
+import { RequestContext } from './request-context';
+import { TenantRateLimitGuard } from './tenant-rate-limit.guard';
+import { PrismaModule } from '../prisma/prisma.module';
 
-/**
- * CommonModule — exporta utilitários compartilhados entre todos os módulos da API.
- * Importe CommonModule em qualquer módulo que precisar de AuditService.
- */
 @Module({
-  providers: [AuditService, EmailService],
-  exports: [AuditService, EmailService],
+  imports: [PrismaModule],
+  providers: [AuditService, EmailService, RedisService, RequestContext, TenantRateLimitGuard],
+  exports: [AuditService, EmailService, RedisService, RequestContext, TenantRateLimitGuard],
 })
 export class CommonModule {}

@@ -10,7 +10,7 @@ export async function GET(req: NextRequest) {
   if (session instanceof NextResponse) return session;
   const res = await fetch(`${apiBaseUrl()}/notifications/config`, {
     headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
@@ -25,10 +25,10 @@ export async function POST(req: NextRequest) {
     method: 'POST',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
     body: JSON.stringify(omitTenantIdFromBody(body)),
-    cache: 'no-store'
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });

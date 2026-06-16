@@ -1,6 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { randomBytes } from 'crypto';
-import { createHash } from 'crypto';
+import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 
 /**
  * Bootstrap Token Service
@@ -31,7 +30,9 @@ export class BootstrapTokenService {
    * Verify a bootstrap token against its hash
    */
   verifyToken(token: string, hash: string): boolean {
-    return this.hashToken(token) === hash;
+    const tokenHash = Buffer.from(this.hashToken(token), 'utf8');
+    const storedHash = Buffer.from(hash, 'utf8');
+    return tokenHash.length === storedHash.length && timingSafeEqual(tokenHash, storedHash);
   }
 
   /**

@@ -1,53 +1,69 @@
-import { Injectable, CanActivate, ExecutionContext, HttpException, HttpStatus } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  CanActivate,
+  ExecutionContext,
+  HttpException,
+  HttpStatus,
+} from '@nestjs/common';
+import { Request } from 'express';
+import { RedisService } from '../common/redis.service';
 
-// In-memory store: key = identifier + endpoint, value = array of timestamps
-const requestLog = new Map<string, number[]>();
-const WINDOW_MS = 15 * 60 * 1000; // 15 minutes
-const LIMIT = 5; // 5 attempts per window
+const WINDOW_SECONDS = 15 * 60;
+const LIMIT = 5;
+const LOCKOUT_SECONDS = 15 * 60;
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
-  canActivate(context: ExecutionContext): boolean {
-    const request = context.switchToHttp().getRequest();
-    const identifier = request.body?.identifier || request.body?.email || request.ip;
-    const endpoint = request.route?.path || request.url;
-    const key = `${identifier}:${endpoint}`;
-    const now = Date.now();
+  constructor(@Inject(RedisService) private readonly redis: RedisService) {}
 
-    // Get existing requests for this key
-    const requests = requestLog.get(key) || [];
+  async canActivate(context: ExecutionContext): Promise<boolean> {
+    const request = context.switchToHttp().getRequest<Request>();
+    const ip = this.getClientIp(request);
+    const body = request.body as { identifier?: string; email?: string };
+    const identifier = body?.identifier || body?.email || ip;
 
-    // Remove old requests outside the window
-    const recentRequests = requests.filter((timestamp) => now - timestamp < WINDOW_MS);
+    const key = `rate-limit:login:${ip}:${identifier}`;
+    const lockoutKey = `rate-limit:login:lockout:${ip}:${identifier}`;
 
-    if (recentRequests.length >= LIMIT) {
+    try {
+      const isLockedOut = await this.redis.get(lockoutKey);
+      if (isLockedOut) {
+        throw new HttpException(
+          {
+            statusCode: 429,
+            message: 'Too many login attempts. Please try again after 15 minutes.',
+            retryAfter: LOCKOUT_SECONDS,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      const attempts = await this.redis.incrEx(key, WINDOW_SECONDS);
+
+      if (attempts > LIMIT) {
+        await this.redis.set(lockoutKey, '1', LOCKOUT_SECONDS);
+        throw new HttpException(
+          {
+            statusCode: 429,
+            message: 'Too many login attempts. Please try again after 15 minutes.',
+            retryAfter: LOCKOUT_SECONDS,
+          },
+          HttpStatus.TOO_MANY_REQUESTS,
+        );
+      }
+
+      return true;
+    } catch (error) {
+      if (error instanceof HttpException) throw error;
       throw new HttpException(
-        'Too many login attempts. Please try again after 15 minutes.',
-        HttpStatus.TOO_MANY_REQUESTS
+        'Serviço temporariamente indisponível. Tente novamente.',
+        HttpStatus.SERVICE_UNAVAILABLE,
       );
     }
-
-    // Add current request
-    recentRequests.push(now);
-    requestLog.set(key, recentRequests);
-
-    // Clean up old entries periodically (every hour)
-    if (Math.random() < 0.01) {
-      this.cleanupOldEntries();
-    }
-
-    return true;
   }
 
-  private cleanupOldEntries(): void {
-    const now = Date.now();
-    for (const [key, requests] of requestLog.entries()) {
-      const recentRequests = requests.filter((timestamp) => now - timestamp < WINDOW_MS);
-      if (recentRequests.length === 0) {
-        requestLog.delete(key);
-      } else {
-        requestLog.set(key, recentRequests);
-      }
-    }
+  private getClientIp(request: Request): string {
+    return request.ip || '0.0.0.0';
   }
 }

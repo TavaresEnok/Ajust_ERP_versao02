@@ -9,18 +9,24 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const { id } = await context.params;
   const formData = await request.formData();
 
-  const response = await fetch(`${apiBaseUrl()}/service-orders/${encodeURIComponent(id)}/attachments`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${session.accessToken}`
+  const response = await fetch(
+    `${apiBaseUrl()}/service-orders/${encodeURIComponent(id)}/attachments`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+      },
+      body: formData,
+      cache: 'no-store',
     },
-    body: formData,
-    cache: 'no-store'
-  });
+  );
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao enviar anexos da O.S.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao enviar anexos da O.S.' },
+      { status: response.status },
+    );
   }
 
   const parsed = text ? JSON.parse(text) : {};

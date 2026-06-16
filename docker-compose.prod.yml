@@ -1,59 +1,145 @@
+# ============================================================
+# Ajust ERP — Production Docker Compose
+# ============================================================
+# Uso: docker compose -f docker-compose.prod.yml up -d
+#
+# Variáveis obrigatórias (definir no .env ou via secrets):
+#   DATABASE_URL        — URL completa do PostgreSQL
+#   JWT_ACCESS_SECRET   — Segredo para tokens de acesso (min 32 chars)
+#   JWT_REFRESH_SECRET  — Segredo para tokens de refresh (min 32 chars)
+#   JWT_RESET_SECRET    — Segredo para tokens de redefinição de senha (min 32 chars)
+#   SECRETS_ENCRYPTION_KEY — Chave para criptografia de credenciais (min 32 chars)
+#   POSTGRES_PASSWORD   — Senha do banco em produção
+#   MONITORING_WEBHOOK_TOKEN — Token do webhook de monitoramento
+#   CHAT_WEBHOOK_TOKEN — Token do webhook de chat
+#   WORKER_API_TOKEN   — Token para endpoints operacionais do worker
+#
+# Variáveis recomendadas:
+#   SMTP_HOST / SMTP_PORT / SMTP_USER / SMTP_PASS / SMTP_FROM
+#   WEB_BASE_URL        — URL pública do frontend (ex: https://erp.ajust.com.br)
+#   API_BASE_URL        — URL pública da API/WebSocket (ex: https://api.ajust.com.br)
+#   FRONTEND_URL        — Alias de WEB_BASE_URL (usado em alguns módulos)
+#   API_BASE_URL        — URL pública da API
+#   UPLOAD_ROOT         — Diretório de uploads (padrão: /app/uploads)
+# ============================================================
+
 services:
+  # ── Frontend (Next.js BFF) ───────────────────────────────
   web:
-    build:
-      context: .
-      target: web
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/web:${IMAGE_TAG:-latest}
     ports:
       - "80:3000"
     environment:
       - NODE_ENV=production
       - API_INTERNAL_URL=http://api:3001
-      - API_BASE_URL=${API_BASE_URL:-http://localhost/api}
+      - API_BASE_URL=${API_BASE_URL}
+      - WS_PUBLIC_URL=${API_BASE_URL}
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
 
+  # ── API (NestJS) ─────────────────────────────────────────
   api:
-    build:
-      context: .
-      target: api
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/api:${IMAGE_TAG:-latest}
     ports:
       - "3001:3001"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379
       - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
       - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-      - SMTP_HOST=${SMTP_HOST}
-      - SMTP_PORT=${SMTP_PORT}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
+      - JWT_RESET_SECRET=${JWT_RESET_SECRET}
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
+      - MONITORING_WEBHOOK_TOKEN=${MONITORING_WEBHOOK_TOKEN}
+      - CHAT_WEBHOOK_TOKEN=${CHAT_WEBHOOK_TOKEN}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-"Ajust ERP <noreply@ajusterp.com.br>"}
+      - WEB_BASE_URL=${WEB_BASE_URL}
+      - FRONTEND_URL=${WEB_BASE_URL}
+      - UPLOAD_ROOT=${UPLOAD_ROOT:-/app/uploads}
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/monitoring/health | grep -q '\"status\"' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
+  # ── Worker (Sync/Jobs) ───────────────────────────────────
   worker:
-    build:
-      context: .
-      target: worker
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/worker:${IMAGE_TAG:-latest}
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL:-postgresql://ajust:ajust123@postgres:5432/ajust_erp?schema=public}
+      - DATABASE_URL=${DATABASE_URL}
       - REDIS_URL=redis://redis:6379
-      - IXC_RECONCILE_INTERVAL_MS=300000
+      - IXC_RECONCILE_INTERVAL_MS=${IXC_RECONCILE_INTERVAL_MS:-300000}
+      - UPLOAD_ROOT=${UPLOAD_ROOT:-/app/uploads}
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN}
+      - SMTP_HOST=${SMTP_HOST}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER}
+      - SMTP_PASS=${SMTP_PASS}
+      - SMTP_FROM=${SMTP_FROM:-"Ajust ERP <noreply@ajusterp.com.br>"}
+    volumes:
+      - uploads_data:/app/uploads
     depends_on:
       postgres:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/health | grep -q '\"status\"' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
 
+  # ── PostgreSQL ───────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     environment:
       POSTGRES_DB: ajust_erp
       POSTGRES_USER: ajust
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ajust123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -61,11 +147,41 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      start_period: 10s
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
+  # ── Redis (Pub/Sub + Sessions) ───────────────────────────
   redis:
     image: redis:7-alpine
+    command: >
+      redis-server
+      --save 60 1
+      --loglevel warning
+      --maxmemory 256mb
+      --maxmemory-policy allkeys-lru
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
     restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+          cpus: "0.25"
 
 volumes:
   postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  uploads_data:
+    driver: local

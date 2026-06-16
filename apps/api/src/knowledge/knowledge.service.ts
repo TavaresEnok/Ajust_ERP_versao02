@@ -55,7 +55,16 @@ type ListCredentialInput = {
   provider?: string;
   equipmentType?: string;
   environment?: string;
-  sortBy?: 'provider' | 'equipmentType' | 'equipmentName' | 'environment' | 'host' | 'username' | 'notes' | 'updatedAt' | 'createdAt';
+  sortBy?:
+    | 'provider'
+    | 'equipmentType'
+    | 'equipmentName'
+    | 'environment'
+    | 'host'
+    | 'username'
+    | 'notes'
+    | 'updatedAt'
+    | 'createdAt';
   sortDir?: 'asc' | 'desc';
   limit?: number;
   offset?: number;
@@ -93,7 +102,7 @@ type UpdateNoteInput = {
 export class KnowledgeService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuditService) private readonly audit: AuditService
+    @Inject(AuditService) private readonly audit: AuditService,
   ) {}
 
   async listArticles(authRole: string, authUserId: string, input: ListArticleInput) {
@@ -105,13 +114,13 @@ export class KnowledgeService {
       tenantId: input.tenantId,
       ...(input.includeDrafts && ['super_admin', 'gerente'].includes(authRole)
         ? {}
-        : { isPublished: true })
+        : { isPublished: true }),
     };
 
     if (input.search) {
       where.OR = [
         { title: { contains: input.search, mode: 'insensitive' } },
-        { content: { contains: input.search, mode: 'insensitive' } }
+        { content: { contains: input.search, mode: 'insensitive' } },
       ];
     }
 
@@ -119,9 +128,9 @@ export class KnowledgeService {
       where.tags = {
         some: {
           tag: {
-            name: { equals: input.tag, mode: 'insensitive' }
-          }
-        }
+            name: { equals: input.tag, mode: 'insensitive' },
+          },
+        },
       };
     }
 
@@ -132,10 +141,10 @@ export class KnowledgeService {
         author: { select: { id: true, name: true } },
         tags: {
           include: {
-            tag: true
-          }
-        }
-      }
+            tag: true,
+          },
+        },
+      },
     });
 
     return articles.map((article) => ({
@@ -147,7 +156,7 @@ export class KnowledgeService {
       createdAt: article.createdAt,
       updatedAt: article.updatedAt,
       author: article.author,
-      tags: article.tags.map((item) => item.tag.name)
+      tags: article.tags.map((item) => item.tag.name),
     }));
   }
 
@@ -172,21 +181,21 @@ export class KnowledgeService {
             tag: {
               connectOrCreate: {
                 where: { name: tagName },
-                create: { name: tagName }
-              }
-            }
-          }))
-        }
+                create: { name: tagName },
+              },
+            },
+          })),
+        },
       },
       include: {
         author: { select: { id: true, name: true } },
-        tags: { include: { tag: true } }
-      }
+        tags: { include: { tag: true } },
+      },
     });
 
     await this.logAudit(input.tenantId, authUserId, 'OS_UPDATE', 'knowledge_article', created.id, {
       op: 'create',
-      title: created.title
+      title: created.title,
     });
 
     return {
@@ -198,7 +207,7 @@ export class KnowledgeService {
       createdAt: created.createdAt,
       updatedAt: created.updatedAt,
       author: created.author,
-      tags: created.tags.map((item) => item.tag.name)
+      tags: created.tags.map((item) => item.tag.name),
     };
   }
 
@@ -207,23 +216,24 @@ export class KnowledgeService {
     authUserId: string,
     tenantId: string,
     articleId: string,
-    patch: UpdateArticleInput
+    patch: UpdateArticleInput,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to update knowledge article.');
     }
 
     const article = await this.prisma.knowledgeArticle.findFirst({
-      where: { id: articleId, tenantId }
+      where: { id: articleId, tenantId },
     });
     if (!article) {
       throw new NotFoundException('Knowledge article not found.');
     }
 
     const nextTitle = patch.title?.trim();
-    const nextSlug = nextTitle && nextTitle !== article.title
-      ? await this.buildArticleSlug(tenantId, nextTitle, article.id)
-      : undefined;
+    const nextSlug =
+      nextTitle && nextTitle !== article.title
+        ? await this.buildArticleSlug(tenantId, nextTitle, article.id)
+        : undefined;
 
     const tags = patch.tags ? this.normalizeTags(patch.tags) : null;
 
@@ -242,22 +252,22 @@ export class KnowledgeService {
                   tag: {
                     connectOrCreate: {
                       where: { name: tagName },
-                      create: { name: tagName }
-                    }
-                  }
-                }))
-              }
+                      create: { name: tagName },
+                    },
+                  },
+                })),
+              },
             }
-          : {})
+          : {}),
       },
       include: {
         author: { select: { id: true, name: true } },
-        tags: { include: { tag: true } }
-      }
+        tags: { include: { tag: true } },
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_article', updated.id, {
-      op: 'update'
+      op: 'update',
     });
 
     return {
@@ -269,7 +279,7 @@ export class KnowledgeService {
       createdAt: updated.createdAt,
       updatedAt: updated.updatedAt,
       author: updated.author,
-      tags: updated.tags.map((item) => item.tag.name)
+      tags: updated.tags.map((item) => item.tag.name),
     };
   }
 
@@ -280,19 +290,19 @@ export class KnowledgeService {
 
     const article = await this.prisma.knowledgeArticle.findFirst({
       where: { id: articleId, tenantId },
-      select: { id: true, title: true }
+      select: { id: true, title: true },
     });
     if (!article) {
       throw new NotFoundException('Knowledge article not found.');
     }
 
     await this.prisma.knowledgeArticle.delete({
-      where: { id: article.id }
+      where: { id: article.id },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_article', article.id, {
       op: 'delete',
-      title: article.title
+      title: article.title,
     });
 
     return { deleted: true, id: article.id };
@@ -308,7 +318,7 @@ export class KnowledgeService {
       search: input.search,
       provider: input.provider,
       equipmentType: input.equipmentType,
-      environment: input.environment
+      environment: input.environment,
     });
 
     const orderField = input.sortBy || 'updatedAt';
@@ -333,21 +343,32 @@ export class KnowledgeService {
           username: true,
           notes: true,
           createdAt: true,
-          updatedAt: true
-        }
-      })
+          updatedAt: true,
+        },
+      }),
     ]);
 
-    await this.logAudit(input.tenantId, authUserId, 'CREDENTIAL_ACCESS', 'knowledge_credential', null, {
-      op: 'list',
-      count: credentials.length,
-      total
-    });
+    await this.logAudit(
+      input.tenantId,
+      authUserId,
+      'CREDENTIAL_ACCESS',
+      'knowledge_credential',
+      null,
+      {
+        op: 'list',
+        count: credentials.length,
+        total,
+      },
+    );
 
     return { items: credentials, total, limit, offset };
   }
 
-  async listCredentialProviders(authRole: string, authUserId: string, input: ListCredentialProvidersInput) {
+  async listCredentialProviders(
+    authRole: string,
+    authUserId: string,
+    input: ListCredentialProvidersInput,
+  ) {
     if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to read credentials.');
     }
@@ -356,7 +377,7 @@ export class KnowledgeService {
       tenantId: input.tenantId,
       search: input.search,
       equipmentType: input.equipmentType,
-      environment: input.environment
+      environment: input.environment,
     });
     const limit = input.limit ?? 500;
     const offset = input.offset ?? 0;
@@ -366,12 +387,15 @@ export class KnowledgeService {
       select: {
         provider: true,
         equipmentType: true,
-        environment: true
+        environment: true,
       },
-      orderBy: [{ provider: 'asc' }]
+      orderBy: [{ provider: 'asc' }],
     });
 
-    const grouped = new Map<string, { provider: string; total: number; types: Set<string>; envs: Set<string> }>();
+    const grouped = new Map<
+      string,
+      { provider: string; total: number; types: Set<string>; envs: Set<string> }
+    >();
     for (const row of rows) {
       const provider = row.provider || 'Sem provedor';
       if (!grouped.has(provider)) {
@@ -379,7 +403,7 @@ export class KnowledgeService {
           provider,
           total: 0,
           types: new Set<string>(),
-          envs: new Set<string>()
+          envs: new Set<string>(),
         });
       }
       const item = grouped.get(provider)!;
@@ -393,18 +417,25 @@ export class KnowledgeService {
         provider: item.provider,
         total: item.total,
         equipmentTypeCount: item.types.size,
-        environmentCount: item.envs.size
+        environmentCount: item.envs.size,
       }))
       .sort((a, b) => a.provider.localeCompare(b.provider, 'pt-BR'));
 
     const total = summaries.length;
     const items = summaries.slice(offset, offset + limit);
 
-    await this.logAudit(input.tenantId, authUserId, 'CREDENTIAL_ACCESS', 'knowledge_credential', null, {
-      op: 'list_providers',
-      count: items.length,
-      total
-    });
+    await this.logAudit(
+      input.tenantId,
+      authUserId,
+      'CREDENTIAL_ACCESS',
+      'knowledge_credential',
+      null,
+      {
+        op: 'list_providers',
+        count: items.length,
+        total,
+      },
+    );
 
     return { items, total, limit, offset };
   }
@@ -425,7 +456,7 @@ export class KnowledgeService {
         host: input.host.trim(),
         username: input.username.trim(),
         secretEnc: encryptSecret(input.secret),
-        notes: input.notes?.trim() || null
+        notes: input.notes?.trim() || null,
       },
       select: {
         id: true,
@@ -437,20 +468,32 @@ export class KnowledgeService {
         username: true,
         notes: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
-    await this.logAudit(input.tenantId, authUserId, 'OS_UPDATE', 'knowledge_credential', created.id, {
-      op: 'create',
-      provider: created.provider,
-      environment: created.environment
-    });
+    await this.logAudit(
+      input.tenantId,
+      authUserId,
+      'OS_UPDATE',
+      'knowledge_credential',
+      created.id,
+      {
+        op: 'create',
+        provider: created.provider,
+        environment: created.environment,
+      },
+    );
 
     return created;
   }
 
-  async revealCredential(authRole: string, authUserId: string, tenantId: string, credentialId: string) {
+  async revealCredential(
+    authRole: string,
+    authUserId: string,
+    tenantId: string,
+    credentialId: string,
+  ) {
     if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to reveal credential secret.');
     }
@@ -466,19 +509,26 @@ export class KnowledgeService {
         host: true,
         username: true,
         notes: true,
-        secretEnc: true
-      }
+        secretEnc: true,
+      },
     });
 
     if (!credential) {
       throw new NotFoundException('Credential not found.');
     }
 
-    await this.logAudit(tenantId, authUserId, 'CREDENTIAL_ACCESS', 'knowledge_credential', credential.id, {
-      op: 'reveal',
-      provider: credential.provider,
-      environment: credential.environment
-    });
+    await this.logAudit(
+      tenantId,
+      authUserId,
+      'CREDENTIAL_ACCESS',
+      'knowledge_credential',
+      credential.id,
+      {
+        op: 'reveal',
+        provider: credential.provider,
+        environment: credential.environment,
+      },
+    );
 
     return {
       id: credential.id,
@@ -489,7 +539,7 @@ export class KnowledgeService {
       host: credential.host,
       username: credential.username,
       notes: credential.notes,
-      secret: decryptSecret(credential.secretEnc)
+      secret: decryptSecret(credential.secretEnc),
     };
   }
 
@@ -498,7 +548,7 @@ export class KnowledgeService {
     authUserId: string,
     tenantId: string,
     credentialId: string,
-    patch: UpdateCredentialInput
+    patch: UpdateCredentialInput,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to update credentials.');
@@ -513,12 +563,14 @@ export class KnowledgeService {
 
     const data: Prisma.KnowledgeCredentialUpdateInput = {};
     if (patch.provider !== undefined) data.provider = patch.provider.trim();
-    if (patch.equipmentType !== undefined) data.equipmentType = patch.equipmentType.trim() || 'OUTROS';
+    if (patch.equipmentType !== undefined)
+      data.equipmentType = patch.equipmentType.trim() || 'OUTROS';
     if (patch.equipmentName !== undefined) data.equipmentName = patch.equipmentName.trim();
     if (patch.environment !== undefined) data.environment = patch.environment.trim();
     if (patch.host !== undefined) data.host = patch.host.trim();
     if (patch.username !== undefined) data.username = patch.username.trim();
-    if (patch.secret !== undefined && patch.secret.trim() !== '') data.secretEnc = encryptSecret(patch.secret);
+    if (patch.secret !== undefined && patch.secret.trim() !== '')
+      data.secretEnc = encryptSecret(patch.secret);
     if (patch.notes !== undefined) data.notes = patch.notes ? patch.notes.trim() : null;
 
     const updated = await this.prisma.knowledgeCredential.update({
@@ -534,20 +586,25 @@ export class KnowledgeService {
         username: true,
         notes: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_credential', updated.id, {
       op: 'update',
       provider: updated.provider,
-      environment: updated.environment
+      environment: updated.environment,
     });
 
     return updated;
   }
 
-  async deleteCredential(authRole: string, authUserId: string, tenantId: string, credentialId: string) {
+  async deleteCredential(
+    authRole: string,
+    authUserId: string,
+    tenantId: string,
+    credentialId: string,
+  ) {
     if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to delete credentials.');
     }
@@ -560,32 +617,34 @@ export class KnowledgeService {
     }
 
     await this.prisma.knowledgeCredential.delete({
-      where: { id: credential.id }
+      where: { id: credential.id },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_credential', credential.id, {
       op: 'delete',
       provider: credential.provider,
-      environment: credential.environment
+      environment: credential.environment,
     });
 
     return { deleted: true, id: credential.id };
   }
 
   async listNotes(authRole: string, authUserId: string, input: ListNotesInput) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)) {
+    if (
+      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
+    ) {
       throw new ForbiddenException('Role is not allowed to read notes.');
     }
 
     const where: Prisma.NoteWhereInput = {
       tenantId: input.tenantId,
-      authorUserId: authUserId
+      authorUserId: authUserId,
     };
 
     if (input.search) {
       where.OR = [
         { title: { contains: input.search, mode: 'insensitive' } },
-        { content: { contains: input.search, mode: 'insensitive' } }
+        { content: { contains: input.search, mode: 'insensitive' } },
       ];
     }
 
@@ -602,15 +661,17 @@ export class KnowledgeService {
         content: true,
         pinned: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
     return notes;
   }
 
   async createNote(authRole: string, authUserId: string, input: CreateNoteInput) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)) {
+    if (
+      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
+    ) {
       throw new ForbiddenException('Role is not allowed to create notes.');
     }
 
@@ -620,7 +681,7 @@ export class KnowledgeService {
         authorUserId: authUserId,
         title: input.title.trim(),
         content: input.content || '',
-        pinned: !!input.pinned
+        pinned: !!input.pinned,
       },
       select: {
         id: true,
@@ -628,12 +689,12 @@ export class KnowledgeService {
         content: true,
         pinned: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
     await this.logAudit(input.tenantId, authUserId, 'OS_UPDATE', 'note', created.id, {
-      op: 'create'
+      op: 'create',
     });
 
     return created;
@@ -644,9 +705,11 @@ export class KnowledgeService {
     authUserId: string,
     tenantId: string,
     noteId: string,
-    patch: UpdateNoteInput
+    patch: UpdateNoteInput,
   ) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)) {
+    if (
+      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
+    ) {
       throw new ForbiddenException('Role is not allowed to update notes.');
     }
 
@@ -654,8 +717,8 @@ export class KnowledgeService {
       where: { id: noteId, tenantId },
       select: {
         id: true,
-        authorUserId: true
-      }
+        authorUserId: true,
+      },
     });
     if (!note) {
       throw new NotFoundException('Note not found.');
@@ -671,7 +734,7 @@ export class KnowledgeService {
       data: {
         ...(patch.title !== undefined ? { title: patch.title.trim() } : {}),
         ...(patch.content !== undefined ? { content: patch.content } : {}),
-        ...(patch.pinned !== undefined ? { pinned: patch.pinned } : {})
+        ...(patch.pinned !== undefined ? { pinned: patch.pinned } : {}),
       },
       select: {
         id: true,
@@ -679,19 +742,21 @@ export class KnowledgeService {
         content: true,
         pinned: true,
         createdAt: true,
-        updatedAt: true
-      }
+        updatedAt: true,
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'note', updated.id, {
-      op: 'update'
+      op: 'update',
     });
 
     return updated;
   }
 
   async deleteNote(authRole: string, authUserId: string, tenantId: string, noteId: string) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)) {
+    if (
+      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
+    ) {
       throw new ForbiddenException('Role is not allowed to delete notes.');
     }
 
@@ -699,8 +764,8 @@ export class KnowledgeService {
       where: { id: noteId, tenantId },
       select: {
         id: true,
-        authorUserId: true
-      }
+        authorUserId: true,
+      },
     });
     if (!note) {
       throw new NotFoundException('Note not found.');
@@ -712,11 +777,11 @@ export class KnowledgeService {
     }
 
     await this.prisma.note.delete({
-      where: { id: note.id }
+      where: { id: note.id },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'note', note.id, {
-      op: 'delete'
+      op: 'delete',
     });
 
     return { deleted: true, id: note.id };
@@ -730,7 +795,7 @@ export class KnowledgeService {
     environment?: string;
   }): Prisma.KnowledgeCredentialWhereInput {
     const where: Prisma.KnowledgeCredentialWhereInput = {
-      tenantId: input.tenantId
+      tenantId: input.tenantId,
     };
 
     if (input.search) {
@@ -741,7 +806,7 @@ export class KnowledgeService {
         { environment: { contains: input.search, mode: 'insensitive' } },
         { host: { contains: input.search, mode: 'insensitive' } },
         { username: { contains: input.search, mode: 'insensitive' } },
-        { notes: { contains: input.search, mode: 'insensitive' } }
+        { notes: { contains: input.search, mode: 'insensitive' } },
       ];
     }
     if (input.provider) {
@@ -785,9 +850,9 @@ export class KnowledgeService {
         where: {
           tenantId,
           slug,
-          ...(ignoreId ? { id: { not: ignoreId } } : {})
+          ...(ignoreId ? { id: { not: ignoreId } } : {}),
         },
-        select: { id: true }
+        select: { id: true },
       });
 
       if (!conflict) return slug;
@@ -803,7 +868,7 @@ export class KnowledgeService {
     action: string,
     resourceType: string,
     resourceId: string | null,
-    metadata: Record<string, unknown>
+    metadata: Record<string, unknown>,
   ) {
     // Mapeia strings de ação para o enum correto
     const actionMap: Record<string, import('@prisma/client').AuditAction> = {

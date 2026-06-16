@@ -1,7 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { apiBaseUrl } from '../auth/_lib';
 import { applyRefreshIfNeeded, resolveAuthSession } from '../_proxy';
-import { omitTenantIdFromBody, omitTenantIdFromSearchParams } from '../../../lib/strip-tenant-upstream';
+import {
+  omitTenantIdFromBody,
+  omitTenantIdFromSearchParams,
+} from '../../../lib/strip-tenant-upstream';
 
 export async function GET(request: NextRequest) {
   const session = await resolveAuthSession(request);
@@ -11,12 +14,15 @@ export async function GET(request: NextRequest) {
   const response = await fetch(`${apiBaseUrl()}/service-orders/occurrences?${params.toString()}`, {
     method: 'GET',
     headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao listar ocorrencias.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao listar ocorrencias.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : []);
@@ -34,18 +40,20 @@ export async function POST(request: NextRequest) {
     method: 'POST',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
     body: JSON.stringify(payload),
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao criar ocorrencia.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao criar ocorrencia.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }
-

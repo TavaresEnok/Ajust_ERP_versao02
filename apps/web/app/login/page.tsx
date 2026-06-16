@@ -8,16 +8,35 @@ import Image from 'next/image';
 type LoginResult = {
   ok?: boolean;
   error?: string;
+  twoFactorRequired?: boolean;
+  temporaryToken?: string;
   user?: {
     name?: string;
     role?: string;
   };
 };
 
+type LoginStep = 'credentials' | 'two-factor' | 'bootstrap-request' | 'bootstrap-verify';
+
 const EXAMPLE_ACCOUNTS = [
-  { label: 'Gerente', identifier: 'gerente@ajust.local', password: 'Gerente@123', home: '/gerencia' },
-  { label: 'Analista', identifier: 'analista@ajust.local', password: 'Analista@123', home: '/analista' },
-  { label: 'Cliente (1o acesso CNPJ)', identifier: '00.000.000/0001-00', password: '0100', home: '/cliente' }
+  {
+    label: 'Gerente',
+    identifier: 'gerente@ajust.local',
+    password: 'Gerente@123',
+    home: '/gerencia',
+  },
+  {
+    label: 'Analista',
+    identifier: 'analista@ajust.local',
+    password: 'Analista@123',
+    home: '/analista',
+  },
+  {
+    label: 'Cliente',
+    identifier: '00.000.000/0001-00',
+    password: 'Cliente@123',
+    home: '/cliente',
+  },
 ] as const;
 
 function roleHome(role?: string) {
@@ -46,7 +65,7 @@ function NetworkPattern() {
         y: Math.random() * height,
         vx: (Math.random() - 0.5) * 0.25,
         vy: (Math.random() - 0.5) * 0.25,
-        radius: Math.random() * 1.5 + 0.5
+        radius: Math.random() * 1.5 + 0.5,
       }));
     };
 
@@ -111,7 +130,9 @@ function NetworkPattern() {
     };
   }, []);
 
-  return <canvas ref={canvasRef} className="absolute inset-0 h-full w-full pointer-events-none z-0" />;
+  return (
+    <canvas ref={canvasRef} className="absolute inset-0 h-full w-full pointer-events-none z-0" />
+  );
 }
 
 export default function LoginPage() {
@@ -120,6 +141,13 @@ export default function LoginPage() {
 
   const [identifier, setIdentifier] = useState('');
   const [password, setPassword] = useState('');
+  const [email, setEmail] = useState('');
+  const [code, setCode] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [temporaryToken, setTemporaryToken] = useState('');
+  const [challengeRole, setChallengeRole] = useState<string>();
+  const [step, setStep] = useState<LoginStep>('credentials');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
@@ -128,40 +156,113 @@ export default function LoginPage() {
     setNext(params.get('next') || '');
   }, []);
 
-  async function onSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!identifier || !password) {
-      setError('Informe e-mail ou CNPJ e senha.');
+  function finishLogin(role?: string) {
+    const defaultHome = roleHome(role);
+    const target =
+      next.startsWith('/gerencia') || next.startsWith('/analista') || next.startsWith('/cliente')
+        ? next
+        : defaultHome;
+    router.replace(target as any);
+    router.refresh();
+  }
+
+  async function submitLogin(bootstrapToken?: string) {
+    const response = await fetch('/api/auth/login', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({
+        identifier: identifier.trim(),
+        password: bootstrapToken ? newPassword : password,
+        ...(bootstrapToken ? { bootstrapToken } : {}),
+      }),
+    });
+
+    const payload = (await response.json()) as LoginResult;
+    if (!response.ok || !payload.ok) {
+      throw new Error(payload.error || 'Falha no login.');
+    }
+    if (payload.twoFactorRequired && payload.temporaryToken) {
+      setTemporaryToken(payload.temporaryToken);
+      setChallengeRole(payload.user?.role);
+      setCode('');
+      setStep('two-factor');
       return;
     }
+    finishLogin(payload.user?.role);
+  }
 
+  async function onSubmit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
     setLoading(true);
     setError('');
 
     try {
-      const response = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: {
-          'content-type': 'application/json'
-        },
-        body: JSON.stringify({
-          identifier: identifier.trim(),
-          password
-        })
-      });
-
-      const payload = (await response.json()) as LoginResult;
-      if (!response.ok || !payload.ok) {
-        setError(payload.error || 'Falha no login.');
+      if (step === 'credentials') {
+        if (!identifier || !password) throw new Error('Informe e-mail ou CNPJ e senha.');
+        await submitLogin();
         return;
       }
 
-      const defaultHome = roleHome(payload.user?.role);
-      const target = next.startsWith('/gerencia') || next.startsWith('/analista') || next.startsWith('/cliente')
-        ? next
-        : defaultHome;
-      router.replace(target as any);
-      router.refresh();
+      if (step === 'two-factor') {
+        if (!/^\d{6}$/.test(code)) throw new Error('Informe o código de 6 dígitos.');
+        const response = await fetch('/api/auth/verify-2fa', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ temporaryToken, code }),
+        });
+        const payload = (await response.json()) as LoginResult;
+        if (!response.ok || !payload.ok) {
+          throw new Error(payload.error || 'Falha ao validar o código.');
+        }
+        finishLogin(payload.user?.role || challengeRole);
+        return;
+      }
+
+      const cnpj = identifier.replace(/\D/g, '');
+      if (cnpj.length !== 14 || !email) {
+        throw new Error('Informe um CNPJ válido e o e-mail cadastrado.');
+      }
+
+      if (step === 'bootstrap-request') {
+        const response = await fetch('/api/auth/bootstrap/request-otp', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ cnpj, email: email.trim() }),
+        });
+        const payload = (await response.json()) as { success?: boolean; error?: string };
+        if (!response.ok || !payload.success) {
+          throw new Error(payload.error || 'Não foi possível solicitar o código.');
+        }
+        setStep('bootstrap-verify');
+        return;
+      }
+
+      if (!/^\d{6}$/.test(code)) throw new Error('Informe o código de 6 dígitos.');
+      if (newPassword.length < 8)
+        throw new Error('A nova senha deve conter pelo menos 8 caracteres.');
+      if (newPassword !== confirmPassword) throw new Error('As senhas não coincidem.');
+
+      const response = await fetch('/api/auth/bootstrap/validate-otp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          cnpj,
+          email: email.trim(),
+          otp: code,
+          newPassword,
+        }),
+      });
+      const payload = (await response.json()) as {
+        success?: boolean;
+        bootstrapToken?: string;
+        error?: string;
+      };
+      if (!response.ok || !payload.success || !payload.bootstrapToken) {
+        throw new Error(payload.error || 'Código inválido ou expirado.');
+      }
+      await submitLogin(payload.bootstrapToken);
     } catch (e) {
       setError(e instanceof Error ? e.message : 'Falha inesperada no login.');
     } finally {
@@ -193,43 +294,201 @@ export default function LoginPage() {
 
         <div className="w-full bg-[#111219] p-7 md:w-[57%] md:p-12">
           <h1 className="text-3xl font-bold text-white">Bem-vindo</h1>
-          <p className="mt-2 text-sm text-slate-400">Insira suas credenciais para acessar o portal.</p>
-          <p className="mt-1 text-xs text-slate-500">Cliente no 1o acesso: use CNPJ e senha com os 4 ultimos digitos.</p>
+          <p className="mt-2 text-sm text-slate-400">
+            {step === 'credentials' && 'Insira suas credenciais para acessar o portal.'}
+            {step === 'two-factor' && 'Confirme o código do seu aplicativo autenticador.'}
+            {step === 'bootstrap-request' && 'Solicite o código seguro do primeiro acesso.'}
+            {step === 'bootstrap-verify' && 'Valide o código recebido e escolha sua senha.'}
+          </p>
 
           <form className="mt-8 space-y-5" onSubmit={onSubmit}>
-            <label className="block">
-              <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">Usuario / CNPJ</span>
-              <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
-                <User size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="text"
-                  value={identifier}
-                  onChange={(event) => setIdentifier(event.target.value)}
-                  className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm text-white outline-none placeholder:text-slate-500"
-                  placeholder="seu email, usuario ou CNPJ"
-                  autoComplete="username"
-                />
-              </div>
-            </label>
+            {(step === 'credentials' || step === 'bootstrap-request') && (
+              <label className="block">
+                <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                  {step === 'bootstrap-request' ? 'CNPJ' : 'Usuario / CNPJ'}
+                </span>
+                <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
+                  <User
+                    size={18}
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="text"
+                    value={identifier}
+                    onChange={(event) => setIdentifier(event.target.value)}
+                    className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm text-white outline-none placeholder:text-slate-500"
+                    placeholder={
+                      step === 'bootstrap-request'
+                        ? '00.000.000/0000-00'
+                        : 'seu email, usuario ou CNPJ'
+                    }
+                    autoComplete="username"
+                  />
+                </div>
+              </label>
+            )}
 
-            <label className="block">
-              <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">Senha</span>
-              <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
-                <Lock size={18} className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400" />
-                <input
-                  type="password"
-                  value={password}
-                  onChange={(event) => setPassword(event.target.value)}
-                  className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm tracking-wide text-white outline-none placeholder:text-slate-500"
-                  placeholder="********"
-                  autoComplete="current-password"
-                />
-              </div>
-            </label>
+            {step === 'bootstrap-request' && (
+              <label className="block">
+                <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                  E-mail cadastrado
+                </span>
+                <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
+                  <User
+                    size={18}
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="email"
+                    value={email}
+                    onChange={(event) => setEmail(event.target.value)}
+                    className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm text-white outline-none placeholder:text-slate-500"
+                    placeholder="cliente@empresa.com"
+                    autoComplete="email"
+                  />
+                </div>
+              </label>
+            )}
 
-            <div className="flex justify-end mt-2">
-              <a href="/forgot-password" className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors">Esqueci minha senha</a>
-            </div>
+            {step === 'credentials' && (
+              <label className="block">
+                <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                  Senha
+                </span>
+                <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
+                  <Lock
+                    size={18}
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="password"
+                    value={password}
+                    onChange={(event) => setPassword(event.target.value)}
+                    className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm tracking-wide text-white outline-none placeholder:text-slate-500"
+                    placeholder="********"
+                    autoComplete="current-password"
+                  />
+                </div>
+              </label>
+            )}
+
+            {(step === 'two-factor' || step === 'bootstrap-verify') && (
+              <label className="block">
+                <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                  Código de 6 dígitos
+                </span>
+                <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
+                  <Lock
+                    size={18}
+                    className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                  />
+                  <input
+                    type="text"
+                    inputMode="numeric"
+                    value={code}
+                    onChange={(event) => setCode(event.target.value.replace(/\D/g, '').slice(0, 6))}
+                    className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm tracking-[0.35em] text-white outline-none placeholder:text-slate-500"
+                    placeholder="000000"
+                    autoComplete="one-time-code"
+                  />
+                </div>
+              </label>
+            )}
+
+            {step === 'bootstrap-verify' && (
+              <>
+                <label className="block">
+                  <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                    Nova senha
+                  </span>
+                  <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
+                    <Lock
+                      size={18}
+                      className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      type="password"
+                      value={newPassword}
+                      onChange={(event) => setNewPassword(event.target.value)}
+                      className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm text-white outline-none placeholder:text-slate-500"
+                      placeholder="mínimo de 8 caracteres"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </label>
+                <label className="block">
+                  <span className="mb-2 block text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                    Confirmar nova senha
+                  </span>
+                  <div className="relative rounded-xl border border-[#2d3142] bg-[#171923] transition-colors focus-within:border-indigo-500">
+                    <Lock
+                      size={18}
+                      className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-slate-400"
+                    />
+                    <input
+                      type="password"
+                      value={confirmPassword}
+                      onChange={(event) => setConfirmPassword(event.target.value)}
+                      className="w-full rounded-xl bg-transparent py-3.5 pl-12 pr-4 text-sm text-white outline-none placeholder:text-slate-500"
+                      placeholder="repita a nova senha"
+                      autoComplete="new-password"
+                    />
+                  </div>
+                </label>
+              </>
+            )}
+
+            {step === 'credentials' && (
+              <div className="flex justify-between mt-2">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setStep('bootstrap-request');
+                    setIdentifier('');
+                    setPassword('');
+                    setError('');
+                  }}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Primeiro acesso de cliente
+                </button>
+                <a
+                  href="/forgot-password"
+                  className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+                >
+                  Esqueci minha senha
+                </a>
+              </div>
+            )}
+
+            {step !== 'credentials' && step !== 'two-factor' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('credentials');
+                  setError('');
+                  setCode('');
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+              >
+                Voltar ao login normal
+              </button>
+            )}
+
+            {step === 'two-factor' && (
+              <button
+                type="button"
+                onClick={() => {
+                  setStep('credentials');
+                  setTemporaryToken('');
+                  setCode('');
+                  setError('');
+                }}
+                className="text-xs text-indigo-400 hover:text-indigo-300 transition-colors"
+              >
+                Voltar ao login
+              </button>
+            )}
 
             {error && (
               <div className="flex items-center gap-2 rounded-xl border border-rose-900/60 bg-rose-950/40 px-3 py-2.5 text-xs text-rose-300">
@@ -243,14 +502,20 @@ export default function LoginPage() {
               disabled={loading}
               className="flex w-full items-center justify-center gap-2 rounded-xl bg-gradient-to-r from-indigo-600 to-fuchsia-600 py-3.5 text-sm font-semibold text-white shadow-[0_0_20px_rgba(99,102,241,0.45)] transition hover:opacity-95 disabled:cursor-not-allowed disabled:opacity-60"
             >
-              {loading ? 'Entrando...' : 'Acessar Painel'}
+              {loading && 'Processando...'}
+              {!loading && step === 'credentials' && 'Acessar Painel'}
+              {!loading && step === 'two-factor' && 'Validar código'}
+              {!loading && step === 'bootstrap-request' && 'Enviar código'}
+              {!loading && step === 'bootstrap-verify' && 'Concluir primeiro acesso'}
               {!loading && <ArrowRight size={18} />}
             </button>
           </form>
 
-          {process.env.NODE_ENV !== 'production' && (
+          {process.env.NODE_ENV !== 'production' && step === 'credentials' && (
             <div className="mt-7 border-t border-white/10 pt-4">
-              <p className="text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">Logins de exemplo</p>
+              <p className="text-[0.68rem] font-bold uppercase tracking-widest text-slate-500">
+                Logins de exemplo
+              </p>
               <div className="mt-3 grid grid-cols-1 gap-2">
                 {EXAMPLE_ACCOUNTS.map((account) => (
                   <button
@@ -269,7 +534,9 @@ export default function LoginPage() {
                   </button>
                 ))}
               </div>
-              <p className="mt-2 text-[11px] text-slate-500">Clique em um exemplo para preencher automaticamente.</p>
+              <p className="mt-2 text-[11px] text-slate-500">
+                Clique em um exemplo para preencher automaticamente.
+              </p>
             </div>
           )}
         </div>

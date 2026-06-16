@@ -1,11 +1,22 @@
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import {
-  Controller, Get, Post, Patch, Delete, Body, Param, Req, UseGuards, Inject
+  Controller,
+  Get,
+  Post,
+  Patch,
+  Delete,
+  Body,
+  Param,
+  Req,
+  UseGuards,
+  Inject,
 } from '@nestjs/common';
 import { z } from 'zod';
 import { WorkflowsService } from './workflows.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
+import { assertManagerRole } from '../common/role-utils';
 
 const NodeSchema = z.object({
   id: z.string().min(1),
@@ -25,13 +36,15 @@ const EdgeSchema = z.object({
   label: z.string().optional(),
 });
 
-const GovernanceSchema = z.object({
-  ownerTeam: z.string().min(1).max(120).optional(),
-  requiresApproval: z.boolean().optional(),
-  changeTicketRequired: z.boolean().optional(),
-  maxExecutionsPerHour: z.number().int().min(0).max(100000).optional(),
-  stopOnFailure: z.boolean().optional(),
-}).optional();
+const GovernanceSchema = z
+  .object({
+    ownerTeam: z.string().min(1).max(120).optional(),
+    requiresApproval: z.boolean().optional(),
+    changeTicketRequired: z.boolean().optional(),
+    maxExecutionsPerHour: z.number().int().min(0).max(100000).optional(),
+    stopOnFailure: z.boolean().optional(),
+  })
+  .optional();
 
 const DefinitionSchema = z.object({
   nodes: z.array(NodeSchema),
@@ -57,6 +70,10 @@ const RollbackSchema = z.object({
   version: z.number().int().positive(),
 });
 
+@ApiTags('Workflows')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'Não autenticado' })
+@ApiResponse({ status: 403, description: 'Permissão insuficiente' })
 @Controller('workflows')
 @UseGuards(AuthGuard, TenantIsolationGuard)
 export class WorkflowsController {
@@ -68,38 +85,56 @@ export class WorkflowsController {
 
   @Get()
   list(@Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     return this.svc.list(this.tid(req));
+  }
+
+  @Get('status')
+  @ApiOperation({ summary: 'Status do motor de execução de workflows' })
+  status(@Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
+    return {
+      executionEnabled: this.svc.isExecutionEnabled(),
+      flagRaw: process.env.WORKFLOW_EXECUTION_ENABLED ?? null,
+      maxExecutionsPerHour: Number(process.env.WORKFLOW_MAX_EXECUTIONS_PER_HOUR ?? 0),
+    };
   }
 
   @Get(':id')
   findOne(@Param('id') id: string, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     return this.svc.findOne(this.tid(req), id);
   }
 
   @Post()
-  create(@Body() body: any, @Req() req: RequestWithAuth) {
+  create(@Body() body: unknown, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     const input = CreateWorkflowSchema.parse(body);
     return this.svc.create(this.tid(req), req.auth!.userId, input);
   }
 
   @Patch(':id')
-  update(@Param('id') id: string, @Body() body: any, @Req() req: RequestWithAuth) {
+  update(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     const input = UpdateWorkflowSchema.parse(body);
     return this.svc.update(this.tid(req), req.auth!.userId, id, input);
   }
 
   @Patch(':id/toggle')
   toggle(@Param('id') id: string, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     return this.svc.toggle(this.tid(req), req.auth!.userId, id);
   }
 
   @Delete(':id')
   remove(@Param('id') id: string, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     return this.svc.remove(this.tid(req), req.auth!.userId, id);
   }
 
   @Post(':id/rollback')
   rollback(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
     const input = RollbackSchema.parse(body);
     return this.svc.rollbackToVersion(this.tid(req), req.auth!.userId, id, input.version);
   }

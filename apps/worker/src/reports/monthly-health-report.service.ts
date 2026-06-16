@@ -1,48 +1,29 @@
-import { Inject, Injectable, Logger, OnModuleDestroy, OnModuleInit } from '@nestjs/common';
+import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import nodemailer, { Transporter } from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Injectable()
-export class MonthlyHealthReportService implements OnModuleInit, OnModuleDestroy {
+export class MonthlyHealthReportService implements OnModuleInit {
   private readonly logger = new Logger(MonthlyHealthReportService.name);
-  private timer: NodeJS.Timeout | null = null;
   private running = false;
-  private transporter: any = null;
+  private transporter?: Transporter;
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async onModuleInit() {
-    try {
-      // @ts-expect-error Optional dependency `nodemailer` in worker bundle.
-      const nodemailer = await import('nodemailer');
-      this.transporter = nodemailer.createTransport({
-        host: process.env.SMTP_HOST || 'localhost',
-        port: Number(process.env.SMTP_PORT) || 587,
-        secure: process.env.SMTP_SECURE === 'true',
-        auth: {
-          user: process.env.SMTP_USER,
-          pass: process.env.SMTP_PASS,
-        },
-      });
-    } catch {
-      this.logger.warn('Nodemailer not installed in worker. Emails will just log.');
+    if (!process.env.SMTP_HOST) {
+      this.logger.warn('SMTP is not configured. Monthly reports will not be marked as sent.');
+      return;
     }
-
-    // Run check once on start
-    void this.runCheck();
-
-    // Check every hour
-    this.timer = setInterval(() => {
-      void this.runCheck();
-    }, 60 * 60 * 1000);
-    
-    this.logger.log('Monthly Health Report cron started.');
-  }
-
-  onModuleDestroy() {
-    if (this.timer) {
-      clearInterval(this.timer);
-      this.timer = null;
-    }
+    this.transporter = nodemailer.createTransport({
+      host: process.env.SMTP_HOST,
+      port: Number(process.env.SMTP_PORT) || 587,
+      secure: process.env.SMTP_SECURE === 'true',
+      auth: {
+        user: process.env.SMTP_USER,
+        pass: process.env.SMTP_PASS,
+      },
+    });
   }
 
   async runCheck() {
@@ -57,8 +38,8 @@ export class MonthlyHealthReportService implements OnModuleInit, OnModuleDestroy
       const currentMonth = `${now.getFullYear()}-${now.getMonth() + 1}`; // e.g. "2026-4"
 
       const tenants = await this.prisma.tenant.findMany({
-        where: { status: 'ACTIVE' },
-        select: { id: true, legalName: true, techContactEmail: true }
+        where: { status: 'ACTIVE', deletedAt: null },
+        select: { id: true, legalName: true, techContactEmail: true },
       });
 
       for (const tenant of tenants) {
@@ -67,7 +48,7 @@ export class MonthlyHealthReportService implements OnModuleInit, OnModuleDestroy
         // Check if we already sent for this tenant this month
         const logKey = `health_report_${currentMonth}`;
         const existingLog = await this.prisma.auditLog.findFirst({
-          where: { tenantId: tenant.id, action: 'EXPORT', resourceType: logKey }
+          where: { tenantId: tenant.id, action: 'EXPORT', resourceType: logKey },
         });
 
         if (existingLog) continue; // Already sent
@@ -82,19 +63,20 @@ export class MonthlyHealthReportService implements OnModuleInit, OnModuleDestroy
             action: 'EXPORT',
             resourceType: logKey,
             resourceId: currentMonth,
-            metadata: { type: 'monthly_health_report_email' }
-          }
+            metadata: { type: 'monthly_health_report_email' },
+          },
         });
       }
-
-    } catch (error: any) {
-      this.logger.error(`Failed to process monthly health reports: ${error.message}`);
     } finally {
       this.running = false;
     }
   }
 
-  private async generateAndSendReport(tenant: { id: string, legalName: string, techContactEmail: string }) {
+  private async generateAndSendReport(tenant: {
+    id: string;
+    legalName: string;
+    techContactEmail: string;
+  }) {
     // Basic aggregation for last month's orders
     const now = new Date();
     const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
@@ -103,21 +85,21 @@ export class MonthlyHealthReportService implements OnModuleInit, OnModuleDestroy
     const orders = await this.prisma.serviceOrder.findMany({
       where: {
         tenantId: tenant.id,
-        createdAt: { gte: firstDayLastMonth, lte: lastDayLastMonth }
-      }
+        createdAt: { gte: firstDayLastMonth, lte: lastDayLastMonth },
+      },
     });
 
     const total = orders.length;
-    const closed = orders.filter(o => ['FECHADA', 'RESOLVIDA'].includes(o.status)).length;
-    const critical = orders.filter(o => ['CRITICA', 'ALTA'].includes(o.priority)).length;
+    const closed = orders.filter((o) => ['FECHADA', 'RESOLVIDA'].includes(o.status)).length;
+    const critical = orders.filter((o) => ['CRITICA', 'ALTA'].includes(o.priority)).length;
 
     const resolutionRate = total > 0 ? Math.round((closed / total) * 100) : 100;
-    
+
     // Grade calculation (simplified logic matching API reports)
     let score = 100;
     if (total > 0) {
       score -= (critical / total) * 100;
-      score -= ((1 - (closed / total)) * 50);
+      score -= (1 - closed / total) * 50;
     }
     const finalScore = Math.max(0, Math.round(score));
     let grade = 'A';
@@ -167,20 +149,15 @@ export class MonthlyHealthReportService implements OnModuleInit, OnModuleDestroy
       </div>
     `;
 
-    if (this.transporter) {
-      try {
-        await this.transporter.sendMail({
-          from: process.env.SMTP_FROM || '"Ajust ERP" <noreply@ajusterp.com.br>',
-          to: tenant.techContactEmail,
-          subject: `Saúde Operacional - ${monthName} (${grade})`,
-          html,
-        });
-        this.logger.log(`Sent health report email to ${tenant.techContactEmail}`);
-      } catch (error: any) {
-        this.logger.error(`Failed to send health report to ${tenant.techContactEmail}: ${error.message}`);
-      }
-    } else {
-      this.logger.log(`[MOCK EMAIL] Health Report for ${tenant.legalName} (${grade}) to ${tenant.techContactEmail}`);
+    if (!this.transporter) {
+      throw new Error('SMTP is not configured for monthly health reports.');
     }
+    await this.transporter.sendMail({
+      from: process.env.SMTP_FROM || '"Ajust ERP" <noreply@ajusterp.com.br>',
+      to: tenant.techContactEmail,
+      subject: `Saúde Operacional - ${monthName} (${grade})`,
+      html,
+    });
+    this.logger.log(`Sent health report email to ${tenant.techContactEmail}`);
   }
 }

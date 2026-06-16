@@ -1,5 +1,5 @@
 import { Injectable } from '@nestjs/common';
-import { randomBytes } from 'crypto';
+import { randomBytes, timingSafeEqual } from 'crypto';
 
 /**
  * TOTP (Time-based One-Time Password) implementation for 2FA
@@ -38,7 +38,9 @@ export class TotpService {
     // Check current window and ±1 for drift tolerance
     for (let i = -1; i <= 1; i++) {
       const expectedCode = this.generateCode(secret, timeCounter + i);
-      if (expectedCode === code) {
+      const expected = Buffer.from(expectedCode, 'utf8');
+      const received = Buffer.from(code, 'utf8');
+      if (expected.length === received.length && timingSafeEqual(expected, received)) {
         return true;
       }
     }
@@ -69,12 +71,12 @@ export class TotpService {
     const hash = hmac.update(buffer).digest();
 
     const offset = hash[hash.length - 1] & 0x0f;
-    const code = (
-      ((hash[offset] & 0x7f) << 24) |
-      ((hash[offset + 1] & 0xff) << 16) |
-      ((hash[offset + 2] & 0xff) << 8) |
-      (hash[offset + 3] & 0xff)
-    ) % Math.pow(10, this.DIGITS);
+    const code =
+      (((hash[offset] & 0x7f) << 24) |
+        ((hash[offset + 1] & 0xff) << 16) |
+        ((hash[offset + 2] & 0xff) << 8) |
+        (hash[offset + 3] & 0xff)) %
+      Math.pow(10, this.DIGITS);
 
     return String(code).padStart(this.DIGITS, '0');
   }

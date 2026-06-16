@@ -11,19 +11,25 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
   const body = (await request.json()) as Record<string, unknown>;
   const payload = omitTenantIdFromBody(body);
 
-  const response = await fetch(`${apiBaseUrl()}/service-orders/occurrences/${encodeURIComponent(id)}/orders`, {
-    method: 'POST',
-    headers: {
-      authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+  const response = await fetch(
+    `${apiBaseUrl()}/service-orders/occurrences/${encodeURIComponent(id)}/orders`,
+    {
+      method: 'POST',
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(payload),
+      cache: 'no-store',
     },
-    body: JSON.stringify(payload),
-    cache: 'no-store'
-  });
+  );
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao criar O.S na ocorrencia.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao criar O.S na ocorrencia.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});

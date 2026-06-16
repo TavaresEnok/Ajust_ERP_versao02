@@ -11,10 +11,18 @@ const navItems: NavItem[] = [
   { href: '/', label: 'Inicio' },
   { href: '/gerencia', label: 'Gerencia' },
   { href: '/analista', label: 'Analista' },
-  { href: '/cliente', label: 'Cliente' }
+  { href: '/cliente', label: 'Cliente' },
 ];
 
-export function PortalShell({ title, subtitle, children }: { title: string; subtitle: string; children: ReactNode }) {
+export function PortalShell({
+  title,
+  subtitle,
+  children,
+}: {
+  title: string;
+  subtitle: string;
+  children: ReactNode;
+}) {
   return (
     <main className="app-shell">
       <header className="topbar fade-in-up">

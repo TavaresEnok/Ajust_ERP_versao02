@@ -36,7 +36,11 @@ export class SentryService {
     console.error('Exception (would send to Sentry):', exception.message, context);
   }
 
-  captureMessage(message: string, level: 'fatal' | 'error' | 'warning' | 'log' | 'info' | 'debug' = 'info', context?: Record<string, unknown>): void {
+  captureMessage(
+    message: string,
+    level: 'fatal' | 'error' | 'warning' | 'log' | 'info' | 'debug' = 'info',
+    context?: Record<string, unknown>,
+  ): void {
     if (!this.dsn) {
       console.log(`[${level.toUpperCase()}] ${message}`);
       return;
@@ -67,7 +71,12 @@ export class SentryService {
     console.debug('Sentry: User context cleared');
   }
 
-  addBreadcrumb(category: string, message: string, level: 'fatal' | 'error' | 'warning' | 'info' | 'debug' = 'info', data?: Record<string, unknown>): void {
+  addBreadcrumb(
+    category: string,
+    message: string,
+    level: 'fatal' | 'error' | 'warning' | 'info' | 'debug' = 'info',
+    data?: Record<string, unknown>,
+  ): void {
     if (!this.dsn) {
       return;
     }

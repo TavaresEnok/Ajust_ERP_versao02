@@ -20,15 +20,18 @@ export async function PATCH(request: NextRequest) {
     method: 'PATCH',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
     body: JSON.stringify(body),
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao atualizar perfil.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao atualizar perfil.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});

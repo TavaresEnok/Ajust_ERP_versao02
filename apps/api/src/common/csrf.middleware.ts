@@ -1,12 +1,12 @@
 /**
  * CSRF Protection Middleware
- * 
+ *
  * Implementa proteção contra ataques Cross-Site Request Forgery (CSRF)
- * 
+ *
  * Estratégia: Double-submit cookie + header validation
  * - Cookie: csrf_token
  * - Header: x-csrf-token
- * 
+ *
  * Métodos seguros (GET, HEAD, OPTIONS): Sem validação
  * Métodos arriscados (POST, PUT, PATCH, DELETE): Requer validação
  */
@@ -40,14 +40,14 @@ export class CsrfMiddleware implements NestMiddleware {
     if (!cookieToken) {
       return res.status(403).json({
         statusCode: 403,
-        message: 'CSRF token missing in cookie'
+        message: 'CSRF token missing in cookie',
       });
     }
 
     if (!headerToken) {
       return res.status(403).json({
         statusCode: 403,
-        message: 'CSRF token missing in header'
+        message: 'CSRF token missing in header',
       });
     }
 
@@ -55,7 +55,7 @@ export class CsrfMiddleware implements NestMiddleware {
     if (!this.secureCompare(String(cookieToken), String(headerToken))) {
       return res.status(403).json({
         statusCode: 403,
-        message: 'CSRF token validation failed'
+        message: 'CSRF token validation failed',
       });
     }
 
@@ -85,6 +85,11 @@ export class CsrfMiddleware implements NestMiddleware {
     if (path === '/integrations/ixc/webhook' || path.startsWith('/integrations/ixc/webhook/')) {
       return true;
     }
+    if (exactOrChild('/webhooks/chat')) return true;
+    if (exactOrChild('/webhooks/monitoring')) return true;
+    if (req.method === 'POST' && /^\/csat\/survey\/[^/]+\/answer$/.test(path)) {
+      return true;
+    }
 
     return false;
   }
@@ -99,7 +104,7 @@ export class CsrfMiddleware implements NestMiddleware {
         httpOnly: false, // Precisa ser acessível via JavaScript para header
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
-        maxAge: 24 * 60 * 60 * 1000 // 24 horas
+        maxAge: 24 * 60 * 60 * 1000, // 24 horas
       });
     }
 

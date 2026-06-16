@@ -17,16 +17,19 @@ export async function POST(request: NextRequest, context: { params: Promise<{ id
       method: 'POST',
       headers: {
         authorization: `Bearer ${session.accessToken}`,
-        'content-type': 'application/json'
+        'content-type': 'application/json',
       },
       body: JSON.stringify(payload),
-      cache: 'no-store'
-    }
+      cache: 'no-store',
+    },
   );
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao anotar ocorrencia.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao anotar ocorrencia.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});

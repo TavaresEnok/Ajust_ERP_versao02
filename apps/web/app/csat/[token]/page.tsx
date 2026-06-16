@@ -1,192 +1,178 @@
 'use client';
-import React, { useEffect, useState } from 'react';
 
-// ─── Star Rating Component ────────────────────────────────────────────────────
-function StarRating({ value, onChange }: { value: number; onChange: (n: number) => void }) {
-  const [hovered, setHovered] = useState(0);
-  return (
-    <div className="flex gap-2">
-      {[1, 2, 3, 4, 5].map(n => (
-        <button
-          key={n}
-          type="button"
-          onMouseEnter={() => setHovered(n)}
-          onMouseLeave={() => setHovered(0)}
-          onClick={() => onChange(n)}
-          className="text-4xl transition-transform hover:scale-125 focus:outline-none"
-          aria-label={`${n} estrela${n > 1 ? 's' : ''}`}
-        >
-          <span className={`transition-colors ${(hovered || value) >= n ? 'text-amber-400' : 'text-slate-600'}`}>
-            ★
-          </span>
-        </button>
-      ))}
-    </div>
-  );
-}
+import Image from 'next/image';
+import { useParams } from 'next/navigation';
+import { FormEvent, useEffect, useState } from 'react';
 
-const LABELS: Record<number, string> = {
-  1: 'Muito ruim 😞',
-  2: 'Ruim 😕',
-  3: 'Regular 😐',
-  4: 'Bom 🙂',
-  5: 'Excelente! 🎉',
+type Survey = {
+  answered: boolean;
+  order: {
+    protocol: string;
+    type: string;
+  };
 };
 
-// ─── Main Page ────────────────────────────────────────────────────────────────
-export default function CsatSurveyPage({ params }: { params: Promise<{ token: string }> }) {
-  const [resolvedToken, setResolvedToken] = useState('');
+const labels = ['Muito ruim', 'Ruim', 'Regular', 'Bom', 'Excelente'];
 
-  const [survey, setSurvey]   = useState<any>(null);
-  const [loading, setLoading] = useState(true);
-  const [score, setScore]     = useState(0);
+export default function CsatPage() {
+  const params = useParams<{ token: string }>();
+  const token = params.token;
+  const [survey, setSurvey] = useState<Survey | null>(null);
+  const [score, setScore] = useState(0);
   const [comment, setComment] = useState('');
+  const [loading, setLoading] = useState(true);
   const [submitting, setSubmitting] = useState(false);
-  const [done, setDone]       = useState(false);
-  const [error, setError]     = useState('');
+  const [submitted, setSubmitted] = useState(false);
+  const [error, setError] = useState('');
 
   useEffect(() => {
-    let mounted = true;
-    params.then((value) => {
-      if (mounted) setResolvedToken(decodeURIComponent(value?.token || ''));
-    });
-    return () => {
-      mounted = false;
+    const controller = new AbortController();
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/csat/${encodeURIComponent(token)}`, {
+          cache: 'no-store',
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(payload.message || 'Pesquisa não encontrada.');
+        setSurvey(payload as Survey);
+      } catch (loadError) {
+        if (!controller.signal.aborted) {
+          setError(
+            loadError instanceof Error
+              ? loadError.message
+              : 'Não foi possível carregar a pesquisa.',
+          );
+        }
+      } finally {
+        if (!controller.signal.aborted) setLoading(false);
+      }
     };
-  }, [params]);
 
-  useEffect(() => {
-    if (!resolvedToken) return;
-    fetch(`/api/csat/${resolvedToken}`)
-      .then(r => r.ok ? r.json() : Promise.reject(r))
-      .then(data => setSurvey(data))
-      .catch(() => setError('Pesquisa não encontrada ou link inválido.'))
-      .finally(() => setLoading(false));
-  }, [resolvedToken]);
+    void load();
+    return () => controller.abort();
+  }, [token]);
 
-  const submit = async () => {
-    if (score === 0) return;
+  const submit = async (event: FormEvent) => {
+    event.preventDefault();
+    if (score < 1) {
+      setError('Selecione uma nota antes de enviar.');
+      return;
+    }
+
     setSubmitting(true);
+    setError('');
     try {
-      const res = await fetch(`/api/csat/${resolvedToken}`, {
+      const response = await fetch(`/api/csat/${encodeURIComponent(token)}/answer`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ score, comment }),
+        body: JSON.stringify({ score, comment: comment.trim() || undefined }),
       });
-      if (res.ok) setDone(true);
-      else setError('Erro ao enviar. Tente novamente.');
-    } finally { setSubmitting(false); }
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok)
+        throw new Error(payload.message || 'Não foi possível enviar sua avaliação.');
+      setSubmitted(true);
+    } catch (submitError) {
+      setError(
+        submitError instanceof Error
+          ? submitError.message
+          : 'Não foi possível enviar sua avaliação.',
+      );
+    } finally {
+      setSubmitting(false);
+    }
   };
 
+  const completed = submitted || survey?.answered;
+
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-950 via-slate-900 to-slate-800 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo / Brand */}
-        <div className="text-center mb-8">
-          <div className="inline-flex items-center gap-3 mb-4">
-            <div className="w-10 h-10 rounded-xl bg-gradient-to-br from-blue-500 to-violet-600 flex items-center justify-center shadow-lg">
-              <span className="text-white font-black text-lg">A</span>
-            </div>
-            <span className="text-white font-bold text-xl tracking-tight">Ajust ERP</span>
+    <main className="min-h-screen bg-[#0a0f1c] text-white px-4 py-10 flex items-center justify-center">
+      <section className="w-full max-w-xl rounded-2xl border border-slate-800 bg-[#111b2e] p-6 sm:p-8 shadow-2xl">
+        <div className="flex justify-center mb-6">
+          <Image
+            src="/Ajust.png"
+            alt="Ajust ERP"
+            width={72}
+            height={72}
+            className="rounded-2xl opacity-90"
+            priority
+          />
+        </div>
+
+        {loading ? (
+          <p className="text-center text-slate-400">Carregando pesquisa...</p>
+        ) : completed ? (
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-3">Obrigado pela sua avaliação</h1>
+            <p className="text-slate-400">Sua resposta foi registrada com sucesso.</p>
           </div>
-          <p className="text-slate-400 text-sm">Pesquisa de Satisfação</p>
-        </div>
+        ) : survey ? (
+          <form onSubmit={submit}>
+            <h1 className="text-2xl font-bold text-center mb-2">Como foi seu atendimento?</h1>
+            <p className="text-sm text-slate-400 text-center mb-8">
+              O.S. {survey.order.protocol} · {survey.order.type.replaceAll('_', ' ')}
+            </p>
 
-        <div className="bg-slate-800/60 backdrop-blur-sm rounded-2xl border border-slate-700/50 p-8 shadow-2xl">
-          {loading && (
-            <div className="text-center py-8">
-              <div className="inline-block w-8 h-8 border-2 border-blue-400 border-t-transparent rounded-full animate-spin mb-4" />
-              <p className="text-slate-400 text-sm">Carregando pesquisa...</p>
+            <div className="grid grid-cols-5 gap-2 mb-3" role="radiogroup" aria-label="Nota">
+              {labels.map((label, index) => {
+                const value = index + 1;
+                const selected = score === value;
+                return (
+                  <button
+                    key={label}
+                    type="button"
+                    role="radio"
+                    aria-checked={selected}
+                    aria-label={`${value} - ${label}`}
+                    onClick={() => setScore(value)}
+                    className={`rounded-xl border py-3 text-lg font-bold transition-colors ${
+                      selected
+                        ? 'border-cyan-400 bg-cyan-500 text-slate-950'
+                        : 'border-slate-700 bg-[#0d1628] text-slate-300 hover:border-cyan-600'
+                    }`}
+                  >
+                    {value}
+                  </button>
+                );
+              })}
             </div>
-          )}
+            <p className="h-5 text-center text-xs text-cyan-300 mb-5">
+              {score ? labels[score - 1] : 'Selecione uma nota de 1 a 5'}
+            </p>
 
-          {!loading && error && (
-            <div className="text-center py-8">
-              <div className="text-4xl mb-4">🔗</div>
-              <p className="text-rose-400 font-semibold">{error}</p>
-              <p className="text-slate-500 text-sm mt-2">Este link pode ter expirado ou já ter sido respondido.</p>
-            </div>
-          )}
+            <label className="block text-sm font-medium text-slate-300 mb-2" htmlFor="comment">
+              Comentário opcional
+            </label>
+            <textarea
+              id="comment"
+              value={comment}
+              maxLength={4000}
+              onChange={(event) => setComment(event.target.value)}
+              className="w-full min-h-28 resize-y rounded-lg border border-slate-700 bg-[#0d1628] p-3 text-white focus:outline-none focus:border-cyan-500"
+              placeholder="Conte-nos o que podemos melhorar."
+            />
 
-          {!loading && !error && survey?.answered && !done && (
-            <div className="text-center py-8">
-              <div className="text-5xl mb-4">✅</div>
-              <p className="text-white font-bold text-lg">Pesquisa já respondida!</p>
-              <p className="text-slate-400 text-sm mt-2">Obrigado pelo seu feedback.</p>
-            </div>
-          )}
-
-          {!loading && !error && done && (
-            <div className="text-center py-8">
-              <div className="text-6xl mb-4 animate-bounce">🎉</div>
-              <p className="text-white font-bold text-xl">Obrigado pelo feedback!</p>
-              <p className="text-slate-400 text-sm mt-2">Sua avaliação nos ajuda a melhorar continuamente.</p>
-              <div className="mt-6 inline-flex items-center gap-2 text-amber-400 text-2xl">
-                {Array.from({ length: score }).map((_, i) => <span key={i}>★</span>)}
+            {error && (
+              <div className="mt-4 rounded-lg border border-rose-500/20 bg-rose-500/10 p-3 text-sm text-rose-400">
+                {error}
               </div>
-              {comment && (
-                <p className="text-slate-300 text-sm mt-4 italic">&quot;{comment}&quot;</p>
-              )}
-            </div>
-          )}
+            )}
 
-          {!loading && !error && !survey?.answered && !done && survey && (
-            <div className="space-y-6">
-              {/* OS Info */}
-              {survey.order && (
-                <div className="bg-slate-700/40 rounded-xl p-4 border border-slate-600/30">
-                  <p className="text-[10px] uppercase tracking-widest font-bold text-slate-500 mb-1">Ordem de Serviço</p>
-                  <p className="text-white font-bold text-lg"># {survey.order.protocol}</p>
-                  {survey.order.type && (
-                    <p className="text-slate-400 text-sm mt-0.5">{survey.order.type}</p>
-                  )}
-                </div>
-              )}
-
-              <div>
-                <p className="text-white font-semibold text-lg mb-1">Como avalia nosso atendimento?</p>
-                <p className="text-slate-400 text-sm">Clique nas estrelas para avaliar de 1 a 5</p>
-              </div>
-
-              <div className="flex flex-col items-center gap-3 py-2">
-                <StarRating value={score} onChange={setScore} />
-                {score > 0 && (
-                  <span className="text-amber-400 font-semibold text-sm animate-fade-in">
-                    {LABELS[score]}
-                  </span>
-                )}
-              </div>
-
-              <div>
-                <label className="text-xs font-bold uppercase tracking-wider text-slate-400 mb-2 block">
-                  Comentário <span className="text-slate-600 font-normal normal-case">(opcional)</span>
-                </label>
-                <textarea
-                  value={comment}
-                  onChange={e => setComment(e.target.value)}
-                  rows={3}
-                  placeholder="Descreva sua experiência..."
-                  className="w-full px-4 py-3 bg-slate-700/50 border border-slate-600/50 rounded-xl text-white text-sm placeholder-slate-500 resize-none focus:outline-none focus:border-blue-500 transition-colors"
-                />
-              </div>
-
-              <button
-                onClick={submit}
-                disabled={score === 0 || submitting}
-                className="w-full py-3 rounded-xl bg-gradient-to-r from-blue-600 to-violet-600 hover:from-blue-700 hover:to-violet-700 text-white font-bold text-sm transition-all disabled:opacity-40 disabled:cursor-not-allowed shadow-lg hover:shadow-blue-500/20"
-              >
-                {submitting ? 'Enviando...' : 'Enviar Avaliação'}
-              </button>
-
-              {error && <p className="text-rose-400 text-sm text-center">{error}</p>}
-            </div>
-          )}
-        </div>
-
-        <p className="text-center text-slate-600 text-xs mt-6">
-          Powered by <span className="text-slate-500 font-semibold">Ajust ERP</span>
-        </p>
-      </div>
-    </div>
+            <button
+              type="submit"
+              disabled={submitting}
+              className="mt-6 w-full rounded-lg bg-cyan-600 px-4 py-3 font-bold text-white transition-colors hover:bg-cyan-500 disabled:opacity-50"
+            >
+              {submitting ? 'Enviando...' : 'Enviar avaliação'}
+            </button>
+          </form>
+        ) : (
+          <div className="text-center">
+            <h1 className="text-2xl font-bold mb-3">Pesquisa indisponível</h1>
+            <p className="text-slate-400">{error || 'Este link não é válido.'}</p>
+          </div>
+        )}
+      </section>
+    </main>
   );
 }

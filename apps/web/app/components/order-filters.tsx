@@ -8,10 +8,16 @@ import {
   PERIOD_OPTIONS,
   PRIORITY_OPTIONS,
   STATUS_OPTIONS,
-  TYPE_OPTIONS
+  TYPE_OPTIONS,
 } from '../../lib/query-builders';
 
-export function OrderFilters({ path, filters }: { path: '/gerencia' | '/analista' | '/cliente'; filters: DashboardFilters }) {
+export function OrderFilters({
+  path,
+  filters,
+}: {
+  path: '/gerencia' | '/analista' | '/cliente';
+  filters: DashboardFilters;
+}) {
   const exportHref = `/api/service-orders/export?${buildDashboardQuery(filters, { page: 1 })}`;
 
   return (
@@ -96,7 +102,11 @@ export function OrderFilters({ path, filters }: { path: '/gerencia' | '/analista
 
       <label className="filter-field filter-grow">
         <span>Busca</span>
-        <input name="q" defaultValue={filters.q || ''} placeholder="protocolo, titulo ou descricao" />
+        <input
+          name="q"
+          defaultValue={filters.q || ''}
+          placeholder="protocolo, titulo ou descricao"
+        />
       </label>
 
       <div className="filter-actions">

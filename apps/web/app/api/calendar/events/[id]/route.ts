@@ -11,15 +11,19 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const raw = await request.json().catch(() => ({}));
   const body = omitTenantIdFromBody(raw);
 
-  const response = await fetch(`${apiBaseUrl()}/calendar/events/${encodeURIComponent(id)}`, {
-    method: 'PATCH',
-    headers: {
-      authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+  const query = request.nextUrl.searchParams.toString();
+  const response = await fetch(
+    `${apiBaseUrl()}/calendar/events/${encodeURIComponent(id)}${query ? `?${query}` : ''}`,
+    {
+      method: 'PATCH',
+      headers: {
+        authorization: `Bearer ${session.accessToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify(body),
+      cache: 'no-store',
     },
-    body: JSON.stringify(body),
-    cache: 'no-store'
-  });
+  );
 
   const text = await response.text();
   const proxied = NextResponse.json(text ? JSON.parse(text) : {}, { status: response.status });
@@ -31,11 +35,15 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   if (session instanceof NextResponse) return session;
 
   const { id } = await context.params;
-  const response = await fetch(`${apiBaseUrl()}/calendar/events/${encodeURIComponent(id)}`, {
-    method: 'DELETE',
-    headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
-  });
+  const query = request.nextUrl.searchParams.toString();
+  const response = await fetch(
+    `${apiBaseUrl()}/calendar/events/${encodeURIComponent(id)}${query ? `?${query}` : ''}`,
+    {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${session.accessToken}` },
+      cache: 'no-store',
+    },
+  );
 
   const text = await response.text();
   const proxied = NextResponse.json(text ? JSON.parse(text) : {}, { status: response.status });

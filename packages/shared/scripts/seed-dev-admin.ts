@@ -17,12 +17,12 @@ async function main() {
       techContactName: 'NOC Ajust',
       techContactEmail: 'noc@ajust.local',
       techContactPhone: '+55-11-99999-0000',
-      status: 'ACTIVE'
-    }
+      status: 'ACTIVE',
+    },
   });
 
   const superAdminRole = await prisma.role.findUnique({
-    where: { code: 'super_admin' }
+    where: { code: 'super_admin' },
   });
 
   if (!superAdminRole) {
@@ -40,32 +40,32 @@ async function main() {
       name: 'Ajust Super Admin',
       passwordHash,
       status: 'ACTIVE',
-      twoFactorEnabled: true
+      twoFactorEnabled: true,
     },
     create: {
       name: 'Ajust Super Admin',
       email,
       passwordHash,
       status: 'ACTIVE',
-      twoFactorEnabled: true
-    }
+      twoFactorEnabled: true,
+    },
   });
 
   await prisma.userTenant.upsert({
     where: {
       userId_tenantId: {
         userId: user.id,
-        tenantId: tenant.id
-      }
+        tenantId: tenant.id,
+      },
     },
     update: {
-      roleId: superAdminRole.id
+      roleId: superAdminRole.id,
     },
     create: {
       userId: user.id,
       tenantId: tenant.id,
-      roleId: superAdminRole.id
-    }
+      roleId: superAdminRole.id,
+    },
   });
 
   console.log(`[seed] dev admin ready: ${email} tenant=${tenant.slug}`);

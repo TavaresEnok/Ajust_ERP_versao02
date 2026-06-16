@@ -1,18 +1,21 @@
-import { Injectable, Logger } from '@nestjs/common';
+import { Injectable, Logger, OnModuleInit } from '@nestjs/common';
+import nodemailer, { Transporter } from 'nodemailer';
 
 @Injectable()
-export class EmailService {
+export class EmailService implements OnModuleInit {
   private readonly logger = new Logger(EmailService.name);
-  private transporter: any;
+  private transporter?: Transporter;
 
-  constructor() {
-    this.initTransporter();
+  async onModuleInit(): Promise<void> {
+    await this.initTransporter();
   }
 
   private async initTransporter() {
+    if (!process.env.SMTP_HOST) {
+      this.logger.warn('SMTP is not configured. Emails will be logged to console only.');
+      return;
+    }
     try {
-      // @ts-expect-error Optional dependency `nodemailer` — dynamic import when SMTP is configured.
-      const nodemailer = await import('nodemailer');
       this.transporter = nodemailer.createTransport({
         host: process.env.SMTP_HOST,
         port: Number(process.env.SMTP_PORT) || 587,
@@ -22,34 +25,85 @@ export class EmailService {
           pass: process.env.SMTP_PASS,
         },
       });
-    } catch {
-      this.logger.warn('Nodemailer is not installed or failed to initialize. Emails will be logged to console only.');
+    } catch (error) {
+      this.logger.error(`Failed to initialize SMTP transporter: ${(error as Error).message}`);
+      throw error;
     }
   }
 
-  async sendEmail(to: string, subject: string, text: string, html?: string) {
+  /**
+   * Enfileira o envio de e-mail de forma assíncrona (fire-and-forget).
+   * Nunca lança exceção para o chamador — falhas são retentadas e logadas.
+   * Tenta até 3 vezes com backoff exponencial (1s, 2s, 4s).
+   */
+  sendEmail(to: string, subject: string, text: string, html?: string): void {
     if (!this.transporter || !process.env.SMTP_HOST) {
       this.logger.log(`[MOCK EMAIL] To: ${to} | Subject: ${subject}`);
       this.logger.debug(`[MOCK EMAIL CONTENT]\n${text}`);
       return;
     }
+    const transporter = this.transporter;
 
-    try {
-      await this.transporter.sendMail({
-        from: process.env.SMTP_FROM || '"Ajust ERP" <noreply@ajusterp.com.br>',
-        to,
-        subject,
-        text,
-        html: html || text,
-      });
-      this.logger.log(`Email sent successfully to ${to}`);
-    } catch (error: any) {
-      this.logger.error(`Failed to send email to ${to}: ${error.message}`);
-    }
+    const MAX_RETRIES = 3;
+    const send = async () => {
+      for (let attempt = 1; attempt <= MAX_RETRIES; attempt++) {
+        try {
+          await transporter.sendMail({
+            from: process.env.SMTP_FROM || '"Ajust ERP" <noreply@ajusterp.com.br>',
+            to,
+            subject,
+            text,
+            html: html || text,
+          });
+          this.logger.log(`Email sent to ${to} (attempt ${attempt})`);
+          return;
+        } catch (error: any) {
+          this.logger.warn(
+            `Email attempt ${attempt}/${MAX_RETRIES} failed to ${to}: ${error.message}`,
+          );
+          if (attempt < MAX_RETRIES) {
+            await new Promise((resolve) => setTimeout(resolve, 1000 * 2 ** (attempt - 1)));
+          }
+        }
+      }
+      this.logger.error(
+        `All ${MAX_RETRIES} email attempts failed to ${to} — subject: "${subject}"`,
+      );
+    };
+
+    // Dispara e NÃO aguarda — o chamador é imediatamente liberado
+    void send();
   }
 
   /**
-   * Envia OTP de 6 dígitos para cliente fazer bootstrap via CNPJ
+   * Envia e-mail de forma síncrona (bloqueia até confirmar envio).
+   * Use apenas para fluxos críticos como OTP/bootstrap onde a
+   * confirmação de entrega é necessária antes de continuar.
+   */
+  private async sendEmailSync(
+    to: string,
+    subject: string,
+    text: string,
+    html?: string,
+  ): Promise<void> {
+    if (!this.transporter || !process.env.SMTP_HOST) {
+      this.logger.log(`[MOCK EMAIL SYNC] To: ${to} | Subject: ${subject}`);
+      this.logger.debug(`[MOCK EMAIL CONTENT]\n${text}`);
+      return;
+    }
+    await this.transporter.sendMail({
+      from: process.env.SMTP_FROM || '"Ajust ERP" <noreply@ajusterp.com.br>',
+      to,
+      subject,
+      text,
+      html: html || text,
+    });
+    this.logger.log(`Email (sync) sent to ${to}`);
+  }
+
+  /**
+   * Envia OTP de 6 dígitos para cliente fazer bootstrap via CNPJ.
+   * Usa sendEmailSync pois o código só é exibido após envio bem-sucedido.
    */
   async sendBootstrapOtp({
     email,
@@ -139,6 +193,6 @@ Ajust ERP - Sistema de Gestão de Serviços
 </html>
     `.trim();
 
-    await this.sendEmail(email, subject, text, html);
+    await this.sendEmailSync(email, subject, text, html);
   }
 }

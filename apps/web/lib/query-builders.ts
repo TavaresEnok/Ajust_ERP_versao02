@@ -127,7 +127,15 @@ export type DashboardData = {
   error: string | null;
 };
 
-const STATUS_ENUM = ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS', 'RESOLVIDA', 'FECHADA', 'CANCELADA'] as const;
+const STATUS_ENUM = [
+  'ABERTA',
+  'EM_ANALISE',
+  'AG_CAMPO',
+  'AG_TERCEIROS',
+  'RESOLVIDA',
+  'FECHADA',
+  'CANCELADA',
+] as const;
 const PRIORITY_ENUM = ['BAIXA', 'NORMAL', 'ALTA', 'CRITICA'] as const;
 const TYPE_ENUM = [
   'ROMPIMENTO',
@@ -137,11 +145,18 @@ const TYPE_ENUM = [
   'CANCELAMENTO',
   'AUDITORIA',
   'INSTALACAO',
-  'BGP'
+  'BGP',
 ] as const;
 const PERIOD_ENUM = ['today', '7d', '15d', '30d', '90d', 'all'] as const;
 const PAGE_SIZE_ENUM = [10, 20, 50] as const;
-const ORDER_BY_ENUM = ['createdAt', 'updatedAt', 'deadlineAt', 'protocol', 'priority', 'status'] as const;
+const ORDER_BY_ENUM = [
+  'createdAt',
+  'updatedAt',
+  'deadlineAt',
+  'protocol',
+  'priority',
+  'status',
+] as const;
 const ORDER_DIR_ENUM = ['asc', 'desc'] as const;
 
 type StatusEnum = (typeof STATUS_ENUM)[number];
@@ -169,13 +184,13 @@ export const PERIOD_OPTIONS: Array<{ value: PeriodEnum; label: string }> = [
   { value: '15d', label: '15 dias' },
   { value: '30d', label: '30 dias' },
   { value: '90d', label: '90 dias' },
-  { value: 'all', label: 'Tudo' }
+  { value: 'all', label: 'Tudo' },
 ];
 
 export const PAGE_SIZE_OPTIONS: Array<{ value: number; label: string }> = [
   { value: 10, label: '10' },
   { value: 20, label: '20' },
-  { value: 50, label: '50' }
+  { value: 50, label: '50' },
 ];
 
 export const ORDER_BY_OPTIONS: Array<{ value: OrderByEnum; label: string }> = [
@@ -184,12 +199,12 @@ export const ORDER_BY_OPTIONS: Array<{ value: OrderByEnum; label: string }> = [
   { value: 'deadlineAt', label: 'SLA' },
   { value: 'protocol', label: 'Protocolo' },
   { value: 'priority', label: 'Prioridade' },
-  { value: 'status', label: 'Status' }
+  { value: 'status', label: 'Status' },
 ];
 
 export const ORDER_DIR_OPTIONS: Array<{ value: OrderDirEnum; label: string }> = [
   { value: 'asc', label: 'Crescente' },
-  { value: 'desc', label: 'Decrescente' }
+  { value: 'desc', label: 'Decrescente' },
 ];
 
 export const STATUS_OPTIONS: Array<{ value: '' | StatusEnum; label: string }> = [
@@ -200,7 +215,7 @@ export const STATUS_OPTIONS: Array<{ value: '' | StatusEnum; label: string }> = 
   { value: 'AG_TERCEIROS', label: 'Ag. terceiros' },
   { value: 'RESOLVIDA', label: 'Resolvida' },
   { value: 'FECHADA', label: 'Fechada' },
-  { value: 'CANCELADA', label: 'Cancelada' }
+  { value: 'CANCELADA', label: 'Cancelada' },
 ];
 
 export const PRIORITY_OPTIONS: Array<{ value: '' | PriorityEnum; label: string }> = [
@@ -208,7 +223,7 @@ export const PRIORITY_OPTIONS: Array<{ value: '' | PriorityEnum; label: string }
   { value: 'BAIXA', label: 'Baixa' },
   { value: 'NORMAL', label: 'Normal' },
   { value: 'ALTA', label: 'Alta' },
-  { value: 'CRITICA', label: 'Critica' }
+  { value: 'CRITICA', label: 'Critica' },
 ];
 
 export const TYPE_OPTIONS: Array<{ value: '' | TypeEnum; label: string }> = [
@@ -220,7 +235,7 @@ export const TYPE_OPTIONS: Array<{ value: '' | TypeEnum; label: string }> = [
   { value: 'CANCELAMENTO', label: 'Cancelamento' },
   { value: 'AUDITORIA', label: 'Auditoria' },
   { value: 'INSTALACAO', label: 'Instalacao' },
-  { value: 'BGP', label: 'BGP' }
+  { value: 'BGP', label: 'BGP' },
 ];
 
 export const STATUS_FLOW: Array<{ key: StatusEnum; label: string }> = [
@@ -230,14 +245,14 @@ export const STATUS_FLOW: Array<{ key: StatusEnum; label: string }> = [
   { key: 'AG_TERCEIROS', label: 'Ag. terceiros' },
   { key: 'RESOLVIDA', label: 'Resolvida' },
   { key: 'FECHADA', label: 'Fechada' },
-  { key: 'CANCELADA', label: 'Cancelada' }
+  { key: 'CANCELADA', label: 'Cancelada' },
 ];
 
 export const PRIORITY_FLOW: Array<{ key: PriorityEnum; label: string }> = [
   { key: 'BAIXA', label: 'Baixa' },
   { key: 'NORMAL', label: 'Normal' },
   { key: 'ALTA', label: 'Alta' },
-  { key: 'CRITICA', label: 'Critica' }
+  { key: 'CRITICA', label: 'Critica' },
 ];
 
 export const TYPE_FLOW: Array<{ key: TypeEnum; label: string }> = [
@@ -248,17 +263,17 @@ export const TYPE_FLOW: Array<{ key: TypeEnum; label: string }> = [
   { key: 'CANCELAMENTO', label: 'Cancelamento' },
   { key: 'AUDITORIA', label: 'Auditoria' },
   { key: 'INSTALACAO', label: 'Instalacao' },
-  { key: 'BGP', label: 'BGP' }
+  { key: 'BGP', label: 'BGP' },
 ];
 
 const STATUS_LABEL: Record<string, string> = Object.fromEntries(
-  STATUS_OPTIONS.filter((x) => x.value).map((x) => [x.value, x.label])
+  STATUS_OPTIONS.filter((x) => x.value).map((x) => [x.value, x.label]),
 );
 const PRIORITY_LABEL: Record<string, string> = Object.fromEntries(
-  PRIORITY_OPTIONS.filter((x) => x.value).map((x) => [x.value, x.label])
+  PRIORITY_OPTIONS.filter((x) => x.value).map((x) => [x.value, x.label]),
 );
 const TYPE_LABEL: Record<string, string> = Object.fromEntries(
-  TYPE_OPTIONS.filter((x) => x.value).map((x) => [x.value, x.label])
+  TYPE_OPTIONS.filter((x) => x.value).map((x) => [x.value, x.label]),
 );
 
 const EMPTY_SUMMARY: DashboardSummary = {
@@ -275,13 +290,13 @@ const EMPTY_SUMMARY: DashboardSummary = {
     AG_TERCEIROS: 0,
     RESOLVIDA: 0,
     FECHADA: 0,
-    CANCELADA: 0
+    CANCELADA: 0,
   },
   byPriority: {
     BAIXA: 0,
     NORMAL: 0,
     ALTA: 0,
-    CRITICA: 0
+    CRITICA: 0,
   },
   byType: {
     ROMPIMENTO: 0,
@@ -291,9 +306,9 @@ const EMPTY_SUMMARY: DashboardSummary = {
     CANCELAMENTO: 0,
     AUDITORIA: 0,
     INSTALACAO: 0,
-    BGP: 0
+    BGP: 0,
   },
-  topAssignees: []
+  topAssignees: [],
 };
 
 const EMPTY_PAGINATION: DashboardPagination = {
@@ -302,7 +317,7 @@ const EMPTY_PAGINATION: DashboardPagination = {
   total: 0,
   totalPages: 1,
   hasPrev: false,
-  hasNext: false
+  hasNext: false,
 };
 
 function baseUrl() {
@@ -319,7 +334,7 @@ function demoCredentials() {
   return {
     email: process.env.WEB_DEMO_EMAIL || process.env.SEED_ADMIN_EMAIL || 'admin@ajust.local',
     password: process.env.WEB_DEMO_PASSWORD || process.env.SEED_ADMIN_PASSWORD || 'Admin@123456',
-    tenantId: process.env.WEB_TENANT_ID
+    tenantId: process.env.WEB_TENANT_ID,
   };
 }
 
@@ -350,7 +365,7 @@ export function buildServiceOrderApiQuery(
   options?: {
     includePagination?: boolean;
     page?: number;
-  }
+  },
 ) {
   const params = new URLSearchParams();
   // tenant vem apenas do JWT na API (TenantIsolationGuard rejeita tenantId na query)
@@ -382,9 +397,9 @@ async function apiJson<T>(path: string, init: RequestInit = {}, accessToken?: st
     headers: {
       'content-type': 'application/json',
       ...(accessToken ? { authorization: `Bearer ${accessToken}` } : {}),
-      ...(init.headers || {})
+      ...(init.headers || {}),
     },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -404,8 +419,8 @@ const getSession = cache(async () => {
     body: JSON.stringify({
       email: creds.email,
       password: creds.password,
-      ...(creds.tenantId ? { tenantId: creds.tenantId } : {})
-    })
+      ...(creds.tenantId ? { tenantId: creds.tenantId } : {}),
+    }),
   });
 
   if (!login.accessToken) {
@@ -415,7 +430,7 @@ const getSession = cache(async () => {
   return {
     accessToken: login.accessToken,
     role: login.user?.role || 'desconhecido',
-    tenantId: login.user?.tenantId || creds.tenantId || ''
+    tenantId: login.user?.tenantId || creds.tenantId || '',
   };
 });
 
@@ -432,13 +447,13 @@ async function getWorkerHealth(): Promise<WorkerHealth | null> {
 async function getExportHistory(
   tenantId: string,
   accessToken: string,
-  limit = 8
+  limit = 8,
 ): Promise<DashboardExportHistoryItem[]> {
   try {
     const rows = await apiJson<ApiExportHistoryItem[]>(
       `/service-orders/export/history?limit=${limit}`,
       { method: 'GET' },
-      accessToken
+      accessToken,
     );
 
     return rows.map((row) => ({
@@ -446,7 +461,7 @@ async function getExportHistory(
       status: row.status,
       createdAt: new Date(row.createdAt),
       fileAvailable: row.fileAvailable,
-      actorName: row.actor?.name || 'Sistema'
+      actorName: row.actor?.name || 'Sistema',
     }));
   } catch {
     return [];
@@ -472,7 +487,7 @@ function normalizeOrder(order: ApiServiceOrder): ServiceOrderView {
     deadlineAt: new Date(order.deadlineAt),
     createdAt: new Date(order.createdAt),
     updatedAt: new Date(order.updatedAt),
-    ownerName: order.owner?.name || order.assignee?.name || 'Nao atribuido'
+    ownerName: order.owner?.name || order.assignee?.name || 'Nao atribuido',
   };
 }
 
@@ -484,17 +499,17 @@ function normalizeSummary(summary: ApiSummary | null | undefined): DashboardSumm
     ...summary,
     byStatus: {
       ...EMPTY_SUMMARY.byStatus,
-      ...(summary.byStatus || {})
+      ...(summary.byStatus || {}),
     },
     byPriority: {
       ...EMPTY_SUMMARY.byPriority,
-      ...(summary.byPriority || {})
+      ...(summary.byPriority || {}),
     },
     byType: {
       ...EMPTY_SUMMARY.byType,
-      ...(summary.byType || {})
+      ...(summary.byType || {}),
     },
-    topAssignees: Array.isArray(summary.topAssignees) ? summary.topAssignees : []
+    topAssignees: Array.isArray(summary.topAssignees) ? summary.topAssignees : [],
   };
 }
 
@@ -505,7 +520,9 @@ function toPositiveInt(raw: string | undefined, fallback: number) {
   return Math.floor(value);
 }
 
-export function normalizeDashboardFilters(raw: Record<string, string | string[] | undefined>): DashboardFilters {
+export function normalizeDashboardFilters(
+  raw: Record<string, string | string[] | undefined>,
+): DashboardFilters {
   const status = pickFirst(raw.status);
   const priority = pickFirst(raw.priority);
   const type = pickFirst(raw.type);
@@ -529,18 +546,23 @@ export function normalizeDashboardFilters(raw: Record<string, string | string[] 
 
   return {
     status: STATUS_ENUM.includes(status as StatusEnum) ? (status as StatusEnum) : undefined,
-    priority: PRIORITY_ENUM.includes(priority as PriorityEnum) ? (priority as PriorityEnum) : undefined,
+    priority: PRIORITY_ENUM.includes(priority as PriorityEnum)
+      ? (priority as PriorityEnum)
+      : undefined,
     type: TYPE_ENUM.includes(type as TypeEnum) ? (type as TypeEnum) : undefined,
     period: PERIOD_ENUM.includes(period as PeriodEnum) ? (period as PeriodEnum) : 'all',
     ...(q.length >= 2 ? { q } : {}),
     page,
     pageSize,
     orderBy,
-    orderDir
+    orderDir,
   };
 }
 
-export function buildDashboardQuery(filters: DashboardFilters, overrides: Partial<DashboardFilters> = {}) {
+export function buildDashboardQuery(
+  filters: DashboardFilters,
+  overrides: Partial<DashboardFilters> = {},
+) {
   const merged: DashboardFilters = { ...filters, ...overrides };
   const params = new URLSearchParams();
 
@@ -573,10 +595,10 @@ export async function loadDashboardData(filters: DashboardFilters): Promise<Dash
       apiJson<ApiSummary>(
         `/service-orders/summary?${buildServiceOrderApiQuery(tenantId, filters, { includePagination: false })}`,
         { method: 'GET' },
-        session.accessToken
+        session.accessToken,
       ),
       getWorkerHealth(),
-      getExportHistory(tenantId, session.accessToken)
+      getExportHistory(tenantId, session.accessToken),
     ]);
 
     const summary = normalizeSummary(summaryRaw);
@@ -586,14 +608,14 @@ export async function loadDashboardData(filters: DashboardFilters): Promise<Dash
     const orders = await apiJson<ApiServiceOrder[]>(
       `/service-orders?${buildServiceOrderApiQuery(tenantId, filters, { includePagination: true, page: safePage })}`,
       { method: 'GET' },
-      session.accessToken
+      session.accessToken,
     );
 
     return {
       tenant: {
         id: tenantId,
         tradeName: me.tenant?.tradeName || 'Tenant',
-        role: me.tenant?.role || session.role
+        role: me.tenant?.role || session.role,
       },
       orders: orders.map(normalizeOrder),
       summary,
@@ -603,11 +625,11 @@ export async function loadDashboardData(filters: DashboardFilters): Promise<Dash
         total: summary.total,
         totalPages,
         hasPrev: safePage > 1,
-        hasNext: safePage < totalPages
+        hasNext: safePage < totalPages,
       },
       exportsHistory,
       syncLabel: formatSyncLabel(health),
-      error: null
+      error: null,
     };
   } catch (error) {
     const message = error instanceof Error ? error.message : 'Falha ao carregar dashboards.';
@@ -619,7 +641,7 @@ export async function loadDashboardData(filters: DashboardFilters): Promise<Dash
       pagination: EMPTY_PAGINATION,
       exportsHistory: [],
       syncLabel: 'n/d',
-      error: message
+      error: message,
     };
   }
 }
@@ -633,7 +655,7 @@ export function formatShortDate(date: Date) {
     day: '2-digit',
     month: '2-digit',
     hour: '2-digit',
-    minute: '2-digit'
+    minute: '2-digit',
   }).format(date);
 }
 

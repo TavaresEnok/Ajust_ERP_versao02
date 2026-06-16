@@ -1,6 +1,6 @@
 'use client';
 
-import { FormEvent, useEffect, useMemo, useRef, useState } from 'react';
+import { FormEvent, useEffect, useRef, useState } from 'react';
 import { io, Socket } from 'socket.io-client';
 
 type StreamEvent = {
@@ -16,13 +16,7 @@ export function RealtimeEvents() {
   const [lastError, setLastError] = useState<string | null>(null);
   const socketRef = useRef<Socket | null>(null);
 
-  const wsUrl = useMemo(() => {
-    if (process.env.NEXT_PUBLIC_WS_URL) return process.env.NEXT_PUBLIC_WS_URL;
-    if (typeof window !== 'undefined') {
-      return `${window.location.protocol}//${window.location.hostname}:8071`;
-    }
-    return 'http://localhost:8071';
-  }, []);
+  const [wsUrl, setWsUrl] = useState('');
 
   useEffect(() => {
     return () => {
@@ -35,7 +29,7 @@ export function RealtimeEvents() {
     setEvents((prev) => [{ at: new Date().toISOString(), name, payload }, ...prev].slice(0, 30));
   }
 
-  function connect(e: FormEvent) {
+  async function connect(e: FormEvent) {
     e.preventDefault();
 
     socketRef.current?.disconnect();
@@ -44,9 +38,42 @@ export function RealtimeEvents() {
     setStatus('connecting');
     setLastError(null);
 
-    const socket = io(wsUrl, {
+    const credentialsResponse = await fetch('/api/auth/socket-token', { cache: 'no-store' });
+    if (!credentialsResponse.ok) {
+      setStatus('error');
+      setLastError('Falha ao autenticar o canal em tempo real.');
+      return;
+    }
+    const credentials = (await credentialsResponse.json()) as {
+      token?: string;
+      socketUrl?: string;
+    };
+    if (!credentials.token) {
+      setStatus('error');
+      setLastError('Token do canal em tempo real não foi emitido.');
+      return;
+    }
+    const endpoint = credentials.socketUrl || window.location.origin;
+    setWsUrl(endpoint);
+    let initialToken: string | undefined = credentials.token;
+
+    const socket = io(endpoint, {
       transports: ['websocket'],
-      auth: tenantId ? { tenantId } : undefined
+      auth: async (callback) => {
+        try {
+          if (initialToken) {
+            callback({ token: initialToken });
+            initialToken = undefined;
+            return;
+          }
+          const response = await fetch('/api/auth/socket-token', { cache: 'no-store' });
+          if (!response.ok) throw new Error('socket_token_failed');
+          const { token } = (await response.json()) as { token?: string };
+          callback({ token: token || '' });
+        } catch {
+          callback({ token: '' });
+        }
+      },
     });
 
     socketRef.current = socket;
@@ -96,7 +123,7 @@ export function RealtimeEvents() {
       </form>
 
       <p className="ws-meta">
-        endpoint <code>{wsUrl}</code> - status <strong>{status}</strong>
+        endpoint <code>{wsUrl || 'não resolvido'}</code> - status <strong>{status}</strong>
       </p>
       {lastError && <p className="ws-error">Erro: {lastError}</p>}
 

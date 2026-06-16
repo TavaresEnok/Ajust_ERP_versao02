@@ -11,10 +11,10 @@ export async function POST(request: NextRequest) {
         method: 'POST',
         headers: {
           'content-type': 'application/json',
-          authorization: `Bearer ${accessToken}`
+          authorization: `Bearer ${accessToken}`,
         },
         body: JSON.stringify({ sessionId }),
-        cache: 'no-store'
+        cache: 'no-store',
       });
     }
   } catch {
@@ -25,4 +25,3 @@ export async function POST(request: NextRequest) {
   clearAuthCookies(response);
   return response;
 }
-

@@ -1,9 +1,11 @@
 /**
  * Sprint 1 Security E2E Tests
  * Tests for: Tenant Isolation, Rate Limiting, 2FA, Secrets Validation
- * 
+ *
  * Run with: npm run test:e2e
  */
+
+import { createHmac } from 'crypto';
 
 const API_URL = process.env.API_URL || 'http://localhost:8071';
 const ADMIN_EMAIL = 'admin@ajust.local';
@@ -18,12 +20,19 @@ interface TestContext {
   otherTenantId: string;
 }
 
-let context: TestContext = {
+const context: TestContext = {
   adminAccessToken: '',
   adminSessionId: '',
   tenantId: '',
-  otherTenantId: ''
+  otherTenantId: '',
 };
+
+let loginIpSequence = 10;
+
+function nextLoginHeaders(): Record<string, string> {
+  loginIpSequence += 1;
+  return { 'x-forwarded-for': `198.51.100.${loginIpSequence}` };
+}
 
 type HttpResponse = {
   status: number;
@@ -43,16 +52,16 @@ async function requestJson(
     params?: Record<string, string>;
     headers?: Record<string, string>;
     body?: unknown;
-  }
+  },
 ): Promise<HttpResponse> {
   const url = `${API_URL}${withParams(path, options?.params)}`;
   const response = await fetch(url, {
     method,
     headers: {
       ...(options?.body !== undefined ? { 'content-type': 'application/json' } : {}),
-      ...(options?.headers || {})
+      ...(options?.headers || {}),
     },
-    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined
+    body: options?.body !== undefined ? JSON.stringify(options.body) : undefined,
   });
 
   const text = await response.text();
@@ -65,16 +74,54 @@ async function requestJson(
 
   return {
     status: response.status,
-    data
+    data,
   };
 }
 
 const api = {
-  get: (path: string, options?: { params?: Record<string, string>; headers?: Record<string, string> }) =>
-    requestJson('GET', path, options),
+  get: (
+    path: string,
+    options?: { params?: Record<string, string>; headers?: Record<string, string> },
+  ) => requestJson('GET', path, options),
   post: (path: string, body?: unknown, options?: { headers?: Record<string, string> }) =>
-    requestJson('POST', path, { headers: options?.headers, body })
+    requestJson('POST', path, { headers: options?.headers, body }),
 };
+
+function generateTotpCode(secret: string): string {
+  const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
+  let bits = 0;
+  let value = 0;
+  const bytes: number[] = [];
+
+  for (const character of secret.replace(/=+$/, '').toUpperCase()) {
+    const index = alphabet.indexOf(character);
+    if (index < 0) throw new Error('Invalid base32 TOTP secret');
+    value = (value << 5) | index;
+    bits += 5;
+    if (bits >= 8) {
+      bits -= 8;
+      bytes.push((value >> bits) & 0xff);
+    }
+  }
+
+  let counter = Math.floor(Date.now() / 1000 / 30);
+  const counterBuffer = Buffer.alloc(8);
+  for (let index = 7; index >= 0; index--) {
+    counterBuffer[index] = counter & 0xff;
+    counter = Math.floor(counter / 256);
+  }
+
+  const digest = createHmac('sha1', Buffer.from(bytes)).update(counterBuffer).digest();
+  const offset = digest[digest.length - 1] & 0x0f;
+  const code =
+    (((digest[offset] & 0x7f) << 24) |
+      ((digest[offset + 1] & 0xff) << 16) |
+      ((digest[offset + 2] & 0xff) << 8) |
+      (digest[offset + 3] & 0xff)) %
+    1_000_000;
+
+  return String(code).padStart(6, '0');
+}
 
 // ═════════════════════════════════════════════════════════════════════════════
 // TEST 1: Tenant Isolation
@@ -82,16 +129,16 @@ const api = {
 
 async function testTenantIsolationBypass() {
   console.log('\n✓ TEST 1: Tenant Isolation Bypass Prevention');
-  
+
   try {
     // Get list of service orders with tenantId in query parameter (should fail)
     const response = await api.get('/service-orders', {
       params: {
-        tenantId: context.otherTenantId
+        tenantId: context.otherTenantId,
       },
       headers: {
-        Authorization: `Bearer ${context.adminAccessToken}`
-      }
+        Authorization: `Bearer ${context.adminAccessToken}`,
+      },
     });
 
     if (response.status === 403 && response.data.message?.includes('tenantId')) {
@@ -114,7 +161,7 @@ async function testTenantIsolationBypass() {
 
 async function testRateLimiting() {
   console.log('\n✓ TEST 2: Rate Limiting (5 attempts per 15 minutes)');
-  
+
   const email = `test-ratelimit-${Date.now()}@ajust.local`;
   const password = 'invalid-password-123';
 
@@ -125,7 +172,7 @@ async function testRateLimiting() {
     for (let i = 1; i <= 6; i++) {
       const response = await api.post('/auth/login', {
         identifier: email,
-        password: password
+        password: password,
       });
 
       if (i <= 5) {
@@ -158,17 +205,41 @@ async function testRateLimiting() {
 
 async function testTwoFAWorkflow() {
   console.log('\n✓ TEST 3: 2FA Workflow (Setup → Verify → Login)');
-  
+
+  let verifiedAccessToken = '';
+  let twoFactorEnabled = false;
   try {
+    const initialStatusResponse = await api.get('/auth/2fa/status', {
+      headers: {
+        Authorization: `Bearer ${context.adminAccessToken}`,
+      },
+    });
+    if (initialStatusResponse.data.enabled) {
+      const resetResponse = await api.post(
+        '/auth/2fa/disable',
+        { password: ADMIN_PASSWORD },
+        {
+          headers: {
+            Authorization: `Bearer ${context.adminAccessToken}`,
+          },
+        },
+      );
+      if (![200, 201].includes(resetResponse.status)) {
+        console.log(`  ❌ FAIL: Could not reset existing 2FA state`);
+        return false;
+      }
+      console.log(`  ✅ Precondition: Existing 2FA state reset`);
+    }
+
     // Step 1: Setup 2FA (generate secret)
     const setupResponse = await api.post(
       '/auth/2fa/setup',
       {},
       {
         headers: {
-          Authorization: `Bearer ${context.adminAccessToken}`
-        }
-      }
+          Authorization: `Bearer ${context.adminAccessToken}`,
+        },
+      },
     );
 
     if (setupResponse.status !== 200 || !setupResponse.data.secret) {
@@ -182,23 +253,91 @@ async function testTwoFAWorkflow() {
     // Step 2: Get 2FA status (should still be disabled)
     const statusResponse = await api.get('/auth/2fa/status', {
       headers: {
-        Authorization: `Bearer ${context.adminAccessToken}`
-      }
+        Authorization: `Bearer ${context.adminAccessToken}`,
+      },
     });
 
     if (!statusResponse.data.enabled) {
       console.log(`  ✅ Step 2: 2FA still disabled after setup (secret not confirmed)`);
+    } else {
+      console.log(`  ❌ FAIL: 2FA should remain disabled until confirmation`);
+      return false;
     }
 
-    // Note: Can't generate valid TOTP code without external library
-    // In real tests, use totp-generator or similar
-    console.log(`  ⚠️  Step 3: Skipped TOTP verification (requires external library)`);
-    console.log(`  ⚠️  Step 4: Skipped 2FA login flow`);
+    const confirmResponse = await api.post(
+      '/auth/2fa/confirm',
+      { secret, code: generateTotpCode(secret) },
+      {
+        headers: {
+          Authorization: `Bearer ${context.adminAccessToken}`,
+        },
+      },
+    );
+    if (![200, 201].includes(confirmResponse.status) || !confirmResponse.data.success) {
+      console.log(`  ❌ FAIL: 2FA confirmation failed (status: ${confirmResponse.status})`);
+      return false;
+    }
+    twoFactorEnabled = true;
+    console.log(`  ✅ Step 3: TOTP confirmed and 2FA enabled`);
 
+    const challengeResponse = await api.post(
+      '/auth/login',
+      {
+        identifier: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+      },
+      { headers: nextLoginHeaders() },
+    );
+    if (
+      ![200, 201].includes(challengeResponse.status) ||
+      !challengeResponse.data.twoFactorRequired ||
+      !challengeResponse.data.temporaryToken
+    ) {
+      console.log(`  ❌ FAIL: Login did not require 2FA (status: ${challengeResponse.status})`);
+      return false;
+    }
+    console.log(`  ✅ Step 4: Login returned a temporary 2FA challenge`);
+
+    const verificationResponse = await api.post('/auth/verify-2fa', {
+      temporaryToken: challengeResponse.data.temporaryToken,
+      code: generateTotpCode(secret),
+    });
+    if (
+      ![200, 201].includes(verificationResponse.status) ||
+      !verificationResponse.data.accessToken ||
+      !verificationResponse.data.refreshToken
+    ) {
+      console.log(
+        `  ❌ FAIL: 2FA login verification failed (status: ${verificationResponse.status})`,
+      );
+      return false;
+    }
+
+    verifiedAccessToken = verificationResponse.data.accessToken;
+    console.log(`  ✅ Step 5: Valid TOTP completed login and issued full tokens`);
     return true;
   } catch (error) {
     console.log(`  ❌ ERROR: ${error}`);
     return false;
+  } finally {
+    if (twoFactorEnabled) {
+      const disableResponse = await api.post(
+        '/auth/2fa/disable',
+        { password: ADMIN_PASSWORD },
+        {
+          headers: {
+            Authorization: `Bearer ${verifiedAccessToken || context.adminAccessToken}`,
+          },
+        },
+      );
+      if ([200, 201].includes(disableResponse.status)) {
+        console.log(`  ✅ Cleanup: 2FA disabled for subsequent test runs`);
+      } else {
+        console.log(
+          `  ❌ Cleanup failed: could not disable 2FA (status: ${disableResponse.status})`,
+        );
+      }
+    }
   }
 }
 
@@ -211,10 +350,14 @@ async function testRefreshTokenRotation() {
 
   try {
     // Login first
-    const loginResponse = await api.post('/auth/login', {
-      identifier: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD
-    });
+    const loginResponse = await api.post(
+      '/auth/login',
+      {
+        identifier: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+      },
+      { headers: nextLoginHeaders() },
+    );
 
     if (![200, 201].includes(loginResponse.status)) {
       console.log(`  ❌ FAIL: Login failed (status: ${loginResponse.status})`);
@@ -227,7 +370,7 @@ async function testRefreshTokenRotation() {
 
     // Refresh token
     const refreshResponse1 = await api.post('/auth/refresh', {
-      refreshToken: firstRefreshToken
+      refreshToken: firstRefreshToken,
     });
 
     if (refreshResponse1.status !== 200) {
@@ -248,7 +391,7 @@ async function testRefreshTokenRotation() {
 
     // Try to use old token (should fail)
     const oldTokenResponse = await api.post('/auth/refresh', {
-      refreshToken: firstRefreshToken
+      refreshToken: firstRefreshToken,
     });
 
     if (oldTokenResponse.status === 401) {
@@ -302,7 +445,7 @@ async function testObservabilityMetrics() {
 
     if (metricsResponse.status === 200) {
       const metrics = metricsResponse.data;
-      
+
       if (metrics.includes('http_requests_total')) {
         console.log(`  ✅ HTTP requests metrics collected`);
       }
@@ -341,16 +484,20 @@ async function runAllTests() {
     twoFA: false,
     refreshTokenRotation: false,
     secretsValidation: false,
-    observability: false
+    observability: false,
   };
 
   try {
     // Setup: Login as admin to get access token
     console.log('\n[SETUP] Authenticating admin user...');
-    const loginResponse = await api.post('/auth/login', {
-      identifier: ADMIN_EMAIL,
-      password: ADMIN_PASSWORD
-    });
+    const loginResponse = await api.post(
+      '/auth/login',
+      {
+        identifier: ADMIN_EMAIL,
+        password: ADMIN_PASSWORD,
+      },
+      { headers: nextLoginHeaders() },
+    );
 
     if (![200, 201].includes(loginResponse.status)) {
       console.log(`❌ Login failed: ${loginResponse.status}`);
@@ -376,7 +523,7 @@ async function runAllTests() {
     console.log('║                        TEST SUMMARY                       ║');
     console.log('╚═══════════════════════════════════════════════════════════╝');
 
-    const passed = Object.values(results).filter(r => r).length;
+    const passed = Object.values(results).filter((r) => r).length;
     const total = Object.keys(results).length;
 
     console.log(`\n${passed}/${total} tests passed\n`);
@@ -400,7 +547,7 @@ async function runAllTests() {
 }
 
 // Run tests
-runAllTests().catch(error => {
+runAllTests().catch((error) => {
   console.error('Test runner error:', error);
   process.exit(1);
 });

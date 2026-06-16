@@ -20,7 +20,7 @@ export class ObservabilityInterceptor implements NestInterceptor {
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {
     const request = context.switchToHttp().getRequest();
     const response = context.switchToHttp().getResponse();
-    const { method, url, path } = request;
+    const { method, path } = request;
     const startTime = Date.now();
 
     return next.handle().pipe(
@@ -45,12 +45,10 @@ export class ObservabilityInterceptor implements NestInterceptor {
 
           // Log error
           const userId = request.auth?.userId || request.user?.id || 'anonymous';
-          this.loggerService?.error(
-            `${method} ${path} - Status: ${status}`,
-            error,
-            'HTTP',
-            { userId, duration },
-          );
+          this.loggerService?.error(`${method} ${path} - Status: ${status}`, error, 'HTTP', {
+            userId,
+            duration,
+          });
         },
       ),
     );

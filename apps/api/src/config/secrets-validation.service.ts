@@ -14,8 +14,12 @@ export class SecretsValidationService implements OnModuleInit {
     'change-this-secret-key-in-production',
     'ajust123',
     'change-this',
+    'change_me',
+    'change-me',
+    'dev-only',
+    'dev-',
     'test-secret',
-    'development'
+    'development',
   ]);
 
   onModuleInit() {
@@ -25,10 +29,14 @@ export class SecretsValidationService implements OnModuleInit {
   private validateSecrets(): void {
     const isProduction = process.env.NODE_ENV === 'production';
     const secrets = {
-      'JWT_ACCESS_SECRET': process.env.JWT_ACCESS_SECRET,
-      'JWT_REFRESH_SECRET': process.env.JWT_REFRESH_SECRET,
-      'SECRETS_ENCRYPTION_KEY': process.env.SECRETS_ENCRYPTION_KEY,
-      'POSTGRES_PASSWORD': process.env.POSTGRES_PASSWORD
+      JWT_ACCESS_SECRET: process.env.JWT_ACCESS_SECRET,
+      JWT_REFRESH_SECRET: process.env.JWT_REFRESH_SECRET,
+      JWT_RESET_SECRET: process.env.JWT_RESET_SECRET,
+      SECRETS_ENCRYPTION_KEY: process.env.SECRETS_ENCRYPTION_KEY,
+      POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD,
+      SMTP_PASS: process.env.SMTP_PASS,
+      MONITORING_WEBHOOK_TOKEN: process.env.MONITORING_WEBHOOK_TOKEN,
+      CHAT_WEBHOOK_TOKEN: process.env.CHAT_WEBHOOK_TOKEN,
     };
 
     const unsafeSecrets: string[] = [];
@@ -45,12 +53,12 @@ export class SecretsValidationService implements OnModuleInit {
       if (isProduction) {
         throw new Error(
           `❌ CRITICAL: Unsafe secrets in PRODUCTION: ${unsafeSecrets.join(', ')}. ` +
-          `Generate secure secrets and set environment variables before deploying.`
+            `Generate secure secrets and set environment variables before deploying.`,
         );
       } else {
         this.logger.warn(
           `⚠️  DEVELOPMENT: Using default/unsafe secrets: ${unsafeSecrets.join(', ')}. ` +
-          `This is acceptable in development but MUST be changed before production!`
+            `This is acceptable in development but MUST be changed before production!`,
         );
       }
     } else {
@@ -77,7 +85,7 @@ export class SecretsValidationService implements OnModuleInit {
    */
   validateSecret(name: string, value: string): boolean {
     if (!value || this.isUnsafe(value)) {
-      this.logger.error(`❌ Secret '${name}' is unsafe: ${value}`);
+      this.logger.error(`Secret '${name}' is unsafe.`);
       return false;
     }
     return true;

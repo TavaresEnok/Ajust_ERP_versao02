@@ -1,12 +1,35 @@
-import { Controller, Post, Get, Body, UseGuards, Req, BadRequestException, UnauthorizedException, Inject, HttpCode } from '@nestjs/common';
+import { ApiTags } from '@nestjs/swagger';
+import {
+  Controller,
+  Post,
+  Get,
+  Body,
+  UseGuards,
+  Req,
+  BadRequestException,
+  UnauthorizedException,
+  Inject,
+  HttpCode,
+} from '@nestjs/common';
 import { AuthGuard } from './auth.guard';
 import { TotpService } from './totp.service';
 import { AuthService } from './auth.service';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { PrismaService } from '../prisma/prisma.service';
-import { createCipheriv, createDecipheriv, randomBytes } from 'crypto';
 import { compare } from 'bcryptjs';
+import { z } from 'zod';
+import { decryptSecret, encryptSecret } from '../common/secrets.crypto';
 
+const ConfirmTwoFactorSchema = z.object({
+  secret: z.string().trim().min(16).max(256),
+  code: z.string().regex(/^\d{6}$/),
+});
+
+const DisableTwoFactorSchema = z.object({
+  password: z.string().min(1).max(256),
+});
+
+@ApiTags('2FA')
 @Controller('auth/2fa')
 export class TwoFactorController {
   constructor(
@@ -21,7 +44,7 @@ export class TwoFactorController {
   async setupTwoFactor(@Req() req: RequestWithAuth): Promise<{
     secret: string;
     provisioning_url: string;
-    qr_code_url: string;
+    qr_code_url: null;
   }> {
     if (!req.auth?.userId) {
       throw new UnauthorizedException('Missing authentication');
@@ -34,15 +57,17 @@ export class TwoFactorController {
     if (!user) {
       throw new BadRequestException('User not found');
     }
+    if (user.twoFactorEnabled) {
+      throw new BadRequestException('Disable the current 2FA configuration before replacing it.');
+    }
 
     const secret = this.totpService.generateSecret();
     const provisioningUrl = this.totpService.getProvisioningUrl(secret, user.email);
-    const qrCodeUrl = `https://api.qrserver.com/v1/create-qr-code/?size=300x300&data=${encodeURIComponent(provisioningUrl)}`;
 
     return {
       secret,
       provisioning_url: provisioningUrl,
-      qr_code_url: qrCodeUrl,
+      qr_code_url: null,
     };
   }
 
@@ -50,24 +75,31 @@ export class TwoFactorController {
   @UseGuards(AuthGuard)
   async confirmTwoFactor(
     @Req() req: RequestWithAuth,
-    @Body() body: { secret: string; code: string },
+    @Body() body: unknown,
   ): Promise<{ success: boolean; message: string }> {
     if (!req.auth?.userId) {
       throw new UnauthorizedException('Missing authentication');
     }
 
-    if (!body.secret || !body.code) {
-      throw new BadRequestException('Secret and code are required');
+    const input = ConfirmTwoFactorSchema.parse(body);
+    const user = await this.prisma.user.findUnique({
+      where: { id: req.auth.userId },
+      select: { twoFactorEnabled: true },
+    });
+    if (!user) {
+      throw new BadRequestException('User not found');
+    }
+    if (user.twoFactorEnabled) {
+      throw new BadRequestException('Disable the current 2FA configuration before replacing it.');
     }
 
-    // Verify the code
-    const isValid = this.totpService.verifyCode(body.secret, body.code);
+    const isValid = this.totpService.verifyCode(input.secret, input.code);
     if (!isValid) {
       throw new BadRequestException('Invalid verification code');
     }
 
     // Encrypt and store the secret
-    const encryptedSecret = this.encryptSecret(body.secret);
+    const encryptedSecret = encryptSecret(input.secret);
 
     // Update user
     await this.prisma.user.update({
@@ -88,15 +120,13 @@ export class TwoFactorController {
   @UseGuards(AuthGuard)
   async disableTwoFactor(
     @Req() req: RequestWithAuth,
-    @Body() body: { password: string },
+    @Body() body: unknown,
   ): Promise<{ success: boolean; message: string }> {
     if (!req.auth?.userId) {
       throw new UnauthorizedException('Missing authentication');
     }
 
-    if (!body.password) {
-      throw new BadRequestException('Password is required to disable 2FA');
-    }
+    const input = DisableTwoFactorSchema.parse(body);
 
     const user = await this.prisma.user.findUnique({
       where: { id: req.auth.userId },
@@ -107,7 +137,7 @@ export class TwoFactorController {
     }
 
     // Verify password
-    const isValidPassword = await compare(body.password, user.passwordHash);
+    const isValidPassword = await compare(input.password, user.passwordHash);
     if (!isValidPassword) {
       throw new BadRequestException('Invalid password');
     }
@@ -142,31 +172,7 @@ export class TwoFactorController {
       enabled: user?.twoFactorEnabled || false,
     };
   }
-
-  private encryptSecret(secret: string): string {
-    const encryptionKey = Buffer.from(process.env.SECRETS_ENCRYPTION_KEY || 'change-this-secret-key-in-production', 'utf-8');
-    const iv = randomBytes(16);
-    const cipher = createCipheriv('aes-256-gcm', encryptionKey.subarray(0, 32), iv);
-
-    let encrypted = cipher.update(secret, 'utf-8', 'hex');
-    encrypted += cipher.final('hex');
-
-    const authTag = cipher.getAuthTag();
-    return `${iv.toString('hex')}:${encrypted}:${authTag.toString('hex')}`;
-  }
-
   decryptSecret(encrypted: string): string {
-    const encryptionKey = Buffer.from(process.env.SECRETS_ENCRYPTION_KEY || 'change-this-secret-key-in-production', 'utf-8');
-    const [ivHex, encryptedHex, authTagHex] = encrypted.split(':');
-
-    const iv = Buffer.from(ivHex, 'hex');
-    const authTag = Buffer.from(authTagHex, 'hex');
-    const decipher = createDecipheriv('aes-256-gcm', encryptionKey.subarray(0, 32), iv);
-
-    decipher.setAuthTag(authTag);
-    let decrypted = decipher.update(encryptedHex, 'hex', 'utf-8');
-    decrypted += decipher.final('utf-8');
-
-    return decrypted;
+    return decryptSecret(encrypted);
   }
 }

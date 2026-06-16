@@ -2,7 +2,7 @@ name: CI
 
 on:
   push:
-    branches: [main, master, develop]
+    branches: [main, master]
   pull_request:
 
 concurrency:
@@ -13,9 +13,33 @@ env:
   DATABASE_URL: postgresql://postgres:postgres@localhost:5432/ajust_ci?schema=public
   JWT_ACCESS_SECRET: ci_access_secret_minimum_thirty_two_characters_x
   JWT_REFRESH_SECRET: ci_refresh_secret_minimum_thirty_two_characters_x
+  JWT_RESET_SECRET: ci_reset_secret_minimum_thirty_two_characters_x
   SECRETS_ENCRYPTION_KEY: ci_encryption_secret_minimum_thirty_two_characters_x
+  MONITORING_WEBHOOK_TOKEN: ci_monitoring_token_minimum_thirty_two_characters_x
+  CHAT_WEBHOOK_TOKEN: ci_chat_token_minimum_thirty_two_characters_x
+  WORKER_API_TOKEN: ci_worker_token_minimum_thirty_two_characters_x
+  WEB_BASE_URL: http://localhost:3000
+  API_BASE_URL: http://localhost:3001
+  SMTP_HOST: smtp.mailgun.org
+  SMTP_USER: ci@company.test
+  SMTP_PASS: ci_smtp_password_minimum_thirty_two_chars
+  NODE_ENV: development
 
 jobs:
+  gitleaks:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_CONFIG: .gitleaks.toml
+
   api:
     runs-on: ubuntu-latest
 
@@ -49,20 +73,17 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Dependency audit
-        run: pnpm audit --audit-level=moderate
+      - name: Lint
+        run: pnpm run lint
+
+      - name: Format check
+        run: pnpm run format:check
+
+      - name: Typecheck
+        run: pnpm run typecheck
 
       - name: Prisma generate
         run: pnpm exec prisma generate --schema prisma/schema.prisma
-
-      - name: Lint (workspaces)
-        run: pnpm lint
-
-      - name: Prettier check
-        run: pnpm format:check
-
-      - name: Typecheck (monorepo)
-        run: pnpm typecheck
 
       - name: Prisma migrate deploy
         run: pnpm exec prisma migrate deploy --schema prisma/schema.prisma
@@ -70,7 +91,21 @@ jobs:
       - name: Build API
         run: pnpm --filter @ajust/api build
 
-      - name: E2E smoke (seeds database via Prisma)
+      - name: Build Worker
+        run: pnpm --filter @ajust/worker build
+
+      - name: Build Web
+        run: pnpm --filter @ajust/web build
+
+      - name: Unit tests
+        run: pnpm test:unit:coverage
+
+      - name: Release configuration check
+        run: pnpm release:check
+        env:
+          POSTGRES_PASSWORD: ci_postgres_password_minimum_32_chars
+
+      - name: E2E smoke
         run: pnpm --filter @ajust/api test:e2e
 
       - name: Start API server
@@ -88,11 +123,19 @@ jobs:
           echo "API failed to become healthy"
           exit 1
 
-      - name: E2E security (HTTP against running API)
+      - name: E2E security
         run: pnpm --filter @ajust/api test:e2e:security
         env:
           API_URL: http://127.0.0.1:3001
 
+      - name: API load smoke
+        run: pnpm test:load
+        env:
+          LOAD_BASE_URL: http://127.0.0.1:3001
+
       - name: Stop API
         if: always()
         run: kill $(cat /tmp/ajust-api.pid) 2>/dev/null || true
+
+      - name: Dependency audit
+        run: pnpm audit --audit-level=high

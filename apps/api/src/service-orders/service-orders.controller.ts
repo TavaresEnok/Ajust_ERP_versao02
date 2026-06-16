@@ -1,3 +1,4 @@
+import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import {
   BadRequestException,
   Body,
@@ -13,7 +14,7 @@ import {
   Req,
   UseInterceptors,
   UseGuards,
-  UnauthorizedException
+  UnauthorizedException,
 } from '@nestjs/common';
 import { FilesInterceptor } from '@nestjs/platform-express';
 import {
@@ -21,7 +22,7 @@ import {
   OccurrenceStatus,
   Priority,
   ServiceOrderStatus,
-  ServiceOrderType
+  ServiceOrderType,
 } from '@prisma/client';
 import { z } from 'zod';
 import type { Response } from 'express';
@@ -29,6 +30,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { ServiceOrdersService } from './service-orders.service';
+import { TenantRateLimit, TenantRateLimitGuard } from '../common/tenant-rate-limit.guard';
 
 const CreateOrderSchema = z.object({
   tenantId: z.string().uuid().optional(),
@@ -46,7 +48,7 @@ const CreateOrderSchema = z.object({
   analystName: z.string().min(2).optional(),
   deadlineAt: z.string().datetime().optional(),
   tags: z.array(z.string()).optional(),
-  internalNotes: z.string().optional()
+  internalNotes: z.string().optional(),
 });
 
 const UpdateOrderSchema = z.object({
@@ -61,7 +63,7 @@ const UpdateOrderSchema = z.object({
   analystName: z.string().nullable().optional(),
   deadlineAt: z.string().datetime().optional(),
   tags: z.array(z.string()).optional(),
-  internalNotes: z.string().nullable().optional()
+  internalNotes: z.string().nullable().optional(),
 });
 
 const OccurrenceOrderSchema = z.object({
@@ -76,7 +78,7 @@ const OccurrenceOrderSchema = z.object({
   analystName: z.string().min(2).optional(),
   deadlineAt: z.string().datetime().optional(),
   tags: z.array(z.string()).optional(),
-  internalNotes: z.string().optional()
+  internalNotes: z.string().optional(),
 });
 
 const CreateOccurrenceSchema = z.object({
@@ -90,7 +92,7 @@ const CreateOccurrenceSchema = z.object({
   analystResponsible: z.string().min(2),
   description: z.string().min(3),
   createdAt: z.string().datetime().optional(),
-  firstOrder: OccurrenceOrderSchema
+  firstOrder: OccurrenceOrderSchema,
 });
 
 const UpdateOccurrenceSchema = z.object({
@@ -99,7 +101,7 @@ const UpdateOccurrenceSchema = z.object({
   sector: z.string().min(2).optional(),
   origin: z.string().min(2).optional(),
   analystResponsible: z.string().min(2).optional(),
-  description: z.string().min(3).optional()
+  description: z.string().min(3).optional(),
 });
 
 const ListOccurrencesSchema = z.object({
@@ -108,21 +110,21 @@ const ListOccurrencesSchema = z.object({
   status: z.nativeEnum(OccurrenceStatus).optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
-  includeOrders: z.coerce.boolean().optional()
+  includeOrders: z.coerce.boolean().optional(),
 });
 
 const CreateAnnotationSchema = z.object({
-  message: z.string().trim().min(2).max(4000)
+  message: z.string().trim().min(2).max(4000),
 });
 
 const TransitionSchema = z.object({
   toStatus: z.nativeEnum(ServiceOrderStatus),
-  reason: z.string().min(3)
+  reason: z.string().min(3),
 });
 
 const ApprovalSchema = z.object({
   decision: z.nativeEnum(ApprovalStatus),
-  reason: z.string().optional()
+  reason: z.string().optional(),
 });
 
 const ListSchema = z.object({
@@ -134,32 +136,45 @@ const ListSchema = z.object({
   to: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
-  orderBy: z.enum(['createdAt', 'updatedAt', 'deadlineAt', 'protocol', 'priority', 'status']).optional(),
-  orderDir: z.enum(['asc', 'desc']).optional()
+  orderBy: z
+    .enum(['createdAt', 'updatedAt', 'deadlineAt', 'protocol', 'priority', 'status'])
+    .optional(),
+  orderDir: z.enum(['asc', 'desc']).optional(),
 });
 
 const ExportHistorySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
-  offset: z.coerce.number().int().min(0).optional()
+  offset: z.coerce.number().int().min(0).optional(),
 });
 
+@ApiTags('Ordens de Serviço')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'Não autenticado' })
+@ApiResponse({ status: 403, description: 'Permissão insuficiente' })
 @Controller('service-orders')
 @UseGuards(AuthGuard, TenantIsolationGuard)
 export class ServiceOrdersController {
-  constructor(@Inject(ServiceOrdersService) private readonly serviceOrdersService: ServiceOrdersService) {}
+  constructor(
+    @Inject(ServiceOrdersService) private readonly serviceOrdersService: ServiceOrdersService,
+  ) {}
 
   @Post()
+  @ApiOperation({ summary: 'Criar ordem de serviço' })
+  @ApiResponse({ status: 201, description: 'Ordem criada com sucesso' })
+  @ApiResponse({ status: 400, description: 'Dados inválidos' })
   async create(@Body() body: unknown, @Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const input = CreateOrderSchema.parse(body);
 
     return this.serviceOrdersService.create(req.auth.userId, req.auth.role || '', {
       ...input,
-      tenantId: req.auth.tenantId
+      tenantId: req.auth.tenantId,
     });
   }
 
   @Get()
+  @ApiOperation({ summary: 'Listar ordens de serviço com filtros e paginação' })
+  @ApiResponse({ status: 200, description: 'Lista paginada de ordens' })
   async list(
     @Req() req: RequestWithAuth,
     @Query('status') status?: ServiceOrderStatus,
@@ -171,17 +186,28 @@ export class ServiceOrdersController {
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
     @Query('orderBy') orderBy?: string,
-    @Query('orderDir') orderDir?: string
+    @Query('orderDir') orderDir?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    const input = ListSchema.parse({ status, priority, type, search, from, to, limit, offset, orderBy, orderDir });
+    const input = ListSchema.parse({
+      status,
+      priority,
+      type,
+      search,
+      from,
+      to,
+      limit,
+      offset,
+      orderBy,
+      orderDir,
+    });
 
     if (input.from && input.to && new Date(input.from).getTime() > new Date(input.to).getTime()) {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    return this.serviceOrdersService.list(req.auth.tenantId, input);
+    return this.serviceOrdersService.list(req.auth.tenantId, input, req.auth.role);
   }
 
   @Get('summary')
@@ -194,7 +220,7 @@ export class ServiceOrdersController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('orderBy') orderBy?: string,
-    @Query('orderDir') orderDir?: string
+    @Query('orderDir') orderDir?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -204,7 +230,7 @@ export class ServiceOrdersController {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    return this.serviceOrdersService.summary(req.auth.tenantId, input);
+    return this.serviceOrdersService.summary(req.auth.tenantId, input, req.auth.role);
   }
 
   @Get('occurrences')
@@ -215,7 +241,7 @@ export class ServiceOrdersController {
     @Query('status') status?: OccurrenceStatus,
     @Query('limit') limit?: string,
     @Query('offset') offset?: string,
-    @Query('includeOrders') includeOrders?: string
+    @Query('includeOrders') includeOrders?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -225,19 +251,23 @@ export class ServiceOrdersController {
       status,
       limit,
       offset,
-      includeOrders
+      includeOrders,
     });
 
-    return this.serviceOrdersService.listOccurrences(req.auth.tenantId, input);
+    return this.serviceOrdersService.listOccurrences(req.auth.tenantId, input, req.auth.role);
   }
 
   @Get('occurrences/:occurrenceId')
   async getOccurrenceById(
     @Req() req: RequestWithAuth,
-    @Param('occurrenceId') occurrenceId: string
+    @Param('occurrenceId') occurrenceId: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    return this.serviceOrdersService.getOccurrenceById(req.auth.tenantId, occurrenceId);
+    return this.serviceOrdersService.getOccurrenceById(
+      req.auth.tenantId,
+      occurrenceId,
+      req.auth.role,
+    );
   }
 
   @Post('occurrences')
@@ -245,29 +275,39 @@ export class ServiceOrdersController {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const input = CreateOccurrenceSchema.parse(body);
 
-    return this.serviceOrdersService.createOccurrenceWithFirstOrder(req.auth.userId, req.auth.role || '', {
-      ...input,
-      tenantId: req.auth.tenantId
-    });
+    return this.serviceOrdersService.createOccurrenceWithFirstOrder(
+      req.auth.userId,
+      req.auth.role || '',
+      {
+        ...input,
+        tenantId: req.auth.tenantId,
+      },
+    );
   }
 
   @Patch('occurrences/:occurrenceId')
   async patchOccurrence(
     @Req() req: RequestWithAuth,
     @Param('occurrenceId') occurrenceId: string,
-    @Body() body: unknown
+    @Body() body: unknown,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = UpdateOccurrenceSchema.parse(body);
-    return this.serviceOrdersService.updateOccurrence(req.auth.tenantId, occurrenceId, req.auth.userId, req.auth.role || '', input);
+    return this.serviceOrdersService.updateOccurrence(
+      req.auth.tenantId,
+      occurrenceId,
+      req.auth.userId,
+      req.auth.role || '',
+      input,
+    );
   }
 
   @Post('occurrences/:occurrenceId/annotations')
   async annotateOccurrence(
     @Req() req: RequestWithAuth,
     @Param('occurrenceId') occurrenceId: string,
-    @Body() body: unknown
+    @Body() body: unknown,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -277,7 +317,7 @@ export class ServiceOrdersController {
       occurrenceId,
       req.auth.userId,
       req.auth.role || '',
-      input.message
+      input.message,
     );
   }
 
@@ -285,7 +325,7 @@ export class ServiceOrdersController {
   async createOrderInOccurrence(
     @Req() req: RequestWithAuth,
     @Param('occurrenceId') occurrenceId: string,
-    @Body() body: unknown
+    @Body() body: unknown,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -295,11 +335,13 @@ export class ServiceOrdersController {
       occurrenceId,
       req.auth.userId,
       req.auth.role || '',
-      input
+      input,
     );
   }
 
   @Get('export/csv')
+  @UseGuards(TenantRateLimitGuard)
+  @TenantRateLimit(10, 60) // 10 exports por minuto por tenant
   async exportCsv(
     @Req() req: RequestWithAuth,
     @Res({ passthrough: true }) res: Response,
@@ -310,7 +352,7 @@ export class ServiceOrdersController {
     @Query('from') from?: string,
     @Query('to') to?: string,
     @Query('orderBy') orderBy?: string,
-    @Query('orderDir') orderDir?: string
+    @Query('orderDir') orderDir?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -319,7 +361,12 @@ export class ServiceOrdersController {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    const csv = await this.serviceOrdersService.exportCsv(req.auth.tenantId, req.auth.userId, input);
+    const csv = await this.serviceOrdersService.exportCsv(
+      req.auth.tenantId,
+      req.auth.userId,
+      req.auth.role || '',
+      input,
+    );
 
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${csv.fileName}"`);
@@ -333,7 +380,7 @@ export class ServiceOrdersController {
   async exportHistory(
     @Req() req: RequestWithAuth,
     @Query('limit') limit?: string,
-    @Query('offset') offset?: string
+    @Query('offset') offset?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -342,7 +389,7 @@ export class ServiceOrdersController {
       req.auth.tenantId,
       req.auth.role || '',
       input.limit || 20,
-      input.offset || 0
+      input.offset || 0,
     );
   }
 
@@ -350,7 +397,7 @@ export class ServiceOrdersController {
   async downloadExport(
     @Req() req: RequestWithAuth,
     @Res({ passthrough: true }) res: Response,
-    @Param('exportId') exportId: string
+    @Param('exportId') exportId: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -358,7 +405,7 @@ export class ServiceOrdersController {
       req.auth.tenantId,
       exportId,
       req.auth.userId,
-      req.auth.role || ''
+      req.auth.role || '',
     );
 
     res.setHeader('content-type', 'text/csv; charset=utf-8');
@@ -370,27 +417,25 @@ export class ServiceOrdersController {
   @Get(':id')
   async getById(@Param('id') id: string, @Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    return this.serviceOrdersService.getById(req.auth.tenantId, id);
+    return this.serviceOrdersService.getById(req.auth.tenantId, id, req.auth.role);
   }
 
   @Patch(':id')
-  async patchOrder(
-    @Param('id') id: string,
-    @Body() body: unknown,
-    @Req() req: RequestWithAuth
-  ) {
+  async patchOrder(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = UpdateOrderSchema.parse(body);
-    return this.serviceOrdersService.updateOrder(req.auth.tenantId, id, req.auth.userId, req.auth.role || '', input);
+    return this.serviceOrdersService.updateOrder(
+      req.auth.tenantId,
+      id,
+      req.auth.userId,
+      req.auth.role || '',
+      input,
+    );
   }
 
   @Post(':id/annotations')
-  async annotateOrder(
-    @Param('id') id: string,
-    @Body() body: unknown,
-    @Req() req: RequestWithAuth
-  ) {
+  async annotateOrder(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = CreateAnnotationSchema.parse(body);
@@ -399,29 +444,27 @@ export class ServiceOrdersController {
       id,
       req.auth.userId,
       req.auth.role || '',
-      input.message
+      input.message,
     );
   }
 
   @Patch(':id/transition')
-  async transition(
-    @Param('id') id: string,
-    @Body() body: unknown,
-    @Req() req: RequestWithAuth
-  ) {
+  async transition(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = TransitionSchema.parse(body);
 
-    return this.serviceOrdersService.transition(req.auth.tenantId, id, req.auth.userId, req.auth.role || '', input);
+    return this.serviceOrdersService.transition(
+      req.auth.tenantId,
+      id,
+      req.auth.userId,
+      req.auth.role || '',
+      input,
+    );
   }
 
   @Post(':id/approvals')
-  async approve(
-    @Param('id') id: string,
-    @Body() body: unknown,
-    @Req() req: RequestWithAuth
-  ) {
+  async approve(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ApprovalSchema.parse(body);
@@ -432,20 +475,20 @@ export class ServiceOrdersController {
       req.auth.userId,
       req.auth.role || '',
       input.decision,
-      input.reason
+      input.reason,
     );
   }
 
   @Post(':id/attachments')
   @UseInterceptors(
     FilesInterceptor('files', 10, {
-      limits: { fileSize: 10 * 1024 * 1024 }
-    })
+      limits: { fileSize: 10 * 1024 * 1024 },
+    }),
   )
   async uploadAttachments(
     @Param('id') id: string,
     @UploadedFiles() files: Array<Express.Multer.File>,
-    @Req() req: RequestWithAuth
+    @Req() req: RequestWithAuth,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -454,7 +497,7 @@ export class ServiceOrdersController {
       id,
       req.auth.userId,
       req.auth.role || '',
-      files || []
+      files || [],
     );
   }
 }

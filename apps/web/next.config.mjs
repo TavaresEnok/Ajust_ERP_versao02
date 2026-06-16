@@ -1,23 +1,36 @@
 /** @type {import('next').NextConfig} */
 const isDev = process.env.NODE_ENV !== 'production';
 
+const securityHeaders = [
+  { key: 'X-Content-Type-Options', value: 'nosniff' },
+  { key: 'X-Frame-Options', value: 'DENY' },
+  { key: 'X-XSS-Protection', value: '1; mode=block' },
+  { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
+  { key: 'Permissions-Policy', value: 'camera=(), microphone=(), geolocation=()' },
+  {
+    key: 'Content-Security-Policy',
+    value:
+      "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:;",
+  },
+];
+
 const nextConfig = {
-  // Limita origens que podem acionar o dev server (CVE dev exposure em versões antigas do Next 15).
   ...(isDev
     ? {
-        allowedDevOrigins: [
-          'localhost',
-          '127.0.0.1',
-          'http://SERVIDOR_IP:8070',
-          'SERVIDOR_IP'
-        ]
+        allowedDevOrigins: ['localhost', '127.0.0.1', 'http://SERVIDOR_IP:8070', 'SERVIDOR_IP'],
       }
     : {}),
-  // Keep dev and production artifacts separated so a local `next build`
-  // does not corrupt the running `next dev` server.
-  distDir: isDev ? '.next-dev' : '.next',
+  distDir: process.env.NEXT_DIST_DIR || (isDev ? '.next-dev' : '.next'),
   output: 'standalone',
-  typedRoutes: true
+  typedRoutes: true,
+  async headers() {
+    return [
+      {
+        source: '/(.*)',
+        headers: securityHeaders,
+      },
+    ];
+  },
 };
 
 export default nextConfig;

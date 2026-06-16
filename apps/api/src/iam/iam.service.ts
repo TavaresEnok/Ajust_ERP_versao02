@@ -1,11 +1,19 @@
-import { ConflictException, Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Prisma, UserStatus } from '@prisma/client';
+import {
+  BadRequestException,
+  ConflictException,
+  Inject,
+  Injectable,
+  NotFoundException,
+  Optional,
+} from '@nestjs/common';
+import { Prisma, Priority, ServiceOrderType, UserStatus } from '@prisma/client';
 import { hash } from 'bcryptjs';
 import type { Express } from 'express';
 import { mkdir, readdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { extname, join } from 'node:path';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
+import { EventsGateway } from '../events.gateway';
 
 type CreateTenantInput = {
   legalName: string;
@@ -64,11 +72,21 @@ type UpdateTenantSectorInput = {
   name: string;
 };
 
+type SaveSlaPolicyInput = {
+  id?: string;
+  priority?: Priority;
+  serviceOrderType?: ServiceOrderType | null;
+  hours?: number;
+  active?: boolean;
+  isOverride?: boolean;
+};
+
 @Injectable()
 export class IamService {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(AuditService) private readonly audit: AuditService
+    @Inject(AuditService) private readonly audit: AuditService,
+    @Optional() @Inject(EventsGateway) private readonly eventsGateway?: EventsGateway,
   ) {}
 
   private normalizeTaxId(taxId: string) {
@@ -81,7 +99,7 @@ export class IamService {
 
   async listRoles() {
     return this.prisma.role.findMany({
-      orderBy: [{ isGlobal: 'desc' }, { code: 'asc' }]
+      orderBy: [{ isGlobal: 'desc' }, { code: 'asc' }],
     });
   }
 
@@ -89,9 +107,9 @@ export class IamService {
     return this.prisma.tenant.findMany({
       where: {
         deletedAt: null,
-        ...(scopeTenantId ? { id: scopeTenantId } : {})
+        ...(scopeTenantId ? { id: scopeTenantId } : {}),
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
   }
 
@@ -99,47 +117,69 @@ export class IamService {
     return this.prisma.auditLog.findMany({
       where: { tenantId },
       include: {
-        actorUser: { select: { id: true, name: true, email: true } }
+        actorUser: { select: { id: true, name: true, email: true } },
       },
       orderBy: { createdAt: 'desc' },
-      take: 200
+      take: 200,
     });
   }
 
   async listSlaPolicies(tenantId: string) {
     return this.prisma.slaPolicy.findMany({
       where: { tenantId },
-      orderBy: [
-        { priority: 'asc' },
-        { serviceOrderType: 'asc' }
-      ]
+      orderBy: [{ priority: 'asc' }, { serviceOrderType: 'asc' }],
     });
   }
 
-  async saveSlaPolicy(actorUserId: string, tenantId: string, input: any) {
+  async saveSlaPolicy(actorUserId: string, tenantId: string, input: SaveSlaPolicyInput) {
     if (input.id) {
-      const updated = await this.prisma.slaPolicy.update({
+      const policy = await this.prisma.slaPolicy.findFirst({
         where: { id: input.id, tenantId },
+        select: { id: true },
+      });
+      if (!policy) throw new NotFoundException('Policy not found');
+
+      const updated = await this.prisma.slaPolicy.update({
+        where: { id: policy.id },
         data: {
           hours: input.hours,
           active: input.active,
-          isOverride: input.isOverride
-        }
+        },
       });
-      await this.audit.log(tenantId, actorUserId, 'SLA_CHANGE', 'sla_policy', updated.id, { op: 'update' });
+      await this.audit.log(tenantId, actorUserId, 'SLA_CHANGE', 'sla_policy', updated.id, {
+        op: 'update',
+      });
       return updated;
     } else {
+      if (!input.priority || input.hours === undefined) {
+        throw new BadRequestException('New SLA policies require priority and hours.');
+      }
+      const isOverride = input.isOverride ?? false;
+      const serviceOrderType = isOverride ? input.serviceOrderType : null;
+      if (isOverride && !serviceOrderType) {
+        throw new BadRequestException('Override policies require a serviceOrderType.');
+      }
+      const existing = await this.prisma.slaPolicy.findFirst({
+        where: isOverride
+          ? { tenantId, isOverride: true, serviceOrderType }
+          : { tenantId, isOverride: false, priority: input.priority, serviceOrderType: null },
+        select: { id: true },
+      });
+      if (existing) throw new ConflictException('An equivalent SLA policy already exists.');
+
       const created = await this.prisma.slaPolicy.create({
         data: {
           tenantId,
           priority: input.priority,
-          serviceOrderType: input.serviceOrderType,
+          serviceOrderType,
           hours: input.hours,
           active: input.active ?? true,
-          isOverride: input.isOverride ?? false
-        }
+          isOverride,
+        },
       });
-      await this.audit.log(tenantId, actorUserId, 'SLA_CHANGE', 'sla_policy', created.id, { op: 'create' });
+      await this.audit.log(tenantId, actorUserId, 'SLA_CHANGE', 'sla_policy', created.id, {
+        op: 'create',
+      });
       return created;
     }
   }
@@ -158,10 +198,12 @@ export class IamService {
           techContactName: input.techContactName,
           techContactEmail: input.techContactEmail,
           techContactPhone: input.techContactPhone,
-          status: input.status || 'ACTIVE'
-        }
+          status: input.status || 'ACTIVE',
+        },
       });
-      await this.audit.log(created.id, actorUserId, 'OS_UPDATE', 'tenant', created.id, { op: 'create' });
+      await this.audit.log(created.id, actorUserId, 'CREATE_TENANT', 'tenant', created.id, {
+        op: 'create',
+      });
       return created;
     } catch {
       throw new ConflictException('Tenant already exists or has conflicting unique fields.');
@@ -171,7 +213,7 @@ export class IamService {
   async updateTenant(actorUserId: string, tenantId: string, patch: UpdateTenantInput) {
     const existing = await this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { id: true }
+      select: { id: true },
     });
     if (!existing) {
       throw new NotFoundException('Tenant not found.');
@@ -187,15 +229,31 @@ export class IamService {
       ...(patch.techContactName !== undefined ? { techContactName: patch.techContactName } : {}),
       ...(patch.techContactEmail !== undefined ? { techContactEmail: patch.techContactEmail } : {}),
       ...(patch.techContactPhone !== undefined ? { techContactPhone: patch.techContactPhone } : {}),
-      ...(patch.status !== undefined ? { status: patch.status } : {})
+      ...(patch.status !== undefined ? { status: patch.status } : {}),
     };
 
+    const disableTenant = patch.status !== undefined && patch.status !== 'ACTIVE';
     try {
-      const updated = await this.prisma.tenant.update({
-        where: { id: tenantId },
-        data: payload
+      const updated = await this.prisma.$transaction(async (tx) => {
+        const result = await tx.tenant.update({
+          where: { id: tenantId },
+          data: payload,
+        });
+        if (disableTenant) {
+          await tx.session.updateMany({
+            where: { tenantId, revokedAt: null },
+            data: { revokedAt: new Date() },
+          });
+        }
+        return result;
       });
-      await this.audit.log(tenantId, actorUserId, 'OS_UPDATE', 'tenant', tenantId, { op: 'update' });
+      if (disableTenant) {
+        this.eventsGateway?.disconnectTenant(tenantId);
+      }
+      await this.audit.log(tenantId, actorUserId, 'UPDATE_TENANT', 'tenant', tenantId, {
+        op: 'update',
+        ...(disableTenant ? { sessionsRevoked: true } : {}),
+      });
       return updated;
     } catch {
       throw new ConflictException('Tenant could not be updated due to conflicting unique fields.');
@@ -204,7 +262,7 @@ export class IamService {
 
   async createUser(actorUserId: string, input: CreateUserInput) {
     const role = await this.prisma.role.findUnique({
-      where: { code: input.roleCode }
+      where: { code: input.roleCode },
     });
 
     if (!role) {
@@ -220,7 +278,7 @@ export class IamService {
     const passwordHash = await hash(input.password, 12);
     const existingUser = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
-      select: { id: true }
+      select: { id: true },
     });
 
     if (existingUser) {
@@ -228,10 +286,10 @@ export class IamService {
         where: {
           userId_tenantId: {
             userId: existingUser.id,
-            tenantId: input.tenantId
-          }
+            tenantId: input.tenantId,
+          },
         },
-        select: { id: true }
+        select: { id: true },
       });
       if (existingMembership) {
         throw new ConflictException('User is already linked to this tenant.');
@@ -244,8 +302,8 @@ export class IamService {
             name: input.name,
             passwordHash,
             status: 'ACTIVE',
-            deletedAt: null
-          }
+            deletedAt: null,
+          },
         });
 
         await tx.userTenant.create({
@@ -253,16 +311,16 @@ export class IamService {
             userId: existingUser.id,
             tenantId: input.tenantId,
             roleId: role.id,
-            ...(input.sector !== undefined ? { sector: input.sector } : {})
-          }
+            ...(input.sector !== undefined ? { sector: input.sector } : {}),
+          },
         });
 
         return tx.userTenant.findUnique({
           where: {
             userId_tenantId: {
               userId: existingUser.id,
-              tenantId: input.tenantId
-            }
+              tenantId: input.tenantId,
+            },
           },
           include: {
             role: true,
@@ -274,13 +332,16 @@ export class IamService {
                 status: true,
                 twoFactorEnabled: true,
                 lastLoginAt: true,
-                createdAt: true
-              }
-            }
-          }
+                createdAt: true,
+              },
+            },
+          },
         });
       });
-      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'user', existingUser.id, { op: 'create_link', role: input.roleCode });
+      await this.audit.log(input.tenantId, actorUserId, 'CREATE_USER', 'user', existingUser.id, {
+        op: 'create_link',
+        role: input.roleCode,
+      });
       return membership;
     }
 
@@ -294,23 +355,26 @@ export class IamService {
             create: {
               tenantId: input.tenantId,
               roleId: role.id,
-              ...(input.sector !== undefined ? { sector: input.sector } : {})
-            }
-          }
+              ...(input.sector !== undefined ? { sector: input.sector } : {}),
+            },
+          },
         },
         select: {
-          id: true
-        }
+          id: true,
+        },
       });
 
-      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'user', created.id, { op: 'create', role: input.roleCode });
+      await this.audit.log(input.tenantId, actorUserId, 'CREATE_USER', 'user', created.id, {
+        op: 'create',
+        role: input.roleCode,
+      });
 
       return this.prisma.userTenant.findUnique({
         where: {
           userId_tenantId: {
             userId: created.id,
-            tenantId: input.tenantId
-          }
+            tenantId: input.tenantId,
+          },
         },
         include: {
           role: true,
@@ -322,10 +386,10 @@ export class IamService {
               status: true,
               twoFactorEnabled: true,
               lastLoginAt: true,
-              createdAt: true
-            }
-          }
-        }
+              createdAt: true,
+            },
+          },
+        },
       });
     } catch {
       throw new ConflictException('User could not be created. Check unique constraints.');
@@ -336,7 +400,7 @@ export class IamService {
     return this.prisma.userTenant.findMany({
       where: {
         tenantId,
-        user: { deletedAt: null }
+        user: { deletedAt: null },
       },
       include: {
         role: true,
@@ -348,13 +412,13 @@ export class IamService {
             status: true,
             twoFactorEnabled: true,
             lastLoginAt: true,
-            createdAt: true
-          }
-        }
+            createdAt: true,
+          },
+        },
       },
       orderBy: {
-        createdAt: 'desc'
-      }
+        createdAt: 'desc',
+      },
     });
   }
 
@@ -363,8 +427,8 @@ export class IamService {
       where: {
         userId_tenantId: {
           userId: input.userId,
-          tenantId: input.tenantId
-        }
+          tenantId: input.tenantId,
+        },
       },
       include: {
         role: true,
@@ -372,10 +436,10 @@ export class IamService {
           select: {
             id: true,
             name: true,
-            email: true
-          }
-        }
-      }
+            email: true,
+          },
+        },
+      },
     });
 
     if (!membership) {
@@ -394,7 +458,7 @@ export class IamService {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.email !== undefined ? { email: input.email.toLowerCase() } : {}),
       ...(input.status !== undefined ? { status: input.status } : {}),
-      ...(input.password ? { passwordHash: await hash(input.password, 12) } : {})
+      ...(input.password ? { passwordHash: await hash(input.password, 12) } : {}),
     };
 
     try {
@@ -402,7 +466,7 @@ export class IamService {
         if (Object.keys(userPatch).length > 0) {
           await tx.user.update({
             where: { id: input.userId },
-            data: userPatch
+            data: userPatch,
           });
         }
 
@@ -412,11 +476,21 @@ export class IamService {
             data: {
               ...(nextRole ? { roleId: nextRole.id } : {}),
               ...(input.sector !== undefined ? { sector: input.sector } : {}),
-            }
+            },
+          });
+        }
+        if (input.password || (input.status !== undefined && input.status !== 'ACTIVE')) {
+          await tx.session.updateMany({
+            where: { userId: input.userId, revokedAt: null },
+            data: { revokedAt: new Date() },
           });
         }
       });
-      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'user', input.userId, { op: 'update' });
+      await this.audit.log(input.tenantId, actorUserId, 'UPDATE_USER', 'user', input.userId, {
+        op: 'update',
+        sessionsRevoked:
+          Boolean(input.password) || (input.status !== undefined && input.status !== 'ACTIVE'),
+      });
     } catch {
       throw new ConflictException('User could not be updated. Check unique constraints.');
     }
@@ -425,8 +499,8 @@ export class IamService {
       where: {
         userId_tenantId: {
           userId: input.userId,
-          tenantId: input.tenantId
-        }
+          tenantId: input.tenantId,
+        },
       },
       include: {
         role: true,
@@ -438,10 +512,10 @@ export class IamService {
             status: true,
             twoFactorEnabled: true,
             lastLoginAt: true,
-            createdAt: true
-          }
-        }
-      }
+            createdAt: true,
+          },
+        },
+      },
     });
   }
 
@@ -450,10 +524,10 @@ export class IamService {
       where: {
         userId_tenantId: {
           userId,
-          tenantId
-        }
+          tenantId,
+        },
       },
-      select: { id: true }
+      select: { id: true },
     });
     if (!membership) {
       throw new NotFoundException('User membership not found for this tenant.');
@@ -461,11 +535,11 @@ export class IamService {
 
     await this.prisma.$transaction(async (tx) => {
       await tx.userTenant.delete({
-        where: { id: membership.id }
+        where: { id: membership.id },
       });
 
       const remainingMemberships = await tx.userTenant.count({
-        where: { userId }
+        where: { userId },
       });
 
       if (remainingMemberships === 0) {
@@ -473,14 +547,14 @@ export class IamService {
           where: { id: userId },
           data: {
             status: 'INACTIVE',
-            deletedAt: new Date()
-          }
+            deletedAt: new Date(),
+          },
         });
       }
 
       await tx.session.updateMany({
         where: { userId, tenantId, revokedAt: null },
-        data: { revokedAt: new Date() }
+        data: { revokedAt: new Date() },
       });
     });
 
@@ -492,33 +566,45 @@ export class IamService {
   async saveTenantLogo(actorUserId: string, tenantId: string, file: Express.Multer.File) {
     const tenant = await this.prisma.tenant.findFirst({
       where: { id: tenantId, deletedAt: null },
-      select: { id: true }
+      select: { id: true },
     });
     if (!tenant) {
       throw new NotFoundException('Tenant not found.');
     }
 
-    const allowedMime = new Set(['image/png', 'image/jpeg', 'image/jpg', 'image/webp', 'image/svg+xml']);
-    if (!allowedMime.has(file.mimetype)) {
-      throw new ConflictException('Unsupported logo format. Use png, jpg, webp, or svg.');
+    const detected = file.buffer
+      .subarray(0, 8)
+      .equals(Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]))
+      ? { ext: '.png', mimeType: 'image/png' }
+      : file.buffer[0] === 0xff && file.buffer[1] === 0xd8 && file.buffer[2] === 0xff
+        ? { ext: '.jpg', mimeType: 'image/jpeg' }
+        : file.buffer.subarray(0, 4).toString('ascii') === 'RIFF' &&
+            file.buffer.subarray(8, 12).toString('ascii') === 'WEBP'
+          ? { ext: '.webp', mimeType: 'image/webp' }
+          : null;
+    if (!detected || file.size > 5 * 1024 * 1024) {
+      throw new ConflictException('Unsupported logo. Use a png, jpg, or webp file up to 5 MB.');
     }
 
     const root = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
     const logoDir = join(root, 'tenant-logos');
     await mkdir(logoDir, { recursive: true });
 
-    const ext = extname(file.originalname || '').toLowerCase() || (file.mimetype === 'image/svg+xml' ? '.svg' : '.png');
-    const nextName = `${tenantId}${ext}`;
+    const nextName = `${tenantId}${detected.ext}`;
 
     const existing = await readdir(logoDir).catch(() => []);
     await Promise.all(
       existing
         .filter((item) => item.startsWith(`${tenantId}.`) && item !== nextName)
-        .map((item) => rm(join(logoDir, item), { force: true }))
+        .map((item) => rm(join(logoDir, item), { force: true })),
     );
 
     await writeFile(join(logoDir, nextName), file.buffer);
-    await this.audit.log(tenantId, actorUserId, 'OS_UPDATE', 'tenant_logo', tenantId, { op: 'upload', fileName: nextName });
+    await this.audit.log(tenantId, actorUserId, 'OS_UPDATE', 'tenant_logo', tenantId, {
+      op: 'upload',
+      fileName: nextName,
+      mimeType: detected.mimeType,
+    });
     return { tenantId, fileName: nextName };
   }
 
@@ -538,12 +624,10 @@ export class IamService {
       ext === '.png'
         ? 'image/png'
         : ext === '.jpg' || ext === '.jpeg'
-        ? 'image/jpeg'
-        : ext === '.webp'
-        ? 'image/webp'
-        : ext === '.svg'
-        ? 'image/svg+xml'
-        : 'application/octet-stream';
+          ? 'image/jpeg'
+          : ext === '.webp'
+            ? 'image/webp'
+            : 'application/octet-stream';
 
     return { fileName, mimeType, buffer };
   }
@@ -551,14 +635,14 @@ export class IamService {
   async listTenantSectors(tenantId: string) {
     return this.prisma.tenantSector.findMany({
       where: { tenantId },
-      orderBy: [{ name: 'asc' }]
+      orderBy: [{ name: 'asc' }],
     });
   }
 
   async createTenantSector(actorUserId: string, input: CreateTenantSectorInput) {
     const tenant = await this.prisma.tenant.findFirst({
       where: { id: input.tenantId, deletedAt: null },
-      select: { id: true }
+      select: { id: true },
     });
     if (!tenant) {
       throw new NotFoundException('Tenant not found.');
@@ -569,10 +653,13 @@ export class IamService {
       const created = await this.prisma.tenantSector.create({
         data: {
           tenantId: input.tenantId,
-          name
-        }
+          name,
+        },
       });
-      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'tenant_sector', created.id, { op: 'create', name });
+      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'tenant_sector', created.id, {
+        op: 'create',
+        name,
+      });
       return created;
     } catch {
       throw new ConflictException('Setor já existe para este tenant.');
@@ -582,7 +669,7 @@ export class IamService {
   async updateTenantSector(actorUserId: string, input: UpdateTenantSectorInput) {
     const existing = await this.prisma.tenantSector.findFirst({
       where: { id: input.sectorId, tenantId: input.tenantId },
-      select: { id: true }
+      select: { id: true },
     });
     if (!existing) {
       throw new NotFoundException('Setor não encontrado para este tenant.');
@@ -592,9 +679,12 @@ export class IamService {
     try {
       const updated = await this.prisma.tenantSector.update({
         where: { id: input.sectorId },
-        data: { name }
+        data: { name },
       });
-      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'tenant_sector', updated.id, { op: 'update', name });
+      await this.audit.log(input.tenantId, actorUserId, 'OS_UPDATE', 'tenant_sector', updated.id, {
+        op: 'update',
+        name,
+      });
       return updated;
     } catch {
       throw new ConflictException('Já existe setor com este nome para este tenant.');
@@ -604,15 +694,17 @@ export class IamService {
   async deleteTenantSector(actorUserId: string, tenantId: string, sectorId: string) {
     const existing = await this.prisma.tenantSector.findFirst({
       where: { id: sectorId, tenantId },
-      select: { id: true }
+      select: { id: true },
     });
     if (!existing) {
       throw new NotFoundException('Setor não encontrado para este tenant.');
     }
     await this.prisma.tenantSector.delete({
-      where: { id: sectorId }
+      where: { id: sectorId },
     });
-    await this.audit.log(tenantId, actorUserId, 'OS_UPDATE', 'tenant_sector', sectorId, { op: 'delete' });
+    await this.audit.log(tenantId, actorUserId, 'OS_UPDATE', 'tenant_sector', sectorId, {
+      op: 'delete',
+    });
     return { removed: true, tenantId, sectorId };
   }
 }

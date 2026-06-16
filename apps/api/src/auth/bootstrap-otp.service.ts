@@ -1,14 +1,16 @@
 /**
  * Bootstrap OTP Service
- * 
+ *
  * Gera e valida OTPs de 6 dígitos para primeiro acesso de clientes via CNPJ
  * Substitui o frágil sistema de 4 últimos dígitos
  */
 
-import { Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
+import { Inject, Injectable, BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { EmailService } from '../common/email.service';
-import { createHash, randomInt } from 'crypto';
+import { createHash, randomInt, timingSafeEqual } from 'crypto';
+import { hash } from 'bcryptjs';
+import { BootstrapTokenService } from './bootstrap-token.service';
 
 @Injectable()
 export class BootstrapOtpService {
@@ -17,13 +19,10 @@ export class BootstrapOtpService {
   private readonly MAX_ATTEMPTS = 3;
 
   constructor(
-    private readonly prisma: PrismaService,
-    private readonly emailService: EmailService
+    @Inject(PrismaService) private readonly prisma: PrismaService,
+    @Inject(EmailService) private readonly emailService: EmailService,
+    @Inject(BootstrapTokenService) private readonly bootstrapTokenService: BootstrapTokenService,
   ) {}
-
-  private get bootstrapOtp() {
-    return (this.prisma as any).bootstrapOtp;
-  }
 
   /**
    * Gera e envia OTP para email do usuário na primeira autenticação por CNPJ
@@ -34,29 +33,29 @@ export class BootstrapOtpService {
     const expiresAt = new Date(Date.now() + this.OTP_VALIDITY_MINUTES * 60 * 1000);
 
     // Remove OTPs antigos expirados
-    await this.bootstrapOtp.deleteMany({
+    await this.prisma.bootstrapOtp.deleteMany({
       where: {
         userId,
-        expiresAt: { lt: new Date() }
-      }
+        expiresAt: { lt: new Date() },
+      },
     });
 
     // Remove OTP anterior se existir (evita múltiplos OTPs ativos)
-    await this.bootstrapOtp.deleteMany({
+    await this.prisma.bootstrapOtp.deleteMany({
       where: {
         userId,
-        validatedAt: null
-      }
+        validatedAt: null,
+      },
     });
 
     // Cria novo OTP
-    await this.bootstrapOtp.create({
+    await this.prisma.bootstrapOtp.create({
       data: {
         userId,
         otp: this.hashOtp(otp),
         expiresAt,
-        attempts: 0
-      }
+        attempts: 0,
+      },
     });
 
     // Envia OTP por email
@@ -64,7 +63,7 @@ export class BootstrapOtpService {
       email,
       otp,
       tenantName,
-      expiresAtMinutes: this.OTP_VALIDITY_MINUTES
+      expiresAtMinutes: this.OTP_VALIDITY_MINUTES,
     });
   }
 
@@ -73,13 +72,13 @@ export class BootstrapOtpService {
    * Implementa rate limiting e expiração
    */
   async validateOtp(userId: string, providedOtp: string): Promise<boolean> {
-    const otpRecord = await this.bootstrapOtp.findFirst({
+    const otpRecord = await this.prisma.bootstrapOtp.findFirst({
       where: {
         userId,
         validatedAt: null, // Não foi validado ainda
-        expiresAt: { gt: new Date() } // Ainda é válido
+        expiresAt: { gt: new Date() }, // Ainda é válido
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
 
     if (!otpRecord) {
@@ -89,14 +88,14 @@ export class BootstrapOtpService {
     // Verifica se já excedeu tentativas máximas
     if (otpRecord.attempts >= this.MAX_ATTEMPTS) {
       throw new UnauthorizedException(
-        `Muitas tentativas falhas. Espere ${this.OTP_VALIDITY_MINUTES} minutos e solicite novo OTP.`
+        `Muitas tentativas falhas. Espere ${this.OTP_VALIDITY_MINUTES} minutos e solicite novo OTP.`,
       );
     }
 
     // Incrementa contador de tentativas
-    await this.bootstrapOtp.update({
+    await this.prisma.bootstrapOtp.update({
       where: { id: otpRecord.id },
-      data: { attempts: otpRecord.attempts + 1 }
+      data: { attempts: otpRecord.attempts + 1 },
     });
 
     // Valida OTP (usando comparação segura contra timing attacks)
@@ -104,14 +103,33 @@ export class BootstrapOtpService {
 
     if (isValid) {
       // Marca como validado
-      await this.bootstrapOtp.update({
+      await this.prisma.bootstrapOtp.update({
         where: { id: otpRecord.id },
-        data: { validatedAt: new Date() }
+        data: { validatedAt: new Date() },
       });
       return true;
     }
 
     return false;
+  }
+
+  async completeFirstAccess(userId: string, otp: string, newPassword: string): Promise<string> {
+    const isValid = await this.validateOtp(userId, otp);
+    if (!isValid) {
+      throw new BadRequestException('Código inválido ou expirado.');
+    }
+
+    const bootstrap = this.bootstrapTokenService.generateTokenWithExpiry(1);
+    await this.prisma.user.update({
+      where: { id: userId },
+      data: {
+        passwordHash: await hash(newPassword, 12),
+        bootstrapTokenHash: bootstrap.hash,
+        bootstrapTokenExpiresAt: bootstrap.expiresAt,
+      },
+    });
+
+    return bootstrap.token;
   }
 
   /**
@@ -133,25 +151,19 @@ export class BootstrapOtpService {
    * Implementa timing-safe comparison
    */
   private secureCompare(a: string, b: string): boolean {
-    if (a.length !== b.length) {
-      return false;
-    }
-
-    let result = 0;
-    for (let i = 0; i < a.length; i++) {
-      result |= a.charCodeAt(i) ^ b.charCodeAt(i);
-    }
-    return result === 0;
+    const left = Buffer.from(a, 'utf8');
+    const right = Buffer.from(b, 'utf8');
+    return left.length === right.length && timingSafeEqual(left, right);
   }
 
   /**
    * Limpa OTPs expirados do banco (pode ser chamado periodicamente)
    */
   async cleanupExpiredOtps(): Promise<number> {
-    const result = await this.bootstrapOtp.deleteMany({
+    const result = await this.prisma.bootstrapOtp.deleteMany({
       where: {
-        expiresAt: { lt: new Date() }
-      }
+        expiresAt: { lt: new Date() },
+      },
     });
     return result.count;
   }

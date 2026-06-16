@@ -21,7 +21,7 @@ export class AuditService {
     resourceType: string,
     resourceId: string | null,
     metadata: Record<string, unknown>,
-    extra?: { ip?: string; userAgent?: string }
+    extra?: { ip?: string; userAgent?: string },
   ): Promise<void> {
     await this.prisma.auditLog.create({
       data: {

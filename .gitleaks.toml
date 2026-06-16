@@ -1,0 +1,38 @@
+# gitleaks configuration
+# https://github.com/gitleaks/gitleaks/blob/master/config/gitleaks.toml
+
+title = "Ajust ERP gitleaks config"
+
+[extend]
+useDefault = true
+
+# Allow CI test secrets, dev-only test values, and docs that mention sample env values
+[allowlist]
+description = "CI placeholders, dev-only test values, and documentation"
+regexes = [
+  '''ci_access_secret_minimum_thirty_two_characters_x''',
+  '''ci_refresh_secret_minimum_thirty_two_characters_x''',
+  '''ci_encryption_secret_minimum_thirty_two_characters_x''',
+  '''dev-temporary-password-change-in-prod''',
+  '''postgres:postgres@localhost''',
+  '''postgresql://postgres:postgres@localhost''',
+]
+paths = [
+  '''(^|/)\.git/''',
+  '''(^|/)node_modules/''',
+  '''(^|/)\.next[^/]*/''',
+  '''(^|/)dist/''',
+  '''(^|/)coverage/''',
+  '''(^|/)test-results/''',
+  '''(^|/)\.env$''',
+  '''(^|/)pnpm-lock\.yaml$''',
+  '''\.md$''',
+  '''(^|/)docs/''',
+  '''(^|/)README\.md$''',
+  '''(^|/)CHANGELOG\.md$''',
+  '''\.env\.example$''',
+  '''\.env\.staging\.example$''',
+  '''\.github/workflows/ci\.yml$''',
+  '''jest\.setup\.js$''',
+  '''\.gitleaks\.toml$''',
+]

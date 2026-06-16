@@ -12,11 +12,15 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const res = await fetch(`${apiBaseUrl()}/workflows/${id}`, {
     method: 'PATCH',
     headers: { authorization: `Bearer ${session.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body), cache: 'no-store'
+    body: JSON.stringify(body),
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
-  return applyRefreshIfNeeded(NextResponse.json(text ? JSON.parse(text) : {}), session.refreshPayload);
+  return applyRefreshIfNeeded(
+    NextResponse.json(text ? JSON.parse(text) : {}),
+    session.refreshPayload,
+  );
 }
 
 export async function DELETE(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -25,11 +29,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const { id } = await params;
   const res = await fetch(`${apiBaseUrl()}/workflows/${id}`, {
     method: 'DELETE',
-    headers: { authorization: `Bearer ${session.accessToken}` }, cache: 'no-store'
+    headers: { authorization: `Bearer ${session.accessToken}` },
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
-  return applyRefreshIfNeeded(NextResponse.json(text ? JSON.parse(text) : {}), session.refreshPayload);
+  return applyRefreshIfNeeded(
+    NextResponse.json(text ? JSON.parse(text) : {}),
+    session.refreshPayload,
+  );
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
@@ -40,9 +48,13 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ id:
   const res = await fetch(`${apiBaseUrl()}/workflows/${id}/rollback`, {
     method: 'POST',
     headers: { authorization: `Bearer ${session.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body), cache: 'no-store'
+    body: JSON.stringify(body),
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
-  return applyRefreshIfNeeded(NextResponse.json(text ? JSON.parse(text) : {}), session.refreshPayload);
+  return applyRefreshIfNeeded(
+    NextResponse.json(text ? JSON.parse(text) : {}),
+    session.refreshPayload,
+  );
 }

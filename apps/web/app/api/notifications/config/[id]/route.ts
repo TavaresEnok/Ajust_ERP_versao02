@@ -7,7 +7,12 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   if (session instanceof NextResponse) return session;
   const { id } = await params;
   const body = await req.json();
-  const res = await fetch(`${apiBaseUrl()}/notifications/config/${id}`, { method: 'PATCH', headers: { authorization: `Bearer ${session.accessToken}`, 'content-type': 'application/json' }, body: JSON.stringify(body), cache: 'no-store' });
+  const res = await fetch(`${apiBaseUrl()}/notifications/config/${id}`, {
+    method: 'PATCH',
+    headers: { authorization: `Bearer ${session.accessToken}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+    cache: 'no-store',
+  });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
   return applyRefreshIfNeeded(NextResponse.json(JSON.parse(text)), session.refreshPayload);
@@ -16,8 +21,15 @@ export async function DELETE(req: NextRequest, { params }: { params: Promise<{ i
   const session = await resolveAuthSession(req);
   if (session instanceof NextResponse) return session;
   const { id } = await params;
-  const res = await fetch(`${apiBaseUrl()}/notifications/config/${id}`, { method: 'DELETE', headers: { authorization: `Bearer ${session.accessToken}` }, cache: 'no-store' });
+  const res = await fetch(`${apiBaseUrl()}/notifications/config/${id}`, {
+    method: 'DELETE',
+    headers: { authorization: `Bearer ${session.accessToken}` },
+    cache: 'no-store',
+  });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
-  return applyRefreshIfNeeded(NextResponse.json(text ? JSON.parse(text) : {}), session.refreshPayload);
+  return applyRefreshIfNeeded(
+    NextResponse.json(text ? JSON.parse(text) : {}),
+    session.refreshPayload,
+  );
 }

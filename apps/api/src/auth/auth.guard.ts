@@ -1,4 +1,10 @@
-import { CanActivate, ExecutionContext, Inject, Injectable, UnauthorizedException } from '@nestjs/common';
+import {
+  CanActivate,
+  ExecutionContext,
+  Inject,
+  Injectable,
+  UnauthorizedException,
+} from '@nestjs/common';
 import { verify } from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestWithAuth } from '../common/request-with-auth';
@@ -24,7 +30,8 @@ export class AuthGuard implements CanActivate {
     }
 
     const token = authHeader.slice('Bearer '.length);
-    const secret = process.env.JWT_ACCESS_SECRET || 'dev-access-secret';
+    const secret = process.env.JWT_ACCESS_SECRET;
+    if (!secret) throw new UnauthorizedException('JWT_ACCESS_SECRET não configurada');
 
     let payload: AccessPayload;
     try {
@@ -75,11 +82,17 @@ export class AuthGuard implements CanActivate {
             tenantId: session.tenantId,
           },
         },
-        select: { role: { select: { code: true } } },
+        select: {
+          role: { select: { code: true } },
+          tenant: { select: { status: true, deletedAt: true } },
+        },
       });
 
       if (!membership) {
         throw new UnauthorizedException('User has no membership for this tenant.');
+      }
+      if (membership.tenant.status !== 'ACTIVE' || membership.tenant.deletedAt) {
+        throw new UnauthorizedException('Tenant is inactive or suspended.');
       }
 
       role = membership.role.code;

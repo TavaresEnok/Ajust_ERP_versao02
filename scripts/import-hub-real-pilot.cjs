@@ -12,7 +12,8 @@ const TARGET_TENANT_SLUG = process.env.TENANT_SLUG || 'ajust-demo';
 const WINDOW_DAYS = Number(process.env.WINDOW_DAYS || 30);
 const WINDOW_MODE = String(process.env.WINDOW_MODE || 'per-provider-latest').toLowerCase();
 const RESET_SCOPE = String(process.env.RESET_SCOPE || 'all').toLowerCase();
-const DRY_RUN = String(process.env.DRY_RUN || '').toLowerCase() === 'true' || process.env.DRY_RUN === '1';
+const DRY_RUN =
+  String(process.env.DRY_RUN || '').toLowerCase() === 'true' || process.env.DRY_RUN === '1';
 
 const PROVIDER_SPECS = [
   { label: 'Meganet', token: 'meganet' },
@@ -166,7 +167,9 @@ function ensureUnique(base, usedSet) {
 }
 
 function normalizeAnalystName(value) {
-  const name = String(value || '').trim().replace(/\s+/g, ' ');
+  const name = String(value || '')
+    .trim()
+    .replace(/\s+/g, ' ');
   if (!name) return null;
   if (normalizeText(name) === 'chamados_em_espera') return null;
   return name;
@@ -196,7 +199,12 @@ function toOrderStatus(order) {
   const status = normalizeText(order.status);
   const sgpStatus = normalizeText(order.sgpStatus);
 
-  if (order.closedAt || status.includes('closed') || sgpStatus.includes('encerrad') || sgpStatus.includes('fechad')) {
+  if (
+    order.closedAt ||
+    status.includes('closed') ||
+    sgpStatus.includes('encerrad') ||
+    sgpStatus.includes('fechad')
+  ) {
     return 'FECHADA';
   }
   if (status.includes('cancel') || sgpStatus.includes('cancel')) return 'CANCELADA';
@@ -214,10 +222,11 @@ function toOccurrenceStatus(orderStatus) {
 }
 
 function toAnalystEmail(name, usedEmails) {
-  const base = normalizeText(name)
-    .replace(/[^a-z0-9]+/g, '.')
-    .replace(/^\.+|\.+$/g, '')
-    .slice(0, 40) || 'analista';
+  const base =
+    normalizeText(name)
+      .replace(/[^a-z0-9]+/g, '.')
+      .replace(/^\.+|\.+$/g, '')
+      .slice(0, 40) || 'analista';
 
   let candidate = `${base}@migracao.ajust.local`;
   let i = 2;
@@ -283,7 +292,9 @@ async function main() {
 
   const providerWindows = new Map();
   if (WINDOW_MODE === 'global-latest') {
-    const globalEnd = new Date(Math.max(...sourceOrders.map((order) => order.effectiveCreatedAt.getTime())));
+    const globalEnd = new Date(
+      Math.max(...sourceOrders.map((order) => order.effectiveCreatedAt.getTime())),
+    );
     const globalStart = new Date(globalEnd.getTime() - WINDOW_DAYS * DAY_MS);
     for (const provider of PROVIDER_SPECS) {
       providerWindows.set(provider.label, { start: globalStart, end: globalEnd });
@@ -298,7 +309,9 @@ async function main() {
     for (const provider of PROVIDER_SPECS) {
       const providerOrders = sourceOrders.filter((order) => order.provider === provider.label);
       if (!providerOrders.length) continue;
-      const end = new Date(Math.max(...providerOrders.map((order) => order.effectiveCreatedAt.getTime())));
+      const end = new Date(
+        Math.max(...providerOrders.map((order) => order.effectiveCreatedAt.getTime())),
+      );
       const start = new Date(end.getTime() - WINDOW_DAYS * DAY_MS);
       providerWindows.set(provider.label, { start, end });
     }
@@ -357,7 +370,7 @@ async function main() {
   }
 
   const existingEmails = new Set(
-    (await prisma.user.findMany({ select: { email: true } })).map((row) => row.email.toLowerCase())
+    (await prisma.user.findMany({ select: { email: true } })).map((row) => row.email.toLowerCase()),
   );
   const userIdByAnalystKey = new Map();
 
@@ -431,16 +444,20 @@ async function main() {
   }
 
   const existingOrderProtocols = new Set(
-    (await prisma.serviceOrder.findMany({
-      where: { tenantId: targetTenant.id },
-      select: { protocol: true },
-    })).map((row) => row.protocol)
+    (
+      await prisma.serviceOrder.findMany({
+        where: { tenantId: targetTenant.id },
+        select: { protocol: true },
+      })
+    ).map((row) => row.protocol),
   );
   const existingOccurrenceNumbers = new Set(
-    (await prisma.occurrence.findMany({
-      where: { tenantId: targetTenant.id },
-      select: { number: true },
-    })).map((row) => row.number)
+    (
+      await prisma.occurrence.findMany({
+        where: { tenantId: targetTenant.id },
+        select: { number: true },
+      })
+    ).map((row) => row.number),
   );
 
   const perProviderCounts = new Map(PROVIDER_SPECS.map((provider) => [provider.label, 0]));
@@ -463,10 +480,16 @@ async function main() {
     const analystUserId = userIdByAnalystKey.get(analystKey) || null;
 
     const occurrenceNumber = ensureUnique(`HUB-${order.protocol}`, existingOccurrenceNumbers);
-    const serviceOrderProtocol = ensureUnique(String(order.protocol || occurrenceNumber), existingOrderProtocols);
+    const serviceOrderProtocol = ensureUnique(
+      String(order.protocol || occurrenceNumber),
+      existingOrderProtocols,
+    );
 
     const orderDescription = String(order.description || '').trim() || 'Sem descricao no Hub.';
-    const orderTitle = `${order.provider} - ${String(order.serviceType || 'Chamado')}`.slice(0, 190);
+    const orderTitle = `${order.provider} - ${String(order.serviceType || 'Chamado')}`.slice(
+      0,
+      190,
+    );
     const occurrenceDescription =
       orderDescription.length > 400 ? `${orderDescription.slice(0, 397)}...` : orderDescription;
 
@@ -542,7 +565,9 @@ async function main() {
     const noteList = notesByOrderId.get(order.id) || [];
     for (const note of noteList) {
       const actorName = normalizeAnalystName(note.userName);
-      const actorUserId = actorName ? userIdByAnalystKey.get(normalizeText(actorName)) || null : null;
+      const actorUserId = actorName
+        ? userIdByAnalystKey.get(normalizeText(actorName)) || null
+        : null;
       const noteCreatedAt = note.createdAt || createdAt;
       const message = String(note.content || '').trim() || 'Atualizacao sem conteudo no Hub.';
 
@@ -615,8 +640,8 @@ async function main() {
         providerWindows: providersWindowSummary,
       },
       null,
-      2
-    )
+      2,
+    ),
   );
 }
 

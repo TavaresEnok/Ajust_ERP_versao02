@@ -8,11 +8,15 @@ export async function GET(req: NextRequest) {
   const session = await resolveAuthSession(req);
   if (session instanceof NextResponse) return session;
   const res = await fetch(`${apiBaseUrl()}/workflows`, {
-    headers: { authorization: `Bearer ${session.accessToken}` }, cache: 'no-store'
+    headers: { authorization: `Bearer ${session.accessToken}` },
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
-  return applyRefreshIfNeeded(NextResponse.json(text ? JSON.parse(text) : []), session.refreshPayload);
+  return applyRefreshIfNeeded(
+    NextResponse.json(text ? JSON.parse(text) : []),
+    session.refreshPayload,
+  );
 }
 
 export async function POST(req: NextRequest) {
@@ -22,9 +26,13 @@ export async function POST(req: NextRequest) {
   const res = await fetch(`${apiBaseUrl()}/workflows`, {
     method: 'POST',
     headers: { authorization: `Bearer ${session.accessToken}`, 'content-type': 'application/json' },
-    body: JSON.stringify(body), cache: 'no-store'
+    body: JSON.stringify(body),
+    cache: 'no-store',
   });
   const text = await res.text();
   if (!res.ok) return NextResponse.json({ error: text }, { status: res.status });
-  return applyRefreshIfNeeded(NextResponse.json(text ? JSON.parse(text) : {}), session.refreshPayload);
+  return applyRefreshIfNeeded(
+    NextResponse.json(text ? JSON.parse(text) : {}),
+    session.refreshPayload,
+  );
 }

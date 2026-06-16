@@ -1,11 +1,29 @@
+/**
+ * ServiceOrdersService
+ *
+ * Orquestra o ciclo de vida completo de uma ordem de serviço.
+ *
+ ## Seções (em ordem):
+ *   1. Lifecycle    — create, update, addAnnotation, getById, list
+ *   2. Transições   — transition, approve, assertTransitionAllowed
+ *   3. Exports      — exportCsv, listExportHistory, downloadExportCsv
+ *   4. Ocorrências  — listOccurrences, createOccurrenceWithFirstOrder, addOccurrenceAnnotation
+ *   5. Helpers      — buildProtocol, sanitizeOrderForRole, csvCell, etc.
+ *
+ * Helpers compartilhados vivem em `./service-orders.helpers.ts` desde a extração
+ * da Fase 8 (Sprint 2 do plano de melhorias).
+ */
 import {
   BadRequestException,
   ForbiddenException,
+  forwardRef,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
-  Optional
+  Optional,
 } from '@nestjs/common';
+import { csvCell, compactRecord, reduceCountRows } from './service-orders.helpers';
 import {
   ApprovalStatus,
   AuditAction,
@@ -13,15 +31,18 @@ import {
   Prisma,
   Priority,
   ServiceOrderStatus,
-  ServiceOrderType
+  ServiceOrderType,
 } from '@prisma/client';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { validatePathWithinBase } from '../common/path-security';
 import { EventsGateway } from '../events.gateway';
 import { PrismaService } from '../prisma/prisma.service';
 import { CsatService } from '../csat/csat.service';
+import { WorkflowsService } from '../workflows/workflows.service';
+import { SlaEngineService } from '../sla/sla-engine.service';
+import { OsProcessTemplateService } from '../os-process-templates/os-process-templates.service';
 
 type CreateOrderInput = {
   tenantId: string;
@@ -135,7 +156,6 @@ type ListInput = {
   orderDir?: 'asc' | 'desc';
 };
 
-type CountMap<T extends string> = Record<T, number>;
 type CsvExportResult = {
   fileName: string;
   content: string;
@@ -178,7 +198,7 @@ const ALLOWED_EXTENSIONS = new Set([
   '.wav',
   '.ogg',
   '.aac',
-  '.m4a'
+  '.m4a',
 ]);
 const ALLOWED_MIME = new Set([
   'application/pdf',
@@ -199,36 +219,30 @@ const ALLOWED_MIME = new Set([
   'audio/x-wav',
   'audio/ogg',
   'audio/aac',
-  'audio/mp4'
+  'audio/mp4',
 ]);
 const MAX_CREATE_RETRIES = 5;
 
 type Role = string;
 
-function computeSlaHours(type: ServiceOrderType, priority: Priority) {
-  const base: Record<Priority, number> = {
-    BAIXA: 72,
-    NORMAL: 24,
-    ALTA: 8,
-    CRITICA: 4
-  };
-
-  if (type === 'ROMPIMENTO' || type === 'BGP') {
-    return Math.max(2, base[priority] / 2);
-  }
-
-  return base[priority];
-}
-
 @Injectable()
 export class ServiceOrdersService {
+  private readonly logger = new Logger(ServiceOrdersService.name);
+
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventsGateway) private readonly eventsGateway: EventsGateway,
-    @Optional() private readonly csatService?: CsatService,
+    @Inject(SlaEngineService) private readonly slaEngine: SlaEngineService,
+    @Optional() @Inject(CsatService) private readonly csatService?: CsatService,
+    @Optional()
+    @Inject(forwardRef(() => WorkflowsService))
+    private readonly workflowsService?: WorkflowsService,
+    @Optional()
+    @Inject(OsProcessTemplateService)
+    private readonly osProcessTemplateService?: OsProcessTemplateService,
   ) {}
 
-  async create(authUserId: string, role: string, input: CreateOrderInput) {
+  async create(authUserId: string | null, role: string, input: CreateOrderInput) {
     if (!ROLE_SET.includes(role as (typeof ROLE_SET)[number])) {
       throw new ForbiddenException('Role is not allowed to create service orders.');
     }
@@ -236,16 +250,44 @@ export class ServiceOrdersService {
     if (input.occurrenceId) {
       const occurrence = await this.prisma.occurrence.findFirst({
         where: { id: input.occurrenceId, tenantId: input.tenantId, deletedAt: null },
-        select: { id: true }
+        select: { id: true },
       });
       if (!occurrence) {
         throw new BadRequestException('Occurrence not found for this tenant.');
       }
     }
 
+    const assignedUserIds = [
+      ...new Set([input.ownerUserId, input.assigneeUserId].filter(Boolean)),
+    ] as string[];
+    if (assignedUserIds.length > 0) {
+      const memberships = await this.prisma.userTenant.findMany({
+        where: { tenantId: input.tenantId, userId: { in: assignedUserIds } },
+        select: { userId: true },
+      });
+      const tenantUsers = new Set(memberships.map((membership) => membership.userId));
+      if (assignedUserIds.some((userId) => !tenantUsers.has(userId))) {
+        throw new BadRequestException(
+          'Owner and assignee must belong to the service order tenant.',
+        );
+      }
+    }
+
     const now = new Date();
-    const slaHours = computeSlaHours(input.type, input.priority);
-    const deadlineAt = input.deadlineAt ? new Date(input.deadlineAt) : new Date(now.getTime() + slaHours * 3600000);
+
+    // Utilize SLA Engine to dynamically compute deadlines rather than raw timestamp addition
+    const slaPolicy = await this.slaEngine.findApplicablePolicy(
+      input.tenantId,
+      input.priority,
+      input.type,
+    );
+    const calculatedDeadline = await this.slaEngine.calculateTargetDate(
+      now,
+      slaPolicy.hours,
+      input.tenantId,
+    );
+
+    const deadlineAt = input.deadlineAt ? new Date(input.deadlineAt) : calculatedDeadline;
 
     const created = await this.withCreateRetry(async () => {
       const protocol = await this.buildProtocol(input.tenantId);
@@ -272,29 +314,29 @@ export class ServiceOrdersService {
           internalNotes: input.internalNotes,
           occurrences: {
             create: {
-              actorUserId: authUserId,
+              ...(authUserId ? { actorUserId: authUserId } : {}),
               sourceSystem: 'ERP',
-              message: 'OS criada manualmente no ERP.'
-            }
-          }
+              message: 'OS criada manualmente no ERP.',
+            },
+          },
         },
         include: {
           occurrences: {
             orderBy: { createdAt: 'desc' },
             include: {
               actorUser: {
-                select: { id: true, name: true, email: true }
-              }
-            }
-          }
-        }
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+        },
       });
     });
 
     await this.logAudit(input.tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
       protocol: created.protocol,
       type: input.type,
-      priority: input.priority
+      priority: input.priority,
     });
 
     this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order.created', {
@@ -303,16 +345,43 @@ export class ServiceOrdersService {
       protocol: created.protocol,
       priority: created.priority,
       status: created.status,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
+
+    this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order_created', {
+      orderId: created.id,
+      protocol: created.protocol,
+    });
+
+    this.workflowsService
+      ?.executeForEvent(input.tenantId, {
+        type: 'order_created',
+        order: {
+          id: created.id,
+          protocol: created.protocol,
+          title: created.title,
+          type: created.type,
+          priority: created.priority,
+          status: created.status,
+          requester: created.requester,
+          sector: created.sector,
+          analystName: created.analystName,
+          deadlineAt: created.deadlineAt?.toISOString(),
+        },
+      })
+      .catch((error) => {
+        this.logger.warn(
+          `Workflow execution failed after order creation: ${(error as Error).message}`,
+        );
+      });
 
     return created;
   }
 
-  async list(tenantId: string, input: ListInput = {}) {
-    const where = this.buildWhere(tenantId, input);
+  async list(tenantId: string, input: ListInput = {}, role?: string | null) {
+    const where = this.buildWhere(tenantId, input, role);
 
-    return this.prisma.serviceOrder.findMany({
+    const rows = await this.prisma.serviceOrder.findMany({
       where,
       orderBy: this.buildOrderBy(input),
       ...(input.limit ? { take: input.limit } : {}),
@@ -330,20 +399,28 @@ export class ServiceOrdersService {
             openedByName: true,
             analystResponsible: true,
             description: true,
-            createdAt: true
-          }
+            createdAt: true,
+          },
         },
         owner: { select: { id: true, name: true, email: true } },
-        assignee: { select: { id: true, name: true, email: true } }
-      }
+        assignee: { select: { id: true, name: true, email: true } },
+      },
     });
+
+    return rows.map((row) => this.sanitizeOrderForRole(row, role));
   }
 
-  async summary(tenantId: string, input: ListInput = {}) {
-    const where = this.buildWhere(tenantId, input);
+  async summary(tenantId: string, input: ListInput = {}, role?: string | null) {
+    const where = this.buildWhere(tenantId, input, role);
     const now = new Date();
     const twoHours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
-    const activeStatuses: ServiceOrderStatus[] = ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS', 'RESOLVIDA'];
+    const activeStatuses: ServiceOrderStatus[] = [
+      'ABERTA',
+      'EM_ANALISE',
+      'AG_CAMPO',
+      'AG_TERCEIROS',
+      'RESOLVIDA',
+    ];
 
     const [
       total,
@@ -355,48 +432,48 @@ export class ServiceOrdersService {
       byStatusRows,
       byPriorityRows,
       byTypeRows,
-      topAssigneesRows
+      topAssigneesRows,
     ] = await Promise.all([
       this.prisma.serviceOrder.count({ where }),
       this.prisma.serviceOrder.count({
-        where: this.andWhere(where, { status: { in: activeStatuses } })
+        where: this.andWhere(where, { status: { in: activeStatuses } }),
       }),
       this.prisma.serviceOrder.count({
-        where: this.andWhere(where, { status: { in: ['FECHADA', 'CANCELADA'] } })
-      }),
-      this.prisma.serviceOrder.count({
-        where: this.andWhere(where, {
-          status: { in: activeStatuses },
-          deadlineAt: { lt: now }
-        })
+        where: this.andWhere(where, { status: { in: ['FECHADA', 'CANCELADA'] } }),
       }),
       this.prisma.serviceOrder.count({
         where: this.andWhere(where, {
           status: { in: activeStatuses },
-          deadlineAt: { gte: now, lte: twoHours }
-        })
+          deadlineAt: { lt: now },
+        }),
+      }),
+      this.prisma.serviceOrder.count({
+        where: this.andWhere(where, {
+          status: { in: activeStatuses },
+          deadlineAt: { gte: now, lte: twoHours },
+        }),
       }),
       this.prisma.serviceOrder.count({
         where: this.andWhere(where, {
           status: { in: activeStatuses },
           priority: 'CRITICA',
-          deadlineAt: { lt: now }
-        })
+          deadlineAt: { lt: now },
+        }),
       }),
       this.prisma.serviceOrder.groupBy({
         by: ['status'],
         where,
-        _count: { _all: true }
+        _count: { _all: true },
       }),
       this.prisma.serviceOrder.groupBy({
         by: ['priority'],
         where,
-        _count: { _all: true }
+        _count: { _all: true },
       }),
       this.prisma.serviceOrder.groupBy({
         by: ['type'],
         where,
-        _count: { _all: true }
+        _count: { _all: true },
       }),
       this.prisma.serviceOrder.groupBy({
         by: ['assigneeUserId'],
@@ -404,49 +481,60 @@ export class ServiceOrdersService {
         _count: { _all: true },
         orderBy: {
           _count: {
-            assigneeUserId: 'desc'
-          }
+            assigneeUserId: 'desc',
+          },
         },
-        take: 5
-      })
+        take: 5,
+      }),
     ]);
 
     const byStatus = this.reduceCountRows<ServiceOrderStatus>(
       byStatusRows.map((row) => ({
         key: row.status,
-        count: (row._count as { _all?: number } | undefined)?._all ?? 0
+        count: (row._count as { _all?: number } | undefined)?._all ?? 0,
       })),
-      ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS', 'RESOLVIDA', 'FECHADA', 'CANCELADA']
+      ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS', 'RESOLVIDA', 'FECHADA', 'CANCELADA'],
     );
 
     const byPriority = this.reduceCountRows<Priority>(
       byPriorityRows.map((row) => ({
         key: row.priority,
-        count: (row._count as { _all?: number } | undefined)?._all ?? 0
+        count: (row._count as { _all?: number } | undefined)?._all ?? 0,
       })),
-      ['BAIXA', 'NORMAL', 'ALTA', 'CRITICA']
+      ['BAIXA', 'NORMAL', 'ALTA', 'CRITICA'],
     );
 
     const byType = this.reduceCountRows<ServiceOrderType>(
       byTypeRows.map((row) => ({
         key: row.type,
-        count: (row._count as { _all?: number } | undefined)?._all ?? 0
+        count: (row._count as { _all?: number } | undefined)?._all ?? 0,
       })),
-      ['ROMPIMENTO', 'LENTIDAO', 'CONFIGURACAO_ONU', 'TROCA_SENHA', 'CANCELAMENTO', 'AUDITORIA', 'INSTALACAO', 'BGP']
+      [
+        'ROMPIMENTO',
+        'LENTIDAO',
+        'CONFIGURACAO_ONU',
+        'TROCA_SENHA',
+        'CANCELAMENTO',
+        'AUDITORIA',
+        'INSTALACAO',
+        'BGP',
+      ],
     );
 
-    const assigneeIds = topAssigneesRows.map((row) => row.assigneeUserId).filter(Boolean) as string[];
+    const assigneeIds = topAssigneesRows
+      .map((row) => row.assigneeUserId)
+      .filter(Boolean) as string[];
     const assignees = assigneeIds.length
       ? await this.prisma.user.findMany({
           where: { id: { in: assigneeIds } },
-          select: { id: true, name: true }
+          select: { id: true, name: true },
         })
       : [];
     const assigneeNameMap = new Map(assignees.map((item) => [item.id, item.name]));
     const topAssignees = topAssigneesRows.map((row) => ({
       userId: row.assigneeUserId as string,
       name: assigneeNameMap.get(row.assigneeUserId as string) || 'Nao atribuido',
-      count: (row._count as { _all?: number } | undefined)?._all ?? 0
+      count: (row._count as { _all?: number } | undefined)?._all ?? 0,
     }));
 
     return {
@@ -459,20 +547,29 @@ export class ServiceOrdersService {
       byStatus,
       byPriority,
       byType,
-      topAssignees
+      topAssignees,
     };
   }
 
-  async exportCsv(tenantId: string, authUserId: string, input: ListInput = {}): Promise<CsvExportResult> {
-    const where = this.buildWhere(tenantId, input);
+  async exportCsv(
+    tenantId: string,
+    authUserId: string,
+    role: string,
+    input: ListInput = {},
+  ): Promise<CsvExportResult> {
+    if (!['super_admin', 'gerente', 'analista', 'leitura'].includes(role)) {
+      throw new ForbiddenException('Role is not allowed to export service orders.');
+    }
+
+    const where = this.buildWhere(tenantId, input, role);
     const rows = await this.prisma.serviceOrder.findMany({
       where,
       orderBy: this.buildOrderBy(input),
       take: EXPORT_MAX_ROWS + 1,
       include: {
         owner: { select: { name: true } },
-        assignee: { select: { name: true } }
-      }
+        assignee: { select: { name: true } },
+      },
     });
 
     const truncated = rows.length > EXPORT_MAX_ROWS;
@@ -491,7 +588,7 @@ export class ServiceOrdersService {
       'resolvedAt',
       'closedAt',
       'ownerName',
-      'assigneeName'
+      'assigneeName',
     ];
 
     const csvLines = [header.join(',')];
@@ -510,7 +607,7 @@ export class ServiceOrdersService {
         row.resolvedAt?.toISOString() || '',
         row.closedAt?.toISOString() || '',
         row.owner?.name || '',
-        row.assignee?.name || ''
+        row.assignee?.name || '',
       ];
 
       csvLines.push(line.map((value) => this.csvCell(value)).join(','));
@@ -523,8 +620,8 @@ export class ServiceOrdersService {
         actorUserId: authUserId,
         reportType: 'service_orders_csv',
         filters: filters as Prisma.InputJsonValue,
-        status: 'PROCESSING'
-      }
+        status: 'PROCESSING',
+      },
     });
 
     const fileName = `service-orders-${new Date().toISOString().slice(0, 10)}-${reportExport.id.slice(0, 8)}.csv`;
@@ -540,15 +637,15 @@ export class ServiceOrdersService {
         where: { id: reportExport.id },
         data: {
           fileUrl: filePath,
-          status: truncated ? 'COMPLETED_TRUNCATED' : 'COMPLETED'
-        }
+          status: truncated ? 'COMPLETED_TRUNCATED' : 'COMPLETED',
+        },
       });
     } catch {
       await this.prisma.reportExport.update({
         where: { id: reportExport.id },
         data: {
-          status: 'FAILED'
-        }
+          status: 'FAILED',
+        },
       });
       throw new BadRequestException('Failed to persist CSV export.');
     }
@@ -558,18 +655,23 @@ export class ServiceOrdersService {
       filters,
       rowCount: exportRows.length,
       truncated,
-      operation: 'create'
+      operation: 'create',
     });
 
     return {
       fileName,
       content: csvLines.join('\n'),
       rowCount: exportRows.length,
-      truncated
+      truncated,
     };
   }
 
-  async listExportHistory(tenantId: string, role: string, limit = 20, offset = 0): Promise<ExportHistoryItem[]> {
+  async listExportHistory(
+    tenantId: string,
+    role: string,
+    limit = 20,
+    offset = 0,
+  ): Promise<ExportHistoryItem[]> {
     if (!['super_admin', 'gerente', 'analista', 'leitura'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to read export history.');
     }
@@ -577,7 +679,7 @@ export class ServiceOrdersService {
     const rows = await this.prisma.reportExport.findMany({
       where: {
         tenantId,
-        reportType: 'service_orders_csv'
+        reportType: 'service_orders_csv',
       },
       orderBy: { createdAt: 'desc' },
       take: limit,
@@ -587,10 +689,10 @@ export class ServiceOrdersService {
           select: {
             id: true,
             name: true,
-            email: true
-          }
-        }
-      }
+            email: true,
+          },
+        },
+      },
     });
 
     return rows.map((row) => ({
@@ -603,9 +705,9 @@ export class ServiceOrdersService {
         ? {
             id: row.actorUser.id,
             name: row.actorUser.name,
-            email: row.actorUser.email
+            email: row.actorUser.email,
           }
-        : null
+        : null,
     }));
   }
 
@@ -613,7 +715,7 @@ export class ServiceOrdersService {
     tenantId: string,
     exportId: string,
     authUserId: string,
-    role: string
+    role: string,
   ): Promise<ExportDownloadResult> {
     if (!['super_admin', 'gerente', 'analista', 'leitura'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to download exports.');
@@ -623,12 +725,12 @@ export class ServiceOrdersService {
       where: {
         id: exportId,
         tenantId,
-        reportType: 'service_orders_csv'
+        reportType: 'service_orders_csv',
       },
       select: {
         id: true,
-        fileUrl: true
-      }
+        fileUrl: true,
+      },
     });
 
     if (!report || !report.fileUrl) {
@@ -645,42 +747,60 @@ export class ServiceOrdersService {
 
     await this.logAudit(tenantId, authUserId, 'EXPORT', 'report_export', report.id, {
       reportType: 'service_orders_csv',
-      operation: 'download'
+      operation: 'download',
     });
 
     return { fileName, content };
   }
 
-  async getById(tenantId: string, id: string, role?: string) {
+  async getById(tenantId: string, id: string, role?: string | null) {
     const order = await this.prisma.serviceOrder.findFirst({
-      where: { id, tenantId, deletedAt: null },
+      where: {
+        id,
+        tenantId,
+        deletedAt: null,
+        ...(this.isCustomerRole(role) ? { isCustomerVisible: true } : {}),
+      },
       include: {
         occurrence: true,
         occurrences: {
+          ...(this.isCustomerRole(role) ? { where: { isCustomerVisible: true } } : {}),
           orderBy: { createdAt: 'desc' },
           include: {
             actorUser: {
-              select: { id: true, name: true, email: true }
-            }
-          }
+              select: { id: true, name: true, email: true },
+            },
+          },
         },
-        attachments: { orderBy: { uploadedAt: 'desc' } },
-        approvals: { orderBy: { createdAt: 'desc' } }
-      }
+        attachments: {
+          ...(this.isCustomerRole(role) ? { where: { isInternal: false } } : {}),
+          orderBy: { uploadedAt: 'desc' },
+        },
+        approvals: this.isCustomerRole(role) ? false : { orderBy: { createdAt: 'desc' } },
+      },
     });
 
     if (!order) {
       throw new NotFoundException('Service order not found.');
     }
 
-    return order;
+    return this.sanitizeOrderForRole(order, role);
   }
 
-  async listOccurrences(tenantId: string, input: ListOccurrencesInput = {}) {
+  async listOccurrences(tenantId: string, input: ListOccurrencesInput = {}, role?: string | null) {
     const where: Prisma.OccurrenceWhereInput = {
       tenantId,
-      deletedAt: null
+      deletedAt: null,
     };
+
+    if (this.isCustomerRole(role)) {
+      where.serviceOrders = {
+        some: {
+          deletedAt: null,
+          isCustomerVisible: true,
+        },
+      };
+    }
 
     if (input.provider) {
       where.provider = { contains: input.provider, mode: 'insensitive' };
@@ -695,7 +815,7 @@ export class ServiceOrdersService {
         { type: { contains: input.search, mode: 'insensitive' } },
         { sector: { contains: input.search, mode: 'insensitive' } },
         { origin: { contains: input.search, mode: 'insensitive' } },
-        { description: { contains: input.search, mode: 'insensitive' } }
+        { description: { contains: input.search, mode: 'insensitive' } },
       ];
     }
 
@@ -706,64 +826,87 @@ export class ServiceOrdersService {
       ...(input.offset ? { skip: input.offset } : {}),
       include: {
         annotations: {
+          ...(this.isCustomerRole(role) ? { where: { isCustomerVisible: true } } : {}),
           orderBy: { createdAt: 'desc' },
           include: {
             actorUser: {
-              select: { id: true, name: true, email: true }
-            }
-          }
+              select: { id: true, name: true, email: true },
+            },
+          },
         },
         ...(input.includeOrders
           ? {
               serviceOrders: {
-                where: { deletedAt: null },
+                where: {
+                  deletedAt: null,
+                  ...(this.isCustomerRole(role) ? { isCustomerVisible: true } : {}),
+                },
                 orderBy: { createdAt: 'desc' },
                 include: {
-                  attachments: { orderBy: { uploadedAt: 'desc' } },
+                  attachments: {
+                    ...(this.isCustomerRole(role) ? { where: { isInternal: false } } : {}),
+                    orderBy: { uploadedAt: 'desc' },
+                  },
                   occurrences: {
+                    ...(this.isCustomerRole(role) ? { where: { isCustomerVisible: true } } : {}),
                     orderBy: { createdAt: 'desc' },
                     include: {
                       actorUser: {
-                        select: { id: true, name: true, email: true }
-                      }
-                    }
-                  }
-                }
-              }
+                        select: { id: true, name: true, email: true },
+                      },
+                    },
+                  },
+                },
+              },
             }
-          : {})
-      }
+          : {}),
+      },
     });
   }
 
-  async getOccurrenceById(tenantId: string, occurrenceId: string) {
+  async getOccurrenceById(tenantId: string, occurrenceId: string, role?: string | null) {
     const occurrence = await this.prisma.occurrence.findFirst({
-      where: { id: occurrenceId, tenantId, deletedAt: null },
+      where: {
+        id: occurrenceId,
+        tenantId,
+        deletedAt: null,
+        ...(this.isCustomerRole(role)
+          ? { serviceOrders: { some: { deletedAt: null, isCustomerVisible: true } } }
+          : {}),
+      },
       include: {
         annotations: {
+          ...(this.isCustomerRole(role) ? { where: { isCustomerVisible: true } } : {}),
           orderBy: { createdAt: 'desc' },
           include: {
             actorUser: {
-              select: { id: true, name: true, email: true }
-            }
-          }
+              select: { id: true, name: true, email: true },
+            },
+          },
         },
         serviceOrders: {
-          where: { deletedAt: null },
+          where: {
+            deletedAt: null,
+            ...(this.isCustomerRole(role) ? { isCustomerVisible: true } : {}),
+          },
           orderBy: { createdAt: 'desc' },
           include: {
-            attachments: { orderBy: { uploadedAt: 'desc' } },
+            attachments: {
+              ...(this.isCustomerRole(role) ? { where: { isInternal: false } } : {}),
+              orderBy: { uploadedAt: 'desc' },
+            },
             occurrences: {
+              ...(this.isCustomerRole(role) ? { where: { isCustomerVisible: true } } : {}),
               orderBy: { createdAt: 'desc' },
               include: {
                 actorUser: {
-                  select: { id: true, name: true, email: true }
-                }
-              }
-            }
-          }
-        }
-      }
+                  select: { id: true, name: true, email: true },
+                },
+              },
+            },
+          },
+        },
+      },
     });
     if (!occurrence) {
       throw new NotFoundException('Occurrence not found.');
@@ -771,7 +914,11 @@ export class ServiceOrdersService {
     return occurrence;
   }
 
-  async createOccurrenceWithFirstOrder(authUserId: string, role: string, input: CreateOccurrenceInput) {
+  async createOccurrenceWithFirstOrder(
+    authUserId: string,
+    role: string,
+    input: CreateOccurrenceInput,
+  ) {
     if (!ROLE_SET.includes(role as (typeof ROLE_SET)[number])) {
       throw new ForbiddenException('Role is not allowed to create occurrence.');
     }
@@ -779,9 +926,14 @@ export class ServiceOrdersService {
     const now = new Date();
     const occurrenceCreatedAt = input.createdAt ? new Date(input.createdAt) : now;
     const firstOrderPriority = input.firstOrder.priority || 'NORMAL';
+    const firstOrderPolicy = await this.slaEngine.findApplicablePolicy(
+      input.tenantId,
+      firstOrderPriority,
+      input.firstOrder.type,
+    );
     const firstOrderDeadline = input.firstOrder.deadlineAt
       ? new Date(input.firstOrder.deadlineAt)
-      : new Date(now.getTime() + computeSlaHours(input.firstOrder.type, firstOrderPriority) * 3600000);
+      : await this.slaEngine.calculateTargetDate(now, firstOrderPolicy.hours, input.tenantId);
     const firstOrderStatus = input.firstOrder.status || 'ABERTA';
 
     const created = await this.withCreateRetry(() =>
@@ -801,8 +953,8 @@ export class ServiceOrdersService {
             openedByName: input.openedByName,
             analystResponsible: input.analystResponsible,
             description: input.description,
-            createdAt: occurrenceCreatedAt
-          }
+            createdAt: occurrenceCreatedAt,
+          },
         });
 
         const order = await tx.serviceOrder.create({
@@ -828,29 +980,36 @@ export class ServiceOrdersService {
               create: {
                 actorUserId: authUserId,
                 sourceSystem: 'ERP',
-                message: `O.S criada na ocorrencia ${occurrence.number}.`
-              }
-            }
-          }
+                message: `O.S criada na ocorrencia ${occurrence.number}.`,
+              },
+            },
+          },
         });
 
         return { occurrence, order };
-      })
+      }),
     );
 
-    await this.logAudit(input.tenantId, authUserId, 'OS_CREATE', 'occurrence', created.occurrence.id, {
-      occurrenceNumber: created.occurrence.number,
-      provider: created.occurrence.provider,
-      firstOrderId: created.order.id,
-      firstOrderProtocol: created.order.protocol
-    });
+    await this.logAudit(
+      input.tenantId,
+      authUserId,
+      'OS_CREATE',
+      'occurrence',
+      created.occurrence.id,
+      {
+        occurrenceNumber: created.occurrence.number,
+        provider: created.occurrence.provider,
+        firstOrderId: created.order.id,
+        firstOrderProtocol: created.order.protocol,
+      },
+    );
 
     this.eventsGateway.emitTenantEvent(input.tenantId, 'occurrence.created', {
       tenantId: input.tenantId,
       occurrenceId: created.occurrence.id,
       occurrenceNumber: created.occurrence.number,
       provider: created.occurrence.provider,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order.created', {
@@ -859,7 +1018,7 @@ export class ServiceOrdersService {
       protocol: created.order.protocol,
       occurrenceId: created.occurrence.id,
       occurrenceNumber: created.occurrence.number,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     return this.getOccurrenceById(input.tenantId, created.occurrence.id);
@@ -870,7 +1029,7 @@ export class ServiceOrdersService {
     occurrenceId: string,
     authUserId: string,
     role: string,
-    patch: UpdateOccurrenceInput
+    patch: UpdateOccurrenceInput,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to update occurrence.');
@@ -878,7 +1037,7 @@ export class ServiceOrdersService {
 
     const occurrence = await this.prisma.occurrence.findFirst({
       where: { id: occurrenceId, tenantId, deletedAt: null },
-      select: { id: true, number: true }
+      select: { id: true, number: true },
     });
     if (!occurrence) {
       throw new NotFoundException('Occurrence not found.');
@@ -894,20 +1053,20 @@ export class ServiceOrdersService {
         ...(patch.analystResponsible !== undefined
           ? { analystResponsible: patch.analystResponsible }
           : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {})
-      }
+        ...(patch.description !== undefined ? { description: patch.description } : {}),
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'occurrence', occurrence.id, {
       occurrenceNumber: occurrence.number,
-      patch
+      patch,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'occurrence.updated', {
       tenantId,
       occurrenceId: updated.id,
       occurrenceNumber: updated.number,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     return this.getOccurrenceById(tenantId, updated.id);
@@ -918,7 +1077,7 @@ export class ServiceOrdersService {
     occurrenceId: string,
     authUserId: string,
     role: string,
-    message: string
+    message: string,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to annotate occurrence.');
@@ -931,7 +1090,7 @@ export class ServiceOrdersService {
 
     const occurrence = await this.prisma.occurrence.findFirst({
       where: { id: occurrenceId, tenantId, deletedAt: null },
-      select: { id: true, number: true }
+      select: { id: true, number: true },
     });
     if (!occurrence) {
       throw new NotFoundException('Occurrence not found.');
@@ -942,13 +1101,13 @@ export class ServiceOrdersService {
         tenantId,
         occurrenceId: occurrence.id,
         actorUserId: authUserId,
-        message: trimmedMessage
-      }
+        message: trimmedMessage,
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'occurrence_annotation', created.id, {
       occurrenceId: occurrence.id,
-      occurrenceNumber: occurrence.number
+      occurrenceNumber: occurrence.number,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'occurrence.annotation_created', {
@@ -956,7 +1115,7 @@ export class ServiceOrdersService {
       occurrenceId: occurrence.id,
       occurrenceNumber: occurrence.number,
       annotationId: created.id,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     return this.getOccurrenceById(tenantId, occurrence.id);
@@ -967,7 +1126,7 @@ export class ServiceOrdersService {
     orderId: string,
     authUserId: string,
     role: string,
-    message: string
+    message: string,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to annotate service order.');
@@ -980,7 +1139,7 @@ export class ServiceOrdersService {
 
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId, deletedAt: null },
-      select: { id: true, protocol: true, occurrenceId: true }
+      select: { id: true, protocol: true, occurrenceId: true },
     });
     if (!order) {
       throw new NotFoundException('Service order not found.');
@@ -996,9 +1155,9 @@ export class ServiceOrdersService {
             create: {
               actorUserId: authUserId,
               sourceSystem: 'ERP',
-              message: noteMessage
-            }
-          }
+              message: noteMessage,
+            },
+          },
         },
         include: {
           occurrence: true,
@@ -1006,12 +1165,12 @@ export class ServiceOrdersService {
             orderBy: { createdAt: 'desc' },
             include: {
               actorUser: {
-                select: { id: true, name: true, email: true }
-              }
-            }
+                select: { id: true, name: true, email: true },
+              },
+            },
           },
-          attachments: { orderBy: { uploadedAt: 'desc' } }
-        }
+          attachments: { orderBy: { uploadedAt: 'desc' } },
+        },
       });
 
       const mirroredOccurrenceAnnotation = order.occurrenceId
@@ -1020,8 +1179,8 @@ export class ServiceOrdersService {
               tenantId,
               occurrenceId: order.occurrenceId,
               actorUserId: authUserId,
-              message: `[O.S ${order.protocol}] ${noteMessage}`
-            }
+              message: `[O.S ${order.protocol}] ${noteMessage}`,
+            },
           })
         : null;
 
@@ -1029,14 +1188,14 @@ export class ServiceOrdersService {
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order_annotation', order.id, {
-      protocol: order.protocol
+      protocol: order.protocol,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.annotation_created', {
       tenantId,
       orderId: result.updatedOrder.id,
       protocol: result.updatedOrder.protocol,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     if (order.occurrenceId && result.mirroredOccurrenceAnnotation) {
@@ -1044,7 +1203,7 @@ export class ServiceOrdersService {
         tenantId,
         occurrenceId: order.occurrenceId,
         annotationId: result.mirroredOccurrenceAnnotation.id,
-        at: new Date().toISOString()
+        at: new Date().toISOString(),
       });
     }
 
@@ -1056,7 +1215,7 @@ export class ServiceOrdersService {
     occurrenceId: string,
     authUserId: string,
     role: string,
-    input: CreateOccurrenceOrderInput
+    input: CreateOccurrenceOrderInput,
   ) {
     if (!ROLE_SET.includes(role as (typeof ROLE_SET)[number])) {
       throw new ForbiddenException('Role is not allowed to create order in occurrence.');
@@ -1070,17 +1229,18 @@ export class ServiceOrdersService {
         provider: true,
         sector: true,
         origin: true,
-        analystResponsible: true
-      }
+        analystResponsible: true,
+      },
     });
     if (!occurrence) {
       throw new NotFoundException('Occurrence not found.');
     }
 
     const priority = input.priority || 'NORMAL';
+    const slaPolicy = await this.slaEngine.findApplicablePolicy(tenantId, priority, input.type);
     const deadlineAt = input.deadlineAt
       ? new Date(input.deadlineAt)
-      : new Date(Date.now() + computeSlaHours(input.type, priority) * 3600000);
+      : await this.slaEngine.calculateTargetDate(new Date(), slaPolicy.hours, tenantId);
     const status = input.status || 'ABERTA';
 
     const created = await this.withCreateRetry(async () => {
@@ -1108,9 +1268,9 @@ export class ServiceOrdersService {
             create: {
               actorUserId: authUserId,
               sourceSystem: 'ERP',
-              message: `O.S criada na ocorrencia ${occurrence.number}.`
-            }
-          }
+              message: `O.S criada na ocorrencia ${occurrence.number}.`,
+            },
+          },
         },
         include: {
           attachments: { orderBy: { uploadedAt: 'desc' } },
@@ -1118,18 +1278,18 @@ export class ServiceOrdersService {
             orderBy: { createdAt: 'desc' },
             include: {
               actorUser: {
-                select: { id: true, name: true, email: true }
-              }
-            }
-          }
-        }
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+        },
       });
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
       protocol: created.protocol,
       occurrenceId: occurrence.id,
-      occurrenceNumber: occurrence.number
+      occurrenceNumber: occurrence.number,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.created', {
@@ -1138,9 +1298,13 @@ export class ServiceOrdersService {
       protocol: created.protocol,
       occurrenceId: occurrence.id,
       occurrenceNumber: occurrence.number,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
+    this.eventsGateway.emitTenantEvent(tenantId, 'service_order_created', {
+      orderId: created.id,
+      protocol: created.protocol,
+    });
     return created;
   }
 
@@ -1149,7 +1313,7 @@ export class ServiceOrdersService {
     orderId: string,
     authUserId: string,
     role: string,
-    patch: UpdateOrderInput
+    patch: UpdateOrderInput,
   ) {
     if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to update service order.');
@@ -1157,7 +1321,7 @@ export class ServiceOrdersService {
 
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId, deletedAt: null },
-      select: { id: true, protocol: true }
+      select: { id: true, protocol: true },
     });
     if (!order) {
       throw new NotFoundException('Service order not found.');
@@ -1175,7 +1339,7 @@ export class ServiceOrdersService {
       ...(patch.ownerName !== undefined ? { ownerName: patch.ownerName } : {}),
       ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
       ...(patch.internalNotes !== undefined ? { internalNotes: patch.internalNotes } : {}),
-      ...(patch.deadlineAt ? { deadlineAt: new Date(patch.deadlineAt) } : {})
+      ...(patch.deadlineAt ? { deadlineAt: new Date(patch.deadlineAt) } : {}),
     };
 
     const updated = await this.prisma.serviceOrder.update({
@@ -1186,9 +1350,9 @@ export class ServiceOrdersService {
           create: {
             actorUserId: authUserId,
             sourceSystem: 'ERP',
-            message: 'Campos da O.S atualizados manualmente.'
-          }
-        }
+            message: 'Campos da O.S atualizados manualmente.',
+          },
+        },
       },
       include: {
         occurrence: true,
@@ -1196,32 +1360,38 @@ export class ServiceOrdersService {
           orderBy: { createdAt: 'desc' },
           include: {
             actorUser: {
-              select: { id: true, name: true, email: true }
-            }
-          }
+              select: { id: true, name: true, email: true },
+            },
+          },
         },
-        attachments: { orderBy: { uploadedAt: 'desc' } }
-      }
+        attachments: { orderBy: { uploadedAt: 'desc' } },
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order', updated.id, {
       protocol: updated.protocol,
-      patch
+      patch,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.updated', {
       tenantId,
       orderId: updated.id,
       protocol: updated.protocol,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     return updated;
   }
 
-  async transition(tenantId: string, id: string, authUserId: string, role: string, input: TransitionInput) {
+  async transition(
+    tenantId: string,
+    id: string,
+    authUserId: string,
+    role: string,
+    input: TransitionInput,
+  ) {
     const order = await this.prisma.serviceOrder.findFirst({
-      where: { id, tenantId, deletedAt: null }
+      where: { id, tenantId, deletedAt: null },
     });
 
     if (!order) {
@@ -1243,16 +1413,16 @@ export class ServiceOrdersService {
         const approved = await this.prisma.serviceOrderApproval.findFirst({
           where: {
             serviceOrderId: order.id,
-            status: 'APPROVED'
+            status: 'APPROVED',
           },
           orderBy: {
-            createdAt: 'desc'
-          }
+            createdAt: 'desc',
+          },
         });
 
         if (!approved) {
           throw new ForbiddenException(
-            'Closing delayed ALTA/CRITICA order requires explicit approval before FECHADA.'
+            'Closing delayed ALTA/CRITICA order requires explicit approval before FECHADA.',
           );
         }
       }
@@ -1267,34 +1437,50 @@ export class ServiceOrdersService {
         resolvedAt: to === 'RESOLVIDA' ? now : order.resolvedAt,
         closedAt: to === 'FECHADA' ? now : order.closedAt,
         canceledAt: to === 'CANCELADA' ? now : order.canceledAt,
-        reopenedCount: from === 'FECHADA' && to === 'EM_ANALISE' ? order.reopenedCount + 1 : order.reopenedCount,
+        reopenedCount:
+          from === 'FECHADA' && to === 'EM_ANALISE' ? order.reopenedCount + 1 : order.reopenedCount,
         occurrences: {
           create: {
             actorUserId: authUserId,
             sourceSystem: 'ERP',
-            message: `Status alterado de ${from} para ${to}. Motivo: ${input.reason}`
-          }
-        }
+            message: `Status alterado de ${from} para ${to}. Motivo: ${input.reason}`,
+          },
+        },
+        serviceOrderStatusEvents: {
+          create: {
+            tenantId,
+            fromStatus: from,
+            toStatus: to,
+            actorUserId: authUserId,
+            reason: input.reason || null,
+          },
+        },
       },
       include: {
         occurrences: {
           orderBy: { createdAt: 'desc' },
           include: {
             actorUser: {
-              select: { id: true, name: true, email: true }
-            }
-          }
-        }
-      }
+              select: { id: true, name: true, email: true },
+            },
+          },
+        },
+      },
     });
 
     const auditAction: AuditAction =
-      to === 'FECHADA' ? 'OS_CLOSE' : to === 'CANCELADA' ? 'OS_CANCEL' : to === 'EM_ANALISE' && from === 'FECHADA' ? 'OS_REOPEN' : 'OS_UPDATE';
+      to === 'FECHADA'
+        ? 'OS_CLOSE'
+        : to === 'CANCELADA'
+          ? 'OS_CANCEL'
+          : to === 'EM_ANALISE' && from === 'FECHADA'
+            ? 'OS_REOPEN'
+            : 'OS_UPDATE';
 
     await this.logAudit(tenantId, authUserId, auditAction, 'service_order', order.id, {
       from,
       to,
-      reason: input.reason
+      reason: input.reason,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.transitioned', {
@@ -1304,12 +1490,58 @@ export class ServiceOrdersService {
       from,
       to,
       byUserId: authUserId,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     // Auto-trigger CSAT survey when order is resolved
     if (to === 'RESOLVIDA') {
-      this.csatService?.createForOrder(tenantId, order.id).catch(() => {/* non-fatal */});
+      this.csatService?.createForOrder(tenantId, order.id).catch((error) => {
+        this.logger.warn(`CSAT creation failed for order ${order.id}: ${(error as Error).message}`);
+      });
+    }
+
+    // Trigger workflow automation for this transition
+    const eventType = to === 'FECHADA' ? ('order_closed' as const) : ('order_updated' as const);
+    this.workflowsService
+      ?.executeForEvent(tenantId, {
+        type: eventType,
+        order: {
+          id: updated.id,
+          protocol: updated.protocol,
+          title: updated.title,
+          type: updated.type,
+          priority: updated.priority,
+          status: updated.status,
+          requester: updated.requester,
+          sector: updated.sector,
+          analystName: updated.analystName,
+          deadlineAt: updated.deadlineAt?.toISOString(),
+        },
+      })
+      .catch((error) => {
+        this.logger.warn(`Workflow execution failed after transition: ${(error as Error).message}`);
+      });
+
+    // Disparar templates de processo ao fechar OS
+    if (to === 'FECHADA') {
+      this.osProcessTemplateService
+        ?.executeForOrder(
+          tenantId,
+          {
+            id: updated.id,
+            protocol: updated.protocol,
+            type: updated.type,
+            occurrenceId: updated.occurrenceId,
+            sector: updated.sector,
+            origin: updated.origin,
+          },
+          authUserId,
+        )
+        .catch((error) => {
+          this.logger.warn(
+            `Process template execution failed for order ${updated.id}: ${(error as Error).message}`,
+          );
+        });
     }
 
     return updated;
@@ -1321,14 +1553,14 @@ export class ServiceOrdersService {
     authUserId: string,
     role: string,
     decision: ApprovalStatus,
-    reason?: string
+    reason?: string,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to approve service orders.');
     }
 
     const order = await this.prisma.serviceOrder.findFirst({
-      where: { id: serviceOrderId, tenantId, deletedAt: null }
+      where: { id: serviceOrderId, tenantId, deletedAt: null },
     });
 
     if (!order) {
@@ -1342,14 +1574,14 @@ export class ServiceOrdersService {
         reviewedById: authUserId,
         status: decision,
         reason,
-        reviewedAt: new Date()
-      }
+        reviewedAt: new Date(),
+      },
     });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order_approval', approval.id, {
       serviceOrderId,
       decision,
-      reason
+      reason,
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.approval', {
@@ -1358,7 +1590,7 @@ export class ServiceOrdersService {
       decision,
       reason: reason || null,
       byUserId: authUserId,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     return approval;
@@ -1369,7 +1601,7 @@ export class ServiceOrdersService {
     serviceOrderId: string,
     authUserId: string,
     role: string,
-    files: Array<Express.Multer.File>
+    files: Array<Express.Multer.File>,
   ) {
     if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to upload attachments.');
@@ -1383,7 +1615,7 @@ export class ServiceOrdersService {
 
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: serviceOrderId, tenantId, deletedAt: null },
-      select: { id: true, protocol: true }
+      select: { id: true, protocol: true },
     });
 
     if (!order) {
@@ -1391,19 +1623,16 @@ export class ServiceOrdersService {
     }
 
     const existingCount = await this.prisma.serviceOrderAttachment.count({
-      where: { serviceOrderId }
+      where: { serviceOrderId },
     });
     if (existingCount + files.length > ATTACHMENT_LIMIT) {
       throw new BadRequestException(
-        `Attachment limit exceeded. Current=${existingCount}, incoming=${files.length}, max=${ATTACHMENT_LIMIT}.`
+        `Attachment limit exceeded. Current=${existingCount}, incoming=${files.length}, max=${ATTACHMENT_LIMIT}.`,
       );
     }
 
     const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
     const orderDir = join(uploadRoot, 'service-orders', serviceOrderId);
-    await mkdir(orderDir, { recursive: true });
-
-    const created = [];
     for (const file of files) {
       const originalName = basename(file.originalname || 'file');
       const ext = extname(originalName).toLowerCase();
@@ -1416,45 +1645,71 @@ export class ServiceOrdersService {
       if (file.size > ATTACHMENT_MAX_BYTES) {
         throw new BadRequestException(`File too large: ${originalName}`);
       }
-
-      const storageFileName = `${Date.now()}_${randomUUID()}${ext}`;
-      const storagePath = join(orderDir, storageFileName);
-      await writeFile(storagePath, file.buffer);
-
-      const attachment = await this.prisma.serviceOrderAttachment.create({
-        data: {
-          serviceOrderId,
-          fileName: originalName,
-          mimeType: file.mimetype,
-          sizeBytes: file.size,
-          storageKey: storagePath,
-          isInternal: true
-        }
-      });
-
-      created.push(attachment);
     }
 
-    await this.prisma.serviceOrderOccurrence.create({
-      data: {
-        serviceOrderId,
-        actorUserId: authUserId,
-        sourceSystem: 'ERP',
-        message: `${created.length} anexo(s) adicionado(s).`
-      }
-    });
+    await mkdir(orderDir, { recursive: true });
 
-    await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order_attachment', serviceOrderId, {
-      count: created.length,
-      names: created.map((a) => a.fileName)
-    });
+    const created = [];
+    const storedPaths: string[] = [];
+    try {
+      for (const file of files) {
+        const originalName = basename(file.originalname || 'file');
+        const ext = extname(originalName).toLowerCase();
+        const storageFileName = `${Date.now()}_${randomUUID()}${ext}`;
+        const storagePath = join(orderDir, storageFileName);
+        await writeFile(storagePath, file.buffer);
+        storedPaths.push(storagePath);
+
+        const attachment = await this.prisma.serviceOrderAttachment.create({
+          data: {
+            serviceOrderId,
+            fileName: originalName,
+            mimeType: file.mimetype,
+            sizeBytes: file.size,
+            storageKey: storagePath,
+            isInternal: true,
+          },
+        });
+
+        created.push(attachment);
+      }
+
+      await this.prisma.serviceOrderOccurrence.create({
+        data: {
+          serviceOrderId,
+          actorUserId: authUserId,
+          sourceSystem: 'ERP',
+          message: `${created.length} anexo(s) adicionado(s).`,
+        },
+      });
+    } catch (error) {
+      if (created.length > 0) {
+        await this.prisma.serviceOrderAttachment.deleteMany({
+          where: { id: { in: created.map((attachment) => attachment.id) } },
+        });
+      }
+      await Promise.all(storedPaths.map((path) => rm(path, { force: true })));
+      throw error;
+    }
+
+    await this.logAudit(
+      tenantId,
+      authUserId,
+      'OS_UPDATE',
+      'service_order_attachment',
+      serviceOrderId,
+      {
+        count: created.length,
+        names: created.map((a) => a.fileName),
+      },
+    );
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.attachment_uploaded', {
       tenantId,
       serviceOrderId,
       protocol: order.protocol,
       count: created.length,
-      at: new Date().toISOString()
+      at: new Date().toISOString(),
     });
 
     return created;
@@ -1476,7 +1731,7 @@ export class ServiceOrdersService {
       AG_TERCEIROS: ['RESOLVIDA', 'EM_ANALISE'],
       RESOLVIDA: ['FECHADA', 'EM_ANALISE'],
       FECHADA: ['EM_ANALISE'],
-      CANCELADA: []
+      CANCELADA: [],
     };
 
     const allowedTo = table[from] || [];
@@ -1500,7 +1755,7 @@ export class ServiceOrdersService {
   private async buildOccurrenceNumber(tenantId: string) {
     const year = new Date().getFullYear();
     const count = await this.prisma.occurrence.count({
-      where: { tenantId }
+      where: { tenantId },
     });
     return `${year}${String(260000 + count + 1).padStart(6, '0')}`;
   }
@@ -1525,11 +1780,19 @@ export class ServiceOrdersService {
     return known?.code === 'P2002';
   }
 
-  private buildWhere(tenantId: string, input: ListInput): Prisma.ServiceOrderWhereInput {
+  private buildWhere(
+    tenantId: string,
+    input: ListInput,
+    role?: string | null,
+  ): Prisma.ServiceOrderWhereInput {
     const where: Prisma.ServiceOrderWhereInput = {
       tenantId,
-      deletedAt: null
+      deletedAt: null,
     };
+
+    if (this.isCustomerRole(role)) {
+      where.isCustomerVisible = true;
+    }
 
     if (input.status) where.status = input.status;
     if (input.priority) where.priority = input.priority;
@@ -1538,7 +1801,7 @@ export class ServiceOrdersService {
     if (input.from || input.to) {
       where.createdAt = {
         ...(input.from ? { gte: new Date(input.from) } : {}),
-        ...(input.to ? { lte: new Date(input.to) } : {})
+        ...(input.to ? { lte: new Date(input.to) } : {}),
       };
     }
 
@@ -1547,7 +1810,7 @@ export class ServiceOrdersService {
         { protocol: { contains: input.search, mode: 'insensitive' } },
         { title: { contains: input.search, mode: 'insensitive' } },
         { description: { contains: input.search, mode: 'insensitive' } },
-        { externalProtocol: { contains: input.search, mode: 'insensitive' } }
+        { externalProtocol: { contains: input.search, mode: 'insensitive' } },
       ];
     }
 
@@ -1556,9 +1819,31 @@ export class ServiceOrdersService {
 
   private andWhere(
     base: Prisma.ServiceOrderWhereInput,
-    extra: Prisma.ServiceOrderWhereInput
+    extra: Prisma.ServiceOrderWhereInput,
   ): Prisma.ServiceOrderWhereInput {
     return { AND: [base, extra] };
+  }
+
+  private isCustomerRole(role?: string | null): boolean {
+    return role === 'cliente';
+  }
+
+  private sanitizeOrderForRole<T>(order: T, role?: string | null): T {
+    if (!this.isCustomerRole(role) || !order || typeof order !== 'object') {
+      return order;
+    }
+
+    const record = order as Record<string, unknown>;
+    const sanitized: Record<string, unknown> = {
+      ...record,
+      internalNotes: null,
+    };
+
+    if ('approvals' in sanitized) {
+      sanitized.approvals = [];
+    }
+
+    return sanitized as T;
   }
 
   private buildOrderBy(input: ListInput): Prisma.ServiceOrderOrderByWithRelationInput {
@@ -1567,37 +1852,21 @@ export class ServiceOrdersService {
     return { [orderBy]: orderDir };
   }
 
-  private reduceCountRows<T extends string>(
-    rows: Array<{ key: T; count: number }>,
-    keys: T[]
-  ): CountMap<T> {
-    const base = Object.fromEntries(keys.map((key) => [key, 0])) as CountMap<T>;
-    for (const row of rows) {
-      base[row.key] = row.count;
-    }
-    return base;
-  }
-
-  private csvCell(value: unknown) {
-    const raw = value == null ? '' : String(value);
-    const normalized = raw.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
-    if (!/[",\n]/.test(normalized)) {
-      return normalized;
-    }
-    return `"${normalized.replace(/"/g, '""')}"`;
-  }
-
-  private compactRecord(input: Record<string, unknown>) {
-    return Object.fromEntries(Object.entries(input).filter(([, value]) => value !== undefined));
-  }
+  /**
+   * Aliases para funções extraídas em `service-orders.helpers.ts`.
+   * Mantidos para preservar as assinaturas originais dentro do service.
+   */
+  private csvCell = csvCell;
+  private compactRecord = compactRecord;
+  private reduceCountRows = reduceCountRows;
 
   private async logAudit(
     tenantId: string,
-    actorUserId: string,
+    actorUserId: string | null,
     action: AuditAction,
     resourceType: string,
     resourceId: string,
-    metadata: Record<string, unknown>
+    metadata: Record<string, unknown>,
   ) {
     await this.prisma.auditLog.create({
       data: {
@@ -1606,8 +1875,8 @@ export class ServiceOrdersService {
         action,
         resourceType,
         resourceId,
-        metadata: metadata as any
-      }
+        metadata: metadata as any,
+      },
     });
   }
 }

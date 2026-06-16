@@ -21,6 +21,7 @@ export class RedisService {
   private isConnected = false;
   private inMemoryStore = new Map<string, { value: any; expiresAt: number }>();
   private readonly logger = new Logger(RedisService.name);
+  private redisErrorLogged = false;
   private errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
@@ -37,18 +38,48 @@ export class RedisService {
    * Connect to Redis with fallback to in-memory storage
    */
   async connect(): Promise<void> {
+    if (process.env.REDIS_DISABLED === 'true') {
+      this.logger.warn('REDIS_DISABLED=true. Using in-memory fallback.');
+      this.client = null;
+      this.isConnected = false;
+      return;
+    }
+
     const redisUrl = process.env.REDIS_URL || 'redis://redis:6379';
+    const connectTimeoutMs = Number(process.env.REDIS_CONNECT_TIMEOUT_MS || 1500);
+    const maxRetries = Number(process.env.REDIS_MAX_RETRIES || 1);
 
     try {
-      this.client = createClient({ url: redisUrl });
+      this.client = createClient({
+        url: redisUrl,
+        socket: {
+          connectTimeout:
+            Number.isFinite(connectTimeoutMs) && connectTimeoutMs > 0 ? connectTimeoutMs : 1500,
+          reconnectStrategy: (retries: number) => {
+            if (retries >= (Number.isFinite(maxRetries) && maxRetries >= 0 ? maxRetries : 1)) {
+              return false;
+            }
+            return Math.min(250 * (retries + 1), 1500);
+          },
+        },
+      });
+      this.redisErrorLogged = false;
 
       this.client.on('error', (err: Error) => {
-        this.logger.error(`Redis Error: ${err.message}`);
+        if (!this.redisErrorLogged) {
+          this.logger.warn(`Redis unavailable (${err.message}). Falling back to in-memory cache.`);
+          this.redisErrorLogged = true;
+        }
         this.isConnected = false;
       });
 
       this.client.on('connect', () => {
-        this.logger.log('Redis connected successfully');
+        if (this.redisErrorLogged) {
+          this.logger.log('Redis connection recovered.');
+        } else {
+          this.logger.log('Redis connected successfully');
+        }
+        this.redisErrorLogged = false;
         this.isConnected = true;
       });
 
@@ -59,8 +90,12 @@ export class RedisService {
       this.logger.warn(
         `Failed to connect to Redis at ${redisUrl}: ${this.errorMessage(error)}. Falling back to in-memory storage.`,
       );
+      if (this.client) {
+        this.client.removeAllListeners?.();
+      }
       this.client = null;
       this.isConnected = false;
+      this.redisErrorLogged = false;
     }
   }
 
@@ -68,13 +103,25 @@ export class RedisService {
    * Disconnect from Redis
    */
   async disconnect(): Promise<void> {
-    if (this.client && this.isConnected) {
-      try {
+    if (!this.client) return;
+
+    try {
+      if (this.client.isOpen) {
         await this.client.quit();
-        this.logger.log('Redis client disconnected');
-      } catch (error: unknown) {
-        this.logger.error(`Error disconnecting from Redis: ${this.errorMessage(error)}`);
       }
+      this.logger.log('Redis client disconnected');
+    } catch (error: unknown) {
+      this.logger.error(`Error disconnecting from Redis: ${this.errorMessage(error)}`);
+      try {
+        this.client.disconnect?.();
+      } catch {
+        // best effort
+      }
+    } finally {
+      this.client.removeAllListeners?.();
+      this.client = null;
+      this.isConnected = false;
+      this.redisErrorLogged = false;
     }
   }
 
@@ -105,11 +152,7 @@ export class RedisService {
   /**
    * Set value in Redis or in-memory fallback with optional expiration (seconds)
    */
-  async set(
-    key: string,
-    value: string,
-    expirationSeconds?: number,
-  ): Promise<void> {
+  async set(key: string, value: string, expirationSeconds?: number): Promise<void> {
     try {
       if (this.client && this.isConnected) {
         if (expirationSeconds) {
@@ -156,10 +199,7 @@ export class RedisService {
   /**
    * Increment counter with expiration
    */
-  async incrEx(
-    key: string,
-    expirationSeconds: number,
-  ): Promise<number> {
+  async incrEx(key: string, expirationSeconds: number): Promise<number> {
     try {
       if (this.client && this.isConnected) {
         const ttl = await this.client.ttl(key);
@@ -239,9 +279,7 @@ export class RedisService {
 
     // Fallback to in-memory
     let deletedCount = 0;
-    const regex = new RegExp(
-      `^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`,
-    );
+    const regex = new RegExp(`^${pattern.replace(/\*/g, '.*').replace(/\?/g, '.')}$`);
 
     for (const key of this.inMemoryStore.keys()) {
       if (regex.test(key)) {
@@ -263,9 +301,7 @@ export class RedisService {
         return result === 1;
       }
     } catch (error: unknown) {
-      this.logger.error(
-        `Redis EXPIRE error for key ${key}: ${this.errorMessage(error)}`,
-      );
+      this.logger.error(`Redis EXPIRE error for key ${key}: ${this.errorMessage(error)}`);
     }
 
     // Fallback to in-memory

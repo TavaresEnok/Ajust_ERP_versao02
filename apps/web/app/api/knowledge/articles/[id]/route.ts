@@ -15,15 +15,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
     method: 'PATCH',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
     body: JSON.stringify(payload),
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao atualizar artigo.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao atualizar artigo.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});
@@ -38,14 +41,17 @@ export async function DELETE(request: NextRequest, context: { params: Promise<{ 
   const response = await fetch(`${apiBaseUrl()}/knowledge/articles/${encodeURIComponent(id)}`, {
     method: 'DELETE',
     headers: {
-      authorization: `Bearer ${session.accessToken}`
+      authorization: `Bearer ${session.accessToken}`,
     },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   if (!response.ok) {
-    return NextResponse.json({ error: text || 'Falha ao excluir artigo.' }, { status: response.status });
+    return NextResponse.json(
+      { error: text || 'Falha ao excluir artigo.' },
+      { status: response.status },
+    );
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});

@@ -1,11 +1,15 @@
-import { buildDashboardQuery, DashboardFilters, DashboardPagination } from '../../lib/query-builders';
+import {
+  buildDashboardQuery,
+  DashboardFilters,
+  DashboardPagination,
+} from '../../lib/query-builders';
 
 type Path = '/gerencia' | '/analista' | '/cliente';
 
 export function OrderPagination({
   path,
   filters,
-  pagination
+  pagination,
 }: {
   path: Path;
   filters: DashboardFilters;

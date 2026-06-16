@@ -14,14 +14,14 @@ async function ensureSeedData(prisma: PrismaClient) {
     { code: 'analista', name: 'Analista', isGlobal: false },
     { code: 'tecnico', name: 'Tecnico', isGlobal: false },
     { code: 'cliente', name: 'Cliente', isGlobal: false },
-    { code: 'leitura', name: 'Leitura', isGlobal: false }
+    { code: 'leitura', name: 'Leitura', isGlobal: false },
   ];
 
   for (const role of roles) {
     await prisma.role.upsert({
       where: { code: role.code },
       update: { name: role.name, isGlobal: role.isGlobal },
-      create: role
+      create: role,
     });
   }
 
@@ -38,8 +38,8 @@ async function ensureSeedData(prisma: PrismaClient) {
       techContactName: 'NOC Ajust',
       techContactEmail: 'noc@ajust.local',
       techContactPhone: '+55-11-99999-0000',
-      status: 'ACTIVE'
-    }
+      status: 'ACTIVE',
+    },
   });
 
   const superAdminRole = await prisma.role.findUnique({ where: { code: 'super_admin' } });
@@ -58,37 +58,40 @@ async function ensureSeedData(prisma: PrismaClient) {
       name: 'Ajust Super Admin',
       passwordHash,
       status: 'ACTIVE',
-      twoFactorEnabled: true
+      twoFactorEnabled: true,
     },
     create: {
       name: 'Ajust Super Admin',
       email,
       passwordHash,
       status: 'ACTIVE',
-      twoFactorEnabled: true
-    }
+      twoFactorEnabled: true,
+    },
   });
 
   await prisma.userTenant.upsert({
     where: {
       userId_tenantId: {
         userId: user.id,
-        tenantId: tenant.id
-      }
+        tenantId: tenant.id,
+      },
     },
     update: { roleId: superAdminRole.id },
     create: {
       userId: user.id,
       tenantId: tenant.id,
-      roleId: superAdminRole.id
-    }
+      roleId: superAdminRole.id,
+    },
   });
 
   return { email, password, tenantId: tenant.id };
 }
 
 function expectStatus(actual: number, expected: number[]) {
-  assert.ok(expected.includes(actual), `unexpected status ${actual}, expected one of ${expected.join(', ')}`);
+  assert.ok(
+    expected.includes(actual),
+    `unexpected status ${actual}, expected one of ${expected.join(', ')}`,
+  );
 }
 
 async function main() {
@@ -98,7 +101,7 @@ async function main() {
   process.env.JWT_REFRESH_TTL_DAYS = process.env.JWT_REFRESH_TTL_DAYS || '7';
 
   const moduleRef = await Test.createTestingModule({
-    imports: [AppModule]
+    imports: [AppModule],
   }).compile();
 
   const app: INestApplication = moduleRef.createNestApplication();
@@ -206,9 +209,9 @@ async function main() {
       .post('/integrations/ixc/configure')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-                baseUrl: 'https://ixc.example.test',
+        baseUrl: 'https://ixc.example.test',
         webhookSecret: 'ixc_e2e_secret',
-        apiToken: 'ixc_e2e_token'
+        apiToken: 'ixc_e2e_token',
       });
 
     expectStatus(configureIxc.status, [200, 201]);
@@ -221,7 +224,7 @@ async function main() {
       .post('/service-orders/occurrences')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-                provider: 'ProviderTest',
+        provider: 'ProviderTest',
         type: 'Rompimento',
         sector: 'NOC',
         origin: 'Monitoramento',
@@ -230,8 +233,8 @@ async function main() {
         description: 'Ocorrência de teste e2e para validar fluxo',
         firstOrder: {
           type: 'ROMPIMENTO',
-          description: 'OS vinculada ao criar ocorrência'
-        }
+          description: 'OS vinculada ao criar ocorrência',
+        },
       });
 
     expectStatus(occCreate.status, [200, 201]);
@@ -275,8 +278,9 @@ async function main() {
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.ok(
-      Array.isArray(occWithAnnotation.body.annotations) && occWithAnnotation.body.annotations.length >= 1,
-      'occurrence must have at least 1 annotation'
+      Array.isArray(occWithAnnotation.body.annotations) &&
+        occWithAnnotation.body.annotations.length >= 1,
+      'occurrence must have at least 1 annotation',
     );
 
     console.log('[e2e] occurrence: create/list/get/patch/annotate ✓');
@@ -288,7 +292,7 @@ async function main() {
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
         type: 'LENTIDAO',
-        description: 'OS adicional criada dentro da ocorrência'
+        description: 'OS adicional criada dentro da ocorrência',
       });
 
     expectStatus(occOrder.status, [200, 201]);
@@ -304,11 +308,11 @@ async function main() {
       .post('/service-orders')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-                type: 'ROMPIMENTO',
+        type: 'ROMPIMENTO',
         priority: 'CRITICA',
         title: 'OS e2e atraso',
         description: 'Teste de aprovacao obrigatoria',
-        deadlineAt: delayedDeadline
+        deadlineAt: delayedDeadline,
       });
 
     expectStatus(createdOrder.status, [200, 201]);
@@ -327,7 +331,7 @@ async function main() {
 
     const filteredList = await request(app.getHttpServer())
       .get(
-        `/service-orders?priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`
+        `/service-orders?priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`,
       )
       .set('Authorization', `Bearer ${accessToken}`);
 
@@ -336,13 +340,22 @@ async function main() {
 
     const csvExport = await request(app.getHttpServer())
       .get(
-        `/service-orders/export/csv?priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`
+        `/service-orders/export/csv?priority=CRITICA&type=ROMPIMENTO&search=atraso&orderBy=deadlineAt&orderDir=asc`,
       )
       .set('Authorization', `Bearer ${accessToken}`);
 
-    if (csvExport.status !== 200) console.log("CSV ERROR:", csvExport.body); assert.equal(csvExport.status, 200, 'csv export should return 200');
-    assert.match(csvExport.headers['content-type'] || '', /text\/csv/, 'csv export should return text/csv');
-    assert.match(csvExport.text || '', /protocol,externalProtocol,title,description/, 'csv export header missing');
+    if (csvExport.status !== 200) console.log('CSV ERROR:', csvExport.body);
+    assert.equal(csvExport.status, 200, 'csv export should return 200');
+    assert.match(
+      csvExport.headers['content-type'] || '',
+      /text\/csv/,
+      'csv export should return text/csv',
+    );
+    assert.match(
+      csvExport.text || '',
+      /protocol,externalProtocol,title,description/,
+      'csv export header missing',
+    );
 
     const exportHistory = await request(app.getHttpServer())
       .get(`/service-orders/export/history?limit=5`)
@@ -351,7 +364,11 @@ async function main() {
     assert.equal(exportHistory.status, 200, 'export history should return 200');
     assert.ok(Array.isArray(exportHistory.body), 'export history should return array');
     assert.ok(exportHistory.body.length >= 1, 'export history should contain at least one item');
-    assert.equal(exportHistory.body[0].fileAvailable, true, 'export history must mark file available');
+    assert.equal(
+      exportHistory.body[0].fileAvailable,
+      true,
+      'export history must mark file available',
+    );
 
     const exportId: string = exportHistory.body[0].id;
     const exportDownload = await request(app.getHttpServer())
@@ -359,8 +376,16 @@ async function main() {
       .set('Authorization', `Bearer ${accessToken}`);
 
     assert.equal(exportDownload.status, 200, 'export download should return 200');
-    assert.match(exportDownload.headers['content-type'] || '', /text\/csv/, 'export download should return text/csv');
-    assert.match(exportDownload.text || '', /protocol,externalProtocol,title,description/, 'downloaded csv header missing');
+    assert.match(
+      exportDownload.headers['content-type'] || '',
+      /text\/csv/,
+      'export download should return text/csv',
+    );
+    assert.match(
+      exportDownload.text || '',
+      /protocol,externalProtocol,title,description/,
+      'downloaded csv header missing',
+    );
 
     console.log('[e2e] service-orders: create/summary/list/export/download ✓');
 
@@ -372,7 +397,11 @@ async function main() {
       .attach('files', Buffer.from('anexo de teste e2e'), 'e2e.txt');
 
     expectStatus(uploadAttachment.status, [200, 201]);
-    assert.equal(Array.isArray(uploadAttachment.body), true, 'attachment response should be an array');
+    assert.equal(
+      Array.isArray(uploadAttachment.body),
+      true,
+      'attachment response should be an array',
+    );
     assert.equal(uploadAttachment.body.length, 1, 'one attachment should be created');
 
     console.log('[e2e] attachment: upload ✓');
@@ -398,7 +427,11 @@ async function main() {
       .set('Authorization', `Bearer ${accessToken}`)
       .send({ toStatus: 'FECHADA', reason: 'fechamento sem aprovacao' });
 
-    assert.equal(closeWithoutApproval.status, 403, 'closing delayed CRITICA should require approval');
+    assert.equal(
+      closeWithoutApproval.status,
+      403,
+      'closing delayed CRITICA should require approval',
+    );
 
     const approve = await request(app.getHttpServer())
       .post(`/service-orders/${orderId}/approvals`)
@@ -418,14 +451,14 @@ async function main() {
 
     /* ════════════════ WEBHOOK IXC ════════════════ */
 
-	    const webhookPayloadObject = {
-	      tenantId: seed.tenantId,
-	            eventType: 'ticket.updated',
+    const webhookPayloadObject = {
+      tenantId: seed.tenantId,
+      eventType: 'ticket.updated',
       externalProtocol: `IXC-${randomUUID()}`,
       status: 'em analise',
       title: 'Webhook IXC E2E',
       description: 'Criada via webhook no teste e2e',
-      payload: { source: 'e2e' }
+      payload: { source: 'e2e' },
     };
     const webhookPayload = JSON.stringify(webhookPayloadObject);
     const signature = createHmac('sha256', 'ixc_e2e_secret').update(webhookPayload).digest('hex');
@@ -447,10 +480,10 @@ async function main() {
       .post('/knowledge/articles')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-                title: 'Artigo E2E de Teste',
+        title: 'Artigo E2E de Teste',
         content: 'Conteúdo do artigo criado automaticamente no e2e.',
         tags: ['e2e', 'teste'],
-        isPublished: true
+        isPublished: true,
       });
 
     expectStatus(articleCreate.status, [200, 201]);
@@ -471,7 +504,11 @@ async function main() {
       .send({ title: 'Artigo E2E Atualizado' });
 
     assert.equal(articleUpdate.status, 200, 'update article should return 200');
-    assert.equal(articleUpdate.body.title, 'Artigo E2E Atualizado', 'article title should be updated');
+    assert.equal(
+      articleUpdate.body.title,
+      'Artigo E2E Atualizado',
+      'article title should be updated',
+    );
 
     console.log('[e2e] knowledge: articles create/list/update ✓');
 
@@ -481,14 +518,14 @@ async function main() {
       .post('/knowledge/credentials')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-                provider: 'IXC Soft',
+        provider: 'IXC Soft',
         equipmentType: 'OLT',
         equipmentName: 'Huawei MA5800',
         environment: 'production',
         host: 'https://ixc.provedor.com.br',
         username: 'admin_e2e',
         secret: 'super-secret-token-e2e',
-        notes: 'Credencial de teste e2e'
+        notes: 'Credencial de teste e2e',
       });
 
     expectStatus(credCreate.status, [200, 201]);
@@ -502,11 +539,20 @@ async function main() {
     assert.equal(credList.status, 200, 'list credentials should return 200');
     assert.ok(Array.isArray(credList.body.items), 'credentials.items must be array');
     assert.ok(typeof credList.body.total === 'number', 'credentials.total must be number');
-    const createdCredentialOnList = (credList.body.items as Array<{ id: string; equipmentType?: string; equipmentName?: string }>)
-      .find((item) => item.id === credId);
+    const createdCredentialOnList = (
+      credList.body.items as Array<{ id: string; equipmentType?: string; equipmentName?: string }>
+    ).find((item) => item.id === credId);
     assert.ok(createdCredentialOnList, 'created credential must appear on list');
-    assert.equal(createdCredentialOnList?.equipmentType, 'OLT', 'credential equipmentType must match');
-    assert.equal(createdCredentialOnList?.equipmentName, 'Huawei MA5800', 'credential equipmentName must match');
+    assert.equal(
+      createdCredentialOnList?.equipmentType,
+      'OLT',
+      'credential equipmentType must match',
+    );
+    assert.equal(
+      createdCredentialOnList?.equipmentName,
+      'Huawei MA5800',
+      'credential equipmentName must match',
+    );
 
     const providerList = await request(app.getHttpServer())
       .get(`/knowledge/credentials/providers`)
@@ -523,7 +569,11 @@ async function main() {
     assert.equal(credReveal.status, 201, 'reveal credential should return 201');
     assert.equal(credReveal.body.secret, 'super-secret-token-e2e', 'revealed secret must match');
     assert.equal(credReveal.body.equipmentType, 'OLT', 'revealed equipmentType must match');
-    assert.equal(credReveal.body.equipmentName, 'Huawei MA5800', 'revealed equipmentName must match');
+    assert.equal(
+      credReveal.body.equipmentName,
+      'Huawei MA5800',
+      'revealed equipmentName must match',
+    );
 
     console.log('[e2e] knowledge: credentials create/list/reveal ✓');
 
@@ -533,9 +583,9 @@ async function main() {
       .post('/knowledge/notes')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
-                title: 'Nota E2E',
+        title: 'Nota E2E',
         content: 'Conteúdo da nota e2e',
-        pinned: true
+        pinned: true,
       });
 
     expectStatus(noteCreate.status, [200, 201]);
@@ -568,7 +618,9 @@ async function main() {
       .get(`/knowledge/notes`)
       .set('Authorization', `Bearer ${accessToken}`);
 
-    const deletedNote = (noteListAfterDelete.body as Array<{ id: string }>).find((n) => n.id === noteId);
+    const deletedNote = (noteListAfterDelete.body as Array<{ id: string }>).find(
+      (n) => n.id === noteId,
+    );
     assert.equal(deletedNote, undefined, 'deleted note should not appear in list');
 
     console.log('[e2e] knowledge: notes create/list/update/delete ✓');
@@ -579,10 +631,10 @@ async function main() {
       .post('/calendar/events')
       .set('authorization', `Bearer ${accessToken}`)
       .send({
-                title: 'Smoke Test Event',
+        title: 'Smoke Test Event',
         startAt: new Date().toISOString(),
         endAt: new Date(Date.now() + 3600000).toISOString(),
-        isGlobal: true
+        isGlobal: true,
       });
     assert.strictEqual(calendarEvtRes.status, 201, 'calendar evt create should be 201');
     const calendarEvtId = calendarEvtRes.body.id;
@@ -605,27 +657,27 @@ async function main() {
 
     const exportLog = await prisma.auditLog.findFirst({
       where: {
-                action: 'EXPORT',
-        resourceType: 'report_export'
+        action: 'EXPORT',
+        resourceType: 'report_export',
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
     assert.ok(exportLog, 'audit log EXPORT should be created');
 
     const reportExport = await prisma.reportExport.findFirst({
       where: {
-                reportType: 'service_orders_csv'
+        reportType: 'service_orders_csv',
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
     assert.ok(reportExport, 'report export row should be created');
 
     const loginAudit = await prisma.auditLog.findFirst({
       where: {
         action: 'LOGIN',
-        resourceType: 'auth'
+        resourceType: 'auth',
       },
-      orderBy: { createdAt: 'desc' }
+      orderBy: { createdAt: 'desc' },
     });
     assert.ok(loginAudit, 'audit log LOGIN should be created');
 
@@ -633,7 +685,6 @@ async function main() {
 
     /* ════════════════ DONE ════════════════ */
 
-    // eslint-disable-next-line no-console
     console.log('\n[e2e] ════════════════════════════════════════');
     console.log('[e2e] ALL SMOKE TESTS PASSED ✓');
     console.log('[e2e] ════════════════════════════════════════\n');
@@ -644,7 +695,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  // eslint-disable-next-line no-console
   console.error('[e2e] smoke failed', err);
   process.exit(1);
 });

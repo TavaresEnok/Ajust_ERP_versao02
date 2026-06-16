@@ -20,7 +20,7 @@ const ROLE_HOME: Record<string, '/gerencia' | '/analista' | '/cliente'> = {
   analista: '/analista',
   tecnico: '/analista',
   leitura: '/analista',
-  cliente: '/cliente'
+  cliente: '/cliente',
 };
 
 function apiBaseUrl() {
@@ -34,13 +34,17 @@ function authCookieOptions(maxAgeSeconds: number) {
     secure: process.env.NODE_ENV === 'production',
     sameSite: 'lax' as const,
     path: '/',
-    maxAge: maxAgeSeconds
+    maxAge: maxAgeSeconds,
   };
 }
 
 function applyAuthCookies(response: NextResponse, tokens: RefreshResult) {
   response.cookies.set('erp_access_token', tokens.accessToken, authCookieOptions(15 * 60));
-  response.cookies.set('erp_refresh_token', tokens.refreshToken, authCookieOptions(7 * 24 * 60 * 60));
+  response.cookies.set(
+    'erp_refresh_token',
+    tokens.refreshToken,
+    authCookieOptions(7 * 24 * 60 * 60),
+  );
   response.cookies.set('erp_session_id', tokens.sessionId, authCookieOptions(7 * 24 * 60 * 60));
   response.cookies.set('erp_role', tokens.role || '', authCookieOptions(7 * 24 * 60 * 60));
   response.cookies.set('erp_tenant_id', tokens.tenantId || '', authCookieOptions(7 * 24 * 60 * 60));
@@ -57,7 +61,7 @@ function clearAuthCookies(response: NextResponse) {
 
 function isProtectedPath(pathname: string) {
   return ['/gerencia', '/analista', '/cliente'].some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
+    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`),
   );
 }
 
@@ -81,7 +85,11 @@ function resolveLegacyPath(pathname: string, role: string | null | undefined) {
   const normalized = normalizePathname(pathname);
   const home = roleHome(role) || '/gerencia';
 
-  if (normalized === '/dashboard' || normalized === '/portal' || normalized === '/portal/dashboard') {
+  if (
+    normalized === '/dashboard' ||
+    normalized === '/portal' ||
+    normalized === '/portal/dashboard'
+  ) {
     return home;
   }
 
@@ -93,7 +101,7 @@ function resolveLegacyPath(pathname: string, role: string | null | undefined) {
       '/portal/tecnicos',
       '/portal/analista',
       '/portal/analyst',
-      '/portal/noc'
+      '/portal/noc',
     ].includes(normalized)
   ) {
     return '/analista';
@@ -137,7 +145,7 @@ async function fetchMe(accessToken: string) {
     const response = await fetch(`${apiBaseUrl()}/auth/me`, {
       method: 'GET',
       headers: { authorization: `Bearer ${accessToken}` },
-      cache: 'no-store'
+      cache: 'no-store',
     });
     if (!response.ok) return null;
     return (await response.json()) as MeResult;
@@ -152,7 +160,7 @@ async function refreshAccess(refreshToken: string) {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ refreshToken }),
-      cache: 'no-store'
+      cache: 'no-store',
     });
     if (!response.ok) return null;
     return (await response.json()) as RefreshResult;
@@ -201,21 +209,15 @@ export async function middleware(request: NextRequest) {
   let authenticated = false;
 
   if (accessToken) {
-    // ─── Fast-path: JWT local check evita roundtrip HTTP em ~90% dos requests ──
-    if (jwtIsLikelyValid(accessToken) && role) {
+    const me = jwtIsLikelyValid(accessToken) ? await fetchMe(accessToken) : null;
+    if (me?.tenant?.role) {
+      role = me.tenant.role;
       authenticated = true;
-    } else {
-      // Token expirado ou sem role — verifica na API
-      const me = await fetchMe(accessToken);
-      if (me?.tenant?.role) {
-        role = me.tenant.role;
+    } else if (refreshToken) {
+      refreshed = await refreshAccess(refreshToken);
+      if (refreshed) {
+        role = refreshed.role || role;
         authenticated = true;
-      } else if (refreshToken) {
-        refreshed = await refreshAccess(refreshToken);
-        if (refreshed) {
-          role = refreshed.role || role;
-          authenticated = true;
-        }
       }
     }
   } else if (refreshToken) {
@@ -261,6 +263,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/).*)'
-  ]
+  matcher: ['/((?!_next/static|_next/image|favicon.ico|api/).*)'],
 };

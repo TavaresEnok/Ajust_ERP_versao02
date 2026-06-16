@@ -1,8 +1,8 @@
 /**
  * Forgot Password Rate Limit Guard
- * 
+ *
  * Uses centralized RedisService for distributed rate limiting
- * 
+ *
  * Previne:
  * - Enumeração de emails (descobrir quais contas existem)
  * - Ataque de força bruta
@@ -11,6 +11,7 @@
 
 import {
   Injectable,
+  Inject,
   CanActivate,
   ExecutionContext,
   HttpException,
@@ -25,10 +26,9 @@ export class ForgotPasswordRateLimitGuard implements CanActivate {
   private readonly WINDOW_MINUTES = 60; // 1 hora
   private readonly LOCKOUT_MINUTES = 15; // 15 minutos de lockout após ultrapassar limite
 
-  constructor(private readonly redis: RedisService) {}
+  constructor(@Inject(RedisService) private readonly redis: RedisService) {}
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
-
     const request = context.switchToHttp().getRequest<Request>();
     const ip = this.getClientIp(request);
     const body = request.body as { email?: string };
@@ -46,9 +46,9 @@ export class ForgotPasswordRateLimitGuard implements CanActivate {
           {
             statusCode: 429,
             message: `Muitas tentativas. Tente novamente em alguns minutos.`,
-            retryAfter: this.LOCKOUT_MINUTES * 60
+            retryAfter: this.LOCKOUT_MINUTES * 60,
           },
-          HttpStatus.TOO_MANY_REQUESTS
+          HttpStatus.TOO_MANY_REQUESTS,
         );
       }
 
@@ -62,31 +62,27 @@ export class ForgotPasswordRateLimitGuard implements CanActivate {
           {
             statusCode: 429,
             message: `Muitas tentativas de recuperação de senha. Tente novamente em ${this.LOCKOUT_MINUTES} minutos.`,
-            retryAfter: this.LOCKOUT_MINUTES * 60
+            retryAfter: this.LOCKOUT_MINUTES * 60,
           },
-          HttpStatus.TOO_MANY_REQUESTS
+          HttpStatus.TOO_MANY_REQUESTS,
         );
       }
 
       // Adicionar jitter na resposta para evitar enumeration timing attacks
       const jitter = Math.random() * 500; // 0-500ms aleatório
-      await new Promise(resolve => setTimeout(resolve, jitter));
+      await new Promise((resolve) => setTimeout(resolve, jitter));
 
       return true;
     } catch (error) {
-      if (error instanceof HttpException) {
-        throw error;
-      }
-      // Em caso de erro, deixar passar (melhor que bloquear tudo)
-      return true;
+      if (error instanceof HttpException) throw error;
+      throw new HttpException(
+        'Serviço temporariamente indisponível. Tente novamente.',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
     }
   }
 
   private getClientIp(request: Request): string {
-    const forwarded = request.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string') {
-      return forwarded.split(',')[0].trim();
-    }
     return request.ip || '0.0.0.0';
   }
 }

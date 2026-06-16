@@ -1,11 +1,11 @@
 'use client';
 import dynamic from 'next/dynamic';
 
-const AnalystMockup = dynamic(() => import('../mockups/analista-mockup'), {
+const AnalystPortal = dynamic(() => import('../analista/portal'), {
   ssr: false,
-  loading: () => <div className="min-h-screen flex items-center justify-center">Loading...</div>
+  loading: () => <div className="min-h-screen flex items-center justify-center">Loading...</div>,
 });
 
 export default function VerifyAnalystPage() {
-    return <AnalystMockup />;
+  return <AnalystPortal />;
 }

@@ -1,5 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { omitTenantIdFromBody, omitTenantIdFromSearchParams } from '../../../lib/strip-tenant-upstream';
+import {
+  omitTenantIdFromBody,
+  omitTenantIdFromSearchParams,
+} from '../../../lib/strip-tenant-upstream';
 import { apiBaseUrl } from '../auth/_lib';
 import { applyRefreshIfNeeded, resolveAuthSession } from '../_proxy';
 
@@ -11,10 +14,12 @@ export async function GET(request: NextRequest) {
 
   const response = await fetch(`${apiBaseUrl()}/service-orders?${searchParams.toString()}`, {
     headers: { authorization: `Bearer ${session.accessToken}` },
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
-  const proxied = NextResponse.json(await response.json().catch(() => ([])), { status: response.status });
+  const proxied = NextResponse.json(await response.json().catch(() => []), {
+    status: response.status,
+  });
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }
 
@@ -29,14 +34,13 @@ export async function POST(request: NextRequest) {
     method: 'POST',
     headers: {
       authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json'
+      'content-type': 'application/json',
     },
     body: JSON.stringify(body),
-    cache: 'no-store'
+    cache: 'no-store',
   });
 
   const text = await response.text();
   const proxied = NextResponse.json(text ? JSON.parse(text) : {}, { status: response.status });
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }
-
