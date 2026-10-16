@@ -137,11 +137,14 @@ async function bootstrap() {
   const csrfMiddleware = new CsrfMiddleware();
   app.use((req: Request, res: Response, next: NextFunction) => csrfMiddleware.use(req, res, next)); // Proteção CSRF (compatível com Bearer + webhooks públicos)
   app.use(
-    (req: RequestWithAuth & { user?: { id?: string } }, _res: Response, next: NextFunction) => {
+    (req: RequestWithAuth & { user?: { id?: string } }, res: Response, next: NextFunction) => {
       const traceId =
         (req.headers['x-trace-id'] as string) ||
         (req.headers['x-request-id'] as string) ||
         randomUUID();
+
+      res.setHeader('x-trace-id', traceId);
+      res.setHeader('x-request-id', traceId);
 
       const tenantId = (req.headers['x-tenant-id'] as string) || undefined;
       const userId = req.auth?.userId || req.user?.id || undefined;

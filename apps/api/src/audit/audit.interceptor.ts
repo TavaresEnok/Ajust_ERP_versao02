@@ -45,6 +45,7 @@ export class AuditInterceptor implements NestInterceptor {
                     method,
                     url,
                     statusCode,
+                    traceId: (headers['x-trace-id'] as string) || (headers['x-request-id'] as string) || undefined,
                     body: this.sanitizeBody(body),
                   } as Prisma.InputJsonValue,
                 },

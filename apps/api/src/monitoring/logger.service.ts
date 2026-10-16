@@ -114,7 +114,11 @@ export class LoggerService {
   ): void {
     const entry = this.buildLogEntry(level, message, context, meta);
 
-    if (process.env.NODE_ENV !== 'production') {
+    const jsonLine = JSON.stringify(entry);
+
+    if (process.env.NODE_ENV === 'production') {
+      process.stdout.write(jsonLine + '\n');
+    } else {
       const colors: Record<string, string> = {
         ERROR: '\x1b[31m',
         WARN: '\x1b[33m',
@@ -133,7 +137,6 @@ export class LoggerService {
     }
 
     try {
-      const jsonLine = JSON.stringify(entry);
       if (level === 'ERROR') {
         const errorLogPath = path.join(this.logDir, 'error.log');
         fs.appendFileSync(errorLogPath, jsonLine + '\n');
