@@ -115,10 +115,91 @@ export class NotificationsService {
             `Evento: ${trigger}\nTenant: ${tenantId}\nProtocolo: ${payload.protocol || '-'}\n\n${JSON.stringify(payload, null, 2)}`,
           );
         }
+        if ((cfg.channel as string) === 'WHATSAPP') {
+          // Despacho para Gateway WhatsApp (Evolution API / Z-API / Webhook)
+          const messageText = payload.message || 
+            `*🚨 [AJUST ERP - ${trigger}]*\n` +
+            `*Protocolo:* ${payload.protocol || '-'}\n` +
+            `*Provedor:* ${payload.provider || '-'}\n` +
+            `*Título:* ${payload.title || '-'}\n` +
+            (payload.pdfUrl ? `\n*📄 Relatório PDF:* ${payload.pdfUrl}` : '');
+
+          const waBody = JSON.stringify({
+            number: payload.targetNumber || payload.groupJid || cfg.target,
+            textMessage: { text: messageText },
+            message: messageText,
+            pdfUrl: payload.pdfUrl,
+            metadata: payload,
+          });
+
+          try {
+            await assertSafeUrl(cfg.target);
+            await fetch(cfg.target, {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: waBody,
+              signal: AbortSignal.timeout(10_000),
+            });
+          } catch (err) {
+            this.logger.warn(`WhatsApp dispatch failed for ${cfg.id}: ${(err as Error).message}`);
+          }
+        }
       }
     } catch (err) {
       this.logger.error('Notification dispatch error', err);
     }
+  }
+
+  /** Disparo sob demanda de O.S. para grupos/números de WhatsApp com link direto do PDF */
+  async dispatchWhatsAppOrder(
+    tenantId: string,
+    input: { orderId: string; target?: string; customMessage?: string },
+  ) {
+    const order = await this.prisma.serviceOrder.findFirst({
+      where: { id: input.orderId, tenantId },
+      include: {
+        occurrence: { select: { provider: true } },
+      },
+    });
+
+    if (!order) throw new NotFoundException('Ordem de serviço não encontrada');
+
+    const providerName = order.requester || order.occurrence?.provider || 'Provedor';
+    const baseUrl = process.env.PUBLIC_APP_URL || 'http://SERVIDOR_IP:8070';
+    const pdfUrl = `${baseUrl}/gerencia?view=ordens&exportPdf=${order.id}`;
+
+    const formattedMessage =
+      input.customMessage ||
+      `*🚨 [AJUST NOC] ORDEM DE SERVIÇO: ${order.protocol}*\n\n` +
+      `*Provedor:* ${providerName}\n` +
+      `*Tipo:* ${order.type}\n` +
+      `*Prioridade:* ${order.priority}\n` +
+      `*Status:* ${order.status}\n` +
+      `*Responsável:* ${order.analystName || 'Equipe NOC'}\n` +
+      `*Prazo SLA:* ${new Date(order.deadlineAt).toLocaleString('pt-BR')}\n\n` +
+      `*Título:* ${order.title}\n` +
+      `*Descrição:* ${order.description.slice(0, 300)}${order.description.length > 300 ? '...' : ''}\n\n` +
+      `*📄 Relatório Técnico / PDF:* ${pdfUrl}`;
+
+    // Dispara via canais configurados de WhatsApp ou webhook geral
+    await this.dispatch(tenantId, 'ORDER_ESCALATED', {
+      orderId: order.id,
+      protocol: order.protocol,
+      provider: providerName,
+      title: order.title,
+      pdfUrl,
+      message: formattedMessage,
+      targetNumber: input.target || '',
+    });
+
+    return {
+      success: true,
+      protocol: order.protocol,
+      target: input.target || 'Canais WhatsApp Configurados',
+      message: formattedMessage,
+      pdfUrl,
+      sentAt: new Date().toISOString(),
+    };
   }
 
   private async validateTarget(channel: NotificationChannel, target: string): Promise<void> {
@@ -128,6 +209,14 @@ export class NotificationsService {
       }
       return;
     }
+    // WhatsApp pode ser uma URL de Gateway (ex: http://...) ou identificador de grupo/telefone
+    if ((channel as string) === 'WHATSAPP') {
+      if (target.startsWith('http://') || target.startsWith('https://')) {
+        await assertSafeUrl(target);
+      }
+      return;
+    }
     await assertSafeUrl(target);
   }
 }
+

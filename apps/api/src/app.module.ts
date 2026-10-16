@@ -26,6 +26,7 @@ import { ReportsModule } from './reports/reports.module';
 import { WorkflowsModule } from './workflows/workflows.module';
 import { AuditModule } from './audit/audit.module';
 import { OsProcessTemplatesModule } from './os-process-templates/os-process-templates.module';
+import { ServiceCatalogModule } from './service-catalog/service-catalog.module';
 import { SecretsValidationService } from './config/secrets-validation.service';
 import { ObservabilityInterceptor } from './monitoring/observability.interceptor';
 import { WebhookController } from './integrations/webhook.controller';
@@ -56,6 +57,7 @@ import { WebhookController } from './integrations/webhook.controller';
     WorkflowsModule,
     AuditModule,
     OsProcessTemplatesModule,
+    ServiceCatalogModule,
   ],
   controllers: [AppController, WebhookController],
   providers: [

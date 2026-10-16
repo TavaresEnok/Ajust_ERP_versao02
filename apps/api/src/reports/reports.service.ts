@@ -21,11 +21,39 @@ export class ReportsService {
     return parsed;
   }
 
-  async getOperationalHealth(tenantId: string) {
+  async getOperationalHealth(
+    tenantId: string,
+    options?: { periodStart?: string; periodEnd?: string; daysBack?: number },
+  ) {
+    const whereClause: Prisma.ServiceOrderWhereInput = { tenantId, deletedAt: null };
+
+    if (options?.periodStart || options?.periodEnd) {
+      const periodStart = options.periodStart
+        ? this.parsePeriodDate(options.periodStart, 'periodStart')
+        : undefined;
+      const periodEnd = options.periodEnd
+        ? this.parsePeriodDate(options.periodEnd, 'periodEnd')
+        : undefined;
+      whereClause.createdAt = {};
+      if (periodStart) whereClause.createdAt.gte = periodStart;
+      if (periodEnd) whereClause.createdAt.lte = periodEnd;
+    } else if (options?.daysBack) {
+      whereClause.createdAt = {
+        gte: new Date(Date.now() - options.daysBack * 24 * 60 * 60 * 1000),
+      };
+    }
+
     const orders = await this.prisma.serviceOrder.findMany({
-      where: { tenantId, deletedAt: null },
-      include: { timeEntries: true },
-      take: 2000,
+      where: whereClause,
+      select: {
+        id: true,
+        requester: true,
+        priority: true,
+        status: true,
+        timeEntries: {
+          select: { minutes: true },
+        },
+      },
       orderBy: { createdAt: 'desc' },
     });
 
@@ -50,7 +78,7 @@ export class ReportsService {
       if (['FECHADA', 'RESOLVIDA'].includes(order.status)) pData.closedOrders += 1;
 
       const orderMinutes =
-        order.timeEntries?.reduce((sum: number, t: any) => sum + t.minutes, 0) || 0;
+        order.timeEntries?.reduce((sum: number, t: { minutes: number }) => sum + t.minutes, 0) || 0;
       pData.totalMinutes += orderMinutes;
     }
 
@@ -85,14 +113,16 @@ export class ReportsService {
     return report.sort((a, b) => a.score - b.score);
   }
 
-  async getManagerKPIs(tenantId: string) {
+  async getManagerKPIs(tenantId: string, options?: { daysBack?: number }) {
+    const days = options?.daysBack || 30;
+    const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
+
     const orders = await this.prisma.serviceOrder.findMany({
       where: {
         tenantId,
         deletedAt: null,
-        createdAt: { gte: new Date(new Date().setDate(new Date().getDate() - 30)) },
+        createdAt: { gte: sinceDate },
       },
-      take: 2000,
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
@@ -101,6 +131,8 @@ export class ReportsService {
         priority: true,
         createdAt: true,
         deadlineAt: true,
+        resolvedAt: true,
+        closedAt: true,
         updatedAt: true,
       },
     });
@@ -128,8 +160,13 @@ export class ReportsService {
       if (isClosed) {
         totalClosed++;
         pData.closed += 1;
-        pData.totalResolutionTimeMs +=
-          new Date(order.updatedAt).getTime() - new Date(order.createdAt).getTime();
+        // Usa a data efetiva de resolução (resolvedAt ou closedAt), evitando distorções por atualizações posteriores em updatedAt
+        const effectiveResolution = order.resolvedAt || order.closedAt || order.updatedAt;
+        const diffMs = Math.max(
+          0,
+          new Date(effectiveResolution).getTime() - new Date(order.createdAt).getTime(),
+        );
+        pData.totalResolutionTimeMs += diffMs;
       } else {
         totalOpen++;
         pData.open += 1;

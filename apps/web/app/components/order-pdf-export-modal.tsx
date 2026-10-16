@@ -60,6 +60,10 @@ type Props = {
 
 export function OrderPdfExportModal({ order, onClose, dark = false }: Props) {
   const [copied, setCopied] = React.useState(false);
+  const [showWaPrompt, setShowWaPrompt] = React.useState(false);
+  const [waTarget, setWaTarget] = React.useState('');
+  const [isSendingWa, setIsSendingWa] = React.useState(false);
+  const [waSentSuccess, setWaSentSuccess] = React.useState(false);
 
   const formatDateTime = (val?: string | null) => {
     if (!val) return '—';
@@ -110,6 +114,35 @@ export function OrderPdfExportModal({ order, onClose, dark = false }: Props) {
     }
   };
 
+  const handleSendAutomaticWhatsApp = async () => {
+    setIsSendingWa(true);
+    try {
+      const res = await fetch('/api/notifications/whatsapp', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          orderId: order.id,
+          target: waTarget.trim() || undefined,
+        }),
+      });
+
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'Erro ao enviar notificação WhatsApp.');
+      }
+
+      setWaSentSuccess(true);
+      setTimeout(() => {
+        setWaSentSuccess(false);
+        setShowWaPrompt(false);
+      }, 3000);
+    } catch (err: any) {
+      alert(`Falha no envio via WhatsApp: ${err.message || 'Erro inesperado'}`);
+    } finally {
+      setIsSendingWa(false);
+    }
+  };
+
   const handlePrint = () => {
     window.print();
   };
@@ -129,23 +162,32 @@ export function OrderPdfExportModal({ order, onClose, dark = false }: Props) {
           </div>
           <div className="flex items-center gap-2">
             <button
+              onClick={() => setShowWaPrompt(!showWaPrompt)}
+              type="button"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-emerald-600 hover:bg-emerald-700 text-white shadow-sm transition-all"
+              title="Disparar PDF e resumo diretamente para grupo ou contato"
+            >
+              <Share2 size={15} />
+              Enviar para Grupo WhatsApp
+            </button>
+            <button
               onClick={handleCopyWhatsApp}
               type="button"
-              className={`flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold transition-all ${
+              className={`flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all ${
                 copied
-                  ? 'bg-emerald-600 text-white'
-                  : 'bg-emerald-500 hover:bg-emerald-600 text-white shadow-sm hover:shadow'
+                  ? 'bg-slate-700 text-white'
+                  : 'bg-slate-200 hover:bg-slate-300 dark:bg-slate-700 dark:hover:bg-slate-600 text-slate-700 dark:text-slate-200'
               }`}
             >
-              {copied ? <Check size={16} /> : <Share2 size={16} />}
-              {copied ? 'Copiado para WhatsApp!' : 'Copiar Resumo WhatsApp'}
+              {copied ? <Check size={15} /> : <Share2 size={15} />}
+              {copied ? 'Copiado!' : 'Copiar Resumo'}
             </button>
             <button
               onClick={handlePrint}
               type="button"
-              className="flex items-center gap-2 px-3.5 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm hover:shadow transition-all"
+              className="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold bg-indigo-600 hover:bg-indigo-700 text-white shadow-sm hover:shadow transition-all"
             >
-              <Printer size={16} />
+              <Printer size={15} />
               Imprimir / Salvar PDF
             </button>
             <button
@@ -158,6 +200,43 @@ export function OrderPdfExportModal({ order, onClose, dark = false }: Props) {
             </button>
           </div>
         </div>
+
+        {/* Prompt de Envio Automático WhatsApp */}
+        {showWaPrompt && (
+          <div className="print:hidden px-6 py-3 bg-emerald-50 dark:bg-emerald-950/40 border-b border-emerald-200 dark:border-emerald-800 flex flex-wrap items-center justify-between gap-3 text-xs">
+            <div className="flex items-center gap-2 text-emerald-900 dark:text-emerald-200">
+              <span className="font-semibold">Disparo Automático com Link do PDF:</span>
+              <input
+                type="text"
+                value={waTarget}
+                onChange={(e) => setWaTarget(e.target.value)}
+                placeholder="ID do Grupo WhatsApp ou Telefone (ex: 5511999999999)..."
+                className="px-3 py-1.5 rounded-lg border border-emerald-300 dark:border-emerald-700 bg-white dark:bg-slate-800 text-slate-800 dark:text-slate-200 w-80 text-xs focus:outline-none focus:ring-1 focus:ring-emerald-500"
+              />
+            </div>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                disabled={isSendingWa}
+                onClick={handleSendAutomaticWhatsApp}
+                className="px-4 py-1.5 rounded-lg bg-emerald-600 hover:bg-emerald-700 text-white font-semibold transition disabled:opacity-50"
+              >
+                {isSendingWa
+                  ? 'Disparando...'
+                  : waSentSuccess
+                    ? '✓ Enviado com Sucesso!'
+                    : 'Confirmar Disparo'}
+              </button>
+              <button
+                type="button"
+                onClick={() => setShowWaPrompt(false)}
+                className="text-slate-400 hover:text-slate-600 dark:hover:text-slate-200 px-2 py-1"
+              >
+                Cancelar
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Printable Document Container */}
         <div

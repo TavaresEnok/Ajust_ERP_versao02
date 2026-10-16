@@ -10,6 +10,7 @@ import {
   Req,
   UseGuards,
   UnauthorizedException,
+  BadRequestException,
   Inject,
 } from '@nestjs/common';
 import { NotificationChannel, NotificationTrigger } from '@prisma/client';
@@ -18,7 +19,7 @@ import { NotificationConfigInput, NotificationsService } from './notifications.s
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
-import { assertManagerRole } from '../common/role-utils';
+import { assertAnyRole, assertManagerRole } from '../common/role-utils';
 
 const NotificationConfigObjectSchema = z.object({
   name: z.string().trim().min(1).max(120),
@@ -81,5 +82,16 @@ export class NotificationsController {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     assertManagerRole(req.auth);
     return this.svc.remove(req.auth.tenantId, id);
+  }
+
+  @Post('whatsapp/dispatch-order')
+  dispatchWhatsApp(
+    @Req() req: RequestWithAuth,
+    @Body() body: { orderId: string; target?: string; customMessage?: string },
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico']);
+    if (!body?.orderId) throw new BadRequestException('orderId is required');
+    return this.svc.dispatchWhatsAppOrder(req.auth.tenantId, body);
   }
 }

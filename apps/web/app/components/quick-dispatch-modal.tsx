@@ -36,13 +36,29 @@ type Props = {
   dark?: boolean;
 };
 
+type CatalogItem = {
+  id: string;
+  name: string;
+  category: string;
+  description?: string;
+  estimatedMinutes?: number;
+  defaultPriority?: string;
+  checklist?: string[];
+  active: boolean;
+};
+
 const SERVICE_TEMPLATES = [
-  { type: 'ROMPIMENTO', label: 'Rompimento de Fibra / Link', defaultUrgency: 'EMERGENCIAL', priority: 'CRITICA' },
+  { type: 'DNS', label: 'Servidor DNS Recursivo (Unbound/Bind)', defaultUrgency: '24H', priority: 'ALTA' },
+  { type: 'PROXMOX', label: 'Cluster Proxmox VE (HA / ZFS / Storage)', defaultUrgency: '48H', priority: 'ALTA' },
   { type: 'BGP', label: 'Incidente / Sessão BGP Down', defaultUrgency: 'EMERGENCIAL', priority: 'CRITICA' },
+  { type: 'FIREWALL', label: 'Firewall de Borda / Proteção DDoS', defaultUrgency: '24H', priority: 'ALTA' },
+  { type: 'ROTEAMENTO_CGNAT', label: 'Implantação / Otimização CGNAT', defaultUrgency: '24H', priority: 'ALTA' },
+  { type: 'ROMPIMENTO', label: 'Rompimento de Fibra / Link', defaultUrgency: 'EMERGENCIAL', priority: 'CRITICA' },
   { type: 'LENTIDAO', label: 'Lentidão Massiva / Degradação', defaultUrgency: '24H', priority: 'ALTA' },
-  { type: 'INSTALACAO', label: 'Implantação de Servidor / DNS / Speedtest', defaultUrgency: '48H', priority: 'NORMAL' },
-  { type: 'CONFIGURACAO_ONU', label: 'Configuração / Provisionamento OLT & ONU', defaultUrgency: '48H', priority: 'NORMAL' },
-  { type: 'AUDITORIA', label: 'Auditoria de Roteamento / Boas Práticas', defaultUrgency: '72H', priority: 'BAIXA' },
+  { type: 'CONFIGURACAO_ONU', label: 'Provisionamento OLT & ONU', defaultUrgency: '48H', priority: 'NORMAL' },
+  { type: 'AUDITORIA', label: 'Auditoria Geral de Topologia', defaultUrgency: '72H', priority: 'NORMAL' },
+  { type: 'INFRAESTRUTURA', label: 'Infraestrutura / Datacenter / Nobreak', defaultUrgency: '24H', priority: 'NORMAL' },
+  { type: 'CONSULTORIA_GERAL', label: 'Consultoria Especializada ISP', defaultUrgency: '72H', priority: 'NORMAL' },
   { type: 'TROCA_SENHA', label: 'Atendimento Rápido / Suporte N1', defaultUrgency: '24H', priority: 'NORMAL' },
 ] as const;
 
@@ -56,18 +72,42 @@ export function QuickDispatchModal({
 }: Props) {
   const [provider, setProvider] = useState(providersList[0] || '');
   const [customProvider, setCustomProvider] = useState('');
-  const [type, setType] = useState('ROMPIMENTO');
-  const [urgency, setUrgency] = useState<'EMERGENCIAL' | '24H' | '48H' | '72H' | 'CUSTOM'>('EMERGENCIAL');
-  const [priority, setPriority] = useState<'BAIXA' | 'NORMAL' | 'ALTA' | 'CRITICA'>('CRITICA');
+  const [type, setType] = useState('DNS');
+  const [urgency, setUrgency] = useState<'EMERGENCIAL' | '24H' | '48H' | '72H' | 'CUSTOM'>('24H');
+  const [priority, setPriority] = useState<'BAIXA' | 'NORMAL' | 'ALTA' | 'CRITICA'>('ALTA');
   const [analyst, setAnalyst] = useState(analystsList[0] || '');
   const [description, setDescription] = useState('');
   const [isDirectResolution, setIsDirectResolution] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [catalogItems, setCatalogItems] = useState<CatalogItem[]>([]);
+  const [selectedCatalogId, setSelectedCatalogId] = useState('');
 
-  const handleTemplateSelect = (tmpl: typeof SERVICE_TEMPLATES[number]) => {
+  // Carrega catálogo de serviços configurável
+  React.useEffect(() => {
+    fetch('/api/service-catalog')
+      .then((r) => (r.ok ? r.json() : []))
+      .then((items) => {
+        if (Array.isArray(items)) setCatalogItems(items);
+      })
+      .catch(() => {});
+  }, []);
+
+  const handleTemplateSelect = (tmpl: (typeof SERVICE_TEMPLATES)[number]) => {
     setType(tmpl.type);
     setUrgency(tmpl.defaultUrgency as any);
     setPriority(tmpl.priority as any);
+  };
+
+  const handleCatalogSelect = (item: CatalogItem) => {
+    setSelectedCatalogId(item.id);
+    setType(item.category || 'CONSULTORIA_GERAL');
+    setPriority((item.defaultPriority as any) || 'NORMAL');
+    setUrgency('24H');
+    let desc = item.description ? `${item.description}\n\n` : '';
+    if (item.checklist && item.checklist.length > 0) {
+      desc += 'Checklist Técnico:\n' + item.checklist.map((c) => `- [ ] ${c}`).join('\n');
+    }
+    setDescription(desc);
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -208,6 +248,36 @@ export function QuickDispatchModal({
                   </button>
                 ))}
               </div>
+
+              {/* Catálogo de Serviços Padronizados (Consultoria de ISPs) */}
+              {catalogItems.length > 0 && (
+                <div className="mt-3 pt-3 border-t border-slate-200 dark:border-slate-800">
+                  <div className="flex items-center justify-between mb-1.5">
+                    <label className="text-[11px] font-bold uppercase tracking-wider text-indigo-600 dark:text-indigo-400">
+                      ⚡ Catálogo Especializado para Provedores
+                    </label>
+                    <span className="text-[10px] text-slate-400">
+                      Preenche checklist e SLA automaticamente
+                    </span>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {catalogItems.map((c) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => handleCatalogSelect(c)}
+                        className={`text-xs px-2.5 py-1.5 rounded-lg border transition ${
+                          selectedCatalogId === c.id
+                            ? 'bg-indigo-600 text-white border-indigo-600 shadow-sm'
+                            : 'bg-white dark:bg-slate-800 border-slate-200 dark:border-slate-700 hover:border-indigo-400 text-slate-700 dark:text-slate-200'
+                        }`}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 

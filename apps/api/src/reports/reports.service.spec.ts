@@ -139,6 +139,33 @@ describe('ReportsService', () => {
       expect(ana!.tmrHours).toBeGreaterThan(0);
     });
 
+    it('utiliza resolvedAt e nao updatedAt para evitar distorcao no calculo de TMR', async () => {
+      const created = new Date('2025-01-01T10:00:00.000Z');
+      const resolved = new Date('2025-01-01T12:00:00.000Z'); // Resolvida em exatamente 2h
+      const updatedDaysLater = new Date('2025-01-20T10:00:00.000Z'); // Editada 19 dias depois (anotação/tag)
+
+      const orders = [
+        {
+          id: '1',
+          analystName: 'Carlos',
+          status: 'RESOLVIDA',
+          priority: 'NORMAL',
+          createdAt: created,
+          deadlineAt: null,
+          resolvedAt: resolved,
+          closedAt: null,
+          updatedAt: updatedDaysLater,
+        },
+      ];
+      svc = new ReportsService(makePrismaWithOrders(orders));
+      const result = await svc.getManagerKPIs('tenant-1');
+      const carlos = result.performanceByAnalyst.find((a) => a.name === 'Carlos');
+      expect(carlos).toBeDefined();
+      expect(carlos!.closed).toBe(1);
+      // Deve ser 2 horas, e NÃO ~456 horas como seria usando updatedAt
+      expect(carlos!.tmrHours).toBe(2);
+    });
+
     it('agrupa ordens por analista, incluindo Unassigned', async () => {
       const orders = [
         {

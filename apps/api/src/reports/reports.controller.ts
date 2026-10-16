@@ -27,19 +27,30 @@ export class ReportsController {
   @Get('operational-health')
   @UseGuards(TenantRateLimitGuard)
   @TenantRateLimit(30, 60) // 30 req/min por tenant
-  getOperationalHealth(@Req() req: RequestWithAuth) {
+  getOperationalHealth(
+    @Req() req: RequestWithAuth,
+    @Query('periodStart') periodStart?: string,
+    @Query('periodEnd') periodEnd?: string,
+    @Query('daysBack') daysBack?: string,
+  ) {
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura', 'cliente']);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    return this.svc.getOperationalHealth(req.auth.tenantId);
+    return this.svc.getOperationalHealth(req.auth.tenantId, {
+      periodStart,
+      periodEnd,
+      daysBack: daysBack ? parseInt(daysBack, 10) : undefined,
+    });
   }
 
   @Get('manager-kpi')
   @UseGuards(TenantRateLimitGuard)
   @TenantRateLimit(30, 60) // 30 req/min por tenant
-  getManagerKPIs(@Req() req: RequestWithAuth) {
+  getManagerKPIs(@Req() req: RequestWithAuth, @Query('daysBack') daysBack?: string) {
     assertManagerRole(req.auth);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    return this.svc.getManagerKPIs(req.auth.tenantId);
+    return this.svc.getManagerKPIs(req.auth.tenantId, {
+      daysBack: daysBack ? parseInt(daysBack, 10) : undefined,
+    });
   }
 
   @Get('service-order-flow')

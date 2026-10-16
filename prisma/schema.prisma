@@ -36,6 +36,13 @@ enum ServiceOrderType {
   AUDITORIA
   INSTALACAO
   BGP
+  DNS
+  PROXMOX
+  FIREWALL
+  ROTEAMENTO_CGNAT
+  INFRAESTRUTURA
+  CONSULTORIA_GERAL
+  OUTRO
 }
 
 enum ServiceOrderStatus {
@@ -141,6 +148,7 @@ model Tenant {
   businessCalendars          BusinessCalendar[]
   businessCalendarExceptions BusinessCalendarException[]
   slaAuditEvents             SlaAuditEvent[]
+  serviceCatalogItems        ServiceCatalogItem[]
 
   @@index([status])
 }
@@ -336,6 +344,10 @@ model ServiceOrder {
   @@index([tenantId, status, priority, deadlineAt])
   @@index([tenantId, type, createdAt])
   @@index([tenantId, occurrenceId, createdAt(sort: Desc)])
+  @@index([tenantId, requester])
+  @@index([tenantId, resolvedAt])
+  @@index([tenantId, closedAt])
+  @@index([tenantId, createdAt])
 }
 
 model ServiceOrderOccurrence {
@@ -799,6 +811,7 @@ enum NotificationChannel {
   EMAIL
   WEBHOOK
   SLACK
+  WHATSAPP
 }
 
 enum NotificationTrigger {
@@ -1005,3 +1018,25 @@ model ProviderProfile {
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 }
+
+// ─── Service Catalog (Catálogo de Serviços Especializados para ISPs) ─────────
+
+model ServiceCatalogItem {
+  id               String           @id @default(uuid())
+  tenantId         String
+  name             String
+  category         ServiceOrderType @default(AUDITORIA)
+  description      String?
+  estimatedMinutes Int              @default(120)
+  defaultPriority  Priority         @default(NORMAL)
+  checklist        Json             @default("[]")
+  active           Boolean          @default(true)
+  createdAt        DateTime         @default(now())
+  updatedAt        DateTime         @updatedAt
+
+  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@index([tenantId, active])
+  @@index([tenantId, category])
+}
+

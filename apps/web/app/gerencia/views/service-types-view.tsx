@@ -43,14 +43,20 @@ type TypeStats = {
 /* Constants                                   */
 /* ─────────────────────────────────────────── */
 const TYPE_LABELS: Record<string, string> = {
-  ROMPIMENTO: 'Rompimento',
-  LENTIDAO: 'Lentidão',
-  CONFIGURACAO_ONU: 'Config. ONU',
-  TROCA_SENHA: 'Troca de Senha',
+  DNS: 'DNS Recursivo/Autoritativo',
+  PROXMOX: 'Cluster Proxmox VE',
+  BGP: 'BGP & Roteamento ASN',
+  FIREWALL: 'Firewall & Proteção DDoS',
+  ROTEAMENTO_CGNAT: 'Roteamento CGNAT',
+  ROMPIMENTO: 'Rompimento de Fibra / Link',
+  LENTIDAO: 'Lentidão Massiva',
+  CONFIGURACAO_ONU: 'Config. ONU / OLT',
+  TROCA_SENHA: 'Suporte N1 / Troca Senha',
   CANCELAMENTO: 'Cancelamento',
-  AUDITORIA: 'Auditoria',
-  INSTALACAO: 'Instalação',
-  BGP: 'BGP',
+  AUDITORIA: 'Auditoria de Rede',
+  INSTALACAO: 'Instalação / Implantação',
+  INFRAESTRUTURA: 'Infraestrutura & POP',
+  CONSULTORIA_GERAL: 'Consultoria Especializada',
   OUTROS: 'Outros',
 };
 
@@ -95,8 +101,7 @@ function buildTypeStats(orders: OrderItem[]): TypeStats[] {
 
       const totalAgeMs = items.reduce((s, o) => {
         const created = new Date(o.createdAt).getTime();
-        const end = STATUS_CLOSED.has(o.status) ? now : now;
-        return s + (end - created);
+        return s + Math.max(0, now - created);
       }, 0);
       const avgAgeHours =
         items.length > 0 ? Math.round((totalAgeMs / items.length / 3600000) * 10) / 10 : 0;
