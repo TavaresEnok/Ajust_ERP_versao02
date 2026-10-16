@@ -15,6 +15,7 @@
  */
 import {
   BadRequestException,
+  ConflictException,
   ForbiddenException,
   forwardRef,
   Inject,
@@ -144,11 +145,13 @@ type UpdateOrderInput = {
   deadlineAt?: string;
   tags?: string[];
   internalNotes?: string | null;
+  expectedVersion?: number;
 };
 
 type TransitionInput = {
   toStatus: ServiceOrderStatus;
   reason: string;
+  expectedVersion?: number;
 };
 
 type ListInput = {
@@ -1329,10 +1332,16 @@ export class ServiceOrdersService {
 
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId, deletedAt: null },
-      select: { id: true, protocol: true },
+      select: { id: true, protocol: true, version: true },
     });
     if (!order) {
       throw new NotFoundException('Service order not found.');
+    }
+
+    if (patch.expectedVersion !== undefined && order.version !== patch.expectedVersion) {
+      throw new ConflictException(
+        'Esta Ordem de Serviço foi alterada por outro usuário. Recarregue a página para obter a versão mais recente.',
+      );
     }
 
     const data: Prisma.ServiceOrderUpdateInput = {
@@ -1350,31 +1359,45 @@ export class ServiceOrdersService {
       ...(patch.deadlineAt ? { deadlineAt: new Date(patch.deadlineAt) } : {}),
     };
 
-    const updated = await this.prisma.serviceOrder.update({
-      where: { id: order.id },
-      data: {
-        ...data,
-        occurrences: {
-          create: {
-            actorUserId: authUserId,
-            sourceSystem: 'ERP',
-            message: 'Campos da O.S atualizados manualmente.',
-          },
+    let updated;
+    try {
+      updated = await this.prisma.serviceOrder.update({
+        where: {
+          id: order.id,
+          ...(patch.expectedVersion !== undefined ? { version: patch.expectedVersion } : {}),
         },
-      },
-      include: {
-        occurrence: true,
-        occurrences: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            actorUser: {
-              select: { id: true, name: true, email: true },
+        data: {
+          ...data,
+          version: { increment: 1 },
+          occurrences: {
+            create: {
+              actorUserId: authUserId,
+              sourceSystem: 'ERP',
+              message: 'Campos da O.S atualizados manualmente.',
             },
           },
         },
-        attachments: { orderBy: { uploadedAt: 'desc' } },
-      },
-    });
+        include: {
+          occurrence: true,
+          occurrences: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              actorUser: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+          attachments: { orderBy: { uploadedAt: 'desc' } },
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new ConflictException(
+          'Esta Ordem de Serviço foi alterada concorrentemente por outro usuário. Recarregue a página para obter a versão mais recente.',
+        );
+      }
+      throw error;
+    }
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order', updated.id, {
       protocol: updated.protocol,
@@ -1436,45 +1459,65 @@ export class ServiceOrdersService {
       }
     }
 
+    if (input.expectedVersion !== undefined && order.version !== input.expectedVersion) {
+      throw new ConflictException(
+        'Esta Ordem de Serviço foi alterada por outro usuário. Recarregue a página para obter a versão mais recente.',
+      );
+    }
+
     const now = new Date();
 
-    const updated = await this.prisma.serviceOrder.update({
-      where: { id: order.id },
-      data: {
-        status: to,
-        resolvedAt: to === 'RESOLVIDA' ? now : order.resolvedAt,
-        closedAt: to === 'FECHADA' ? now : order.closedAt,
-        canceledAt: to === 'CANCELADA' ? now : order.canceledAt,
-        reopenedCount:
-          from === 'FECHADA' && to === 'EM_ANALISE' ? order.reopenedCount + 1 : order.reopenedCount,
-        occurrences: {
-          create: {
-            actorUserId: authUserId,
-            sourceSystem: 'ERP',
-            message: `Status alterado de ${from} para ${to}. Motivo: ${input.reason}`,
-          },
+    let updated;
+    try {
+      updated = await this.prisma.serviceOrder.update({
+        where: {
+          id: order.id,
+          ...(input.expectedVersion !== undefined ? { version: input.expectedVersion } : {}),
         },
-        serviceOrderStatusEvents: {
-          create: {
-            tenantId,
-            fromStatus: from,
-            toStatus: to,
-            actorUserId: authUserId,
-            reason: input.reason || null,
+        data: {
+          status: to,
+          version: { increment: 1 },
+          resolvedAt: to === 'RESOLVIDA' ? now : order.resolvedAt,
+          closedAt: to === 'FECHADA' ? now : order.closedAt,
+          canceledAt: to === 'CANCELADA' ? now : order.canceledAt,
+          reopenedCount:
+            from === 'FECHADA' && to === 'EM_ANALISE' ? order.reopenedCount + 1 : order.reopenedCount,
+          occurrences: {
+            create: {
+              actorUserId: authUserId,
+              sourceSystem: 'ERP',
+              message: `Status alterado de ${from} para ${to}. Motivo: ${input.reason}`,
+            },
           },
-        },
-      },
-      include: {
-        occurrences: {
-          orderBy: { createdAt: 'desc' },
-          include: {
-            actorUser: {
-              select: { id: true, name: true, email: true },
+          serviceOrderStatusEvents: {
+            create: {
+              tenantId,
+              fromStatus: from,
+              toStatus: to,
+              actorUserId: authUserId,
+              reason: input.reason || null,
             },
           },
         },
-      },
-    });
+        include: {
+          occurrences: {
+            orderBy: { createdAt: 'desc' },
+            include: {
+              actorUser: {
+                select: { id: true, name: true, email: true },
+              },
+            },
+          },
+        },
+      });
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
+        throw new ConflictException(
+          'Esta Ordem de Serviço foi alterada concorrentemente por outro usuário. Recarregue a página para obter a versão mais recente.',
+        );
+      }
+      throw error;
+    }
 
     const auditAction: AuditAction =
       to === 'FECHADA'

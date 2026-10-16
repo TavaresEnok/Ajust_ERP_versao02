@@ -14,12 +14,18 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   const raw = await request.json().catch(() => ({}));
   const body = omitTenantIdFromBody(raw);
 
+  const ifMatch = request.headers.get('if-match');
+  const headers: Record<string, string> = {
+    authorization: `Bearer ${session.accessToken}`,
+    'content-type': 'application/json',
+  };
+  if (ifMatch) {
+    headers['if-match'] = ifMatch;
+  }
+
   const response = await fetch(`${apiBaseUrl()}/service-orders/${encodeURIComponent(id)}`, {
     method: 'PATCH',
-    headers: {
-      authorization: `Bearer ${session.accessToken}`,
-      'content-type': 'application/json',
-    },
+    headers,
     body: JSON.stringify(body),
     cache: 'no-store',
   });
@@ -33,5 +39,9 @@ export async function PATCH(request: NextRequest, context: { params: Promise<{ i
   }
 
   const proxied = NextResponse.json(text ? JSON.parse(text) : {});
+  const etag = response.headers.get('etag');
+  if (etag) {
+    proxied.headers.set('etag', etag);
+  }
   return applyRefreshIfNeeded(proxied, session.refreshPayload);
 }

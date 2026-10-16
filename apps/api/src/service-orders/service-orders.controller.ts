@@ -65,6 +65,7 @@ const UpdateOrderSchema = z.object({
   deadlineAt: z.string().datetime().optional(),
   tags: z.array(z.string()).optional(),
   internalNotes: z.string().nullable().optional(),
+  expectedVersion: z.coerce.number().int().positive().optional(),
 });
 
 const OccurrenceOrderSchema = z.object({
@@ -121,6 +122,7 @@ const CreateAnnotationSchema = z.object({
 const TransitionSchema = z.object({
   toStatus: z.nativeEnum(ServiceOrderStatus),
   reason: z.string().min(3),
+  expectedVersion: z.coerce.number().int().positive().optional(),
 });
 
 const ApprovalSchema = z.object({
@@ -416,23 +418,51 @@ export class ServiceOrdersController {
   }
 
   @Get(':id')
-  async getById(@Param('id') id: string, @Req() req: RequestWithAuth) {
+  async getById(
+    @Param('id') id: string,
+    @Req() req: RequestWithAuth,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    return this.serviceOrdersService.getById(req.auth.tenantId, id, req.auth.role);
+    const order = await this.serviceOrdersService.getById(req.auth.tenantId, id, req.auth.role);
+    if (order && typeof order === 'object' && 'version' in order) {
+      res.setHeader('ETag', `"${(order as any).version}"`);
+    }
+    return order;
   }
 
   @Patch(':id')
-  async patchOrder(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+  async patchOrder(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = UpdateOrderSchema.parse(body);
-    return this.serviceOrdersService.updateOrder(
+
+    const ifMatch = req.headers['if-match'];
+    if (input.expectedVersion === undefined && typeof ifMatch === 'string') {
+      const parsed = parseInt(ifMatch.replace(/["\s]/g, ''), 10);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        input.expectedVersion = parsed;
+      }
+    }
+
+    const updated = await this.serviceOrdersService.updateOrder(
       req.auth.tenantId,
       id,
       req.auth.userId,
       req.auth.role || '',
       input,
     );
+
+    if (updated && typeof updated === 'object' && 'version' in updated) {
+      res.setHeader('ETag', `"${(updated as any).version}"`);
+    }
+
+    return updated;
   }
 
   @Post(':id/annotations')
@@ -450,18 +480,37 @@ export class ServiceOrdersController {
   }
 
   @Patch(':id/transition')
-  async transition(@Param('id') id: string, @Body() body: unknown, @Req() req: RequestWithAuth) {
+  async transition(
+    @Param('id') id: string,
+    @Body() body: unknown,
+    @Req() req: RequestWithAuth,
+    @Res({ passthrough: true }) res: Response,
+  ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = TransitionSchema.parse(body);
 
-    return this.serviceOrdersService.transition(
+    const ifMatch = req.headers['if-match'];
+    if (input.expectedVersion === undefined && typeof ifMatch === 'string') {
+      const parsed = parseInt(ifMatch.replace(/["\s]/g, ''), 10);
+      if (!Number.isNaN(parsed) && parsed > 0) {
+        input.expectedVersion = parsed;
+      }
+    }
+
+    const updated = await this.serviceOrdersService.transition(
       req.auth.tenantId,
       id,
       req.auth.userId,
       req.auth.role || '',
       input,
     );
+
+    if (updated && typeof updated === 'object' && 'version' in updated) {
+      res.setHeader('ETag', `"${(updated as any).version}"`);
+    }
+
+    return updated;
   }
 
   @Post(':id/approvals')
