@@ -9,6 +9,8 @@ import { IxcReconciliationProcessor } from './queues/processors/ixc-reconciliati
 import { ExportRetentionProcessor } from './queues/processors/export-retention.processor';
 import { MonthlyReportProcessor } from './queues/processors/monthly-report.processor';
 import { AuditArchivingProcessor } from './queues/processors/audit-archiving.processor';
+import { SlaMonitoringProcessor } from './queues/processors/sla-monitoring.processor';
+import { SlaMonitoringService } from './sla/sla-monitoring.service';
 import { WorkerAuthGuard } from './worker-auth.guard';
 
 @Module({
@@ -23,6 +25,8 @@ import { WorkerAuthGuard } from './worker-auth.guard';
     ExportRetentionProcessor,
     MonthlyReportProcessor,
     AuditArchivingProcessor,
+    SlaMonitoringService,
+    SlaMonitoringProcessor,
     WorkerAuthGuard,
   ],
 })

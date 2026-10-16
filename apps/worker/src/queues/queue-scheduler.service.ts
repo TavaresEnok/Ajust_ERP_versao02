@@ -5,10 +5,12 @@ import {
   QUEUE_EXPORT_RETENTION,
   QUEUE_MONTHLY_HEALTH_REPORT,
   QUEUE_AUDIT_ARCHIVING,
+  QUEUE_SLA_MONITORING,
   JOB_IXC_RECONCILE,
   JOB_EXPORT_CLEANUP,
   JOB_MONTHLY_REPORT,
   JOB_AUDIT_ARCHIVE,
+  JOB_SLA_EVALUATE,
 } from './queue.constants';
 
 const redisConnection = {
@@ -44,9 +46,11 @@ export class QueueSchedulerService implements OnModuleInit, OnModuleDestroy {
     const retentionQueue = this.createQueue(QUEUE_EXPORT_RETENTION);
     const reportQueue = this.createQueue(QUEUE_MONTHLY_HEALTH_REPORT);
     const archiveQueue = this.createQueue(QUEUE_AUDIT_ARCHIVING);
+    const slaQueue = this.createQueue(QUEUE_SLA_MONITORING);
 
     const ixcIntervalMs = Number(process.env.IXC_RECONCILE_INTERVAL_MS || 300_000);
     const retentionIntervalMs = Number(process.env.EXPORT_RETENTION_INTERVAL_MS || 3_600_000);
+    const slaIntervalMs = Number(process.env.SLA_MONITOR_INTERVAL_MS || 60_000); // 1 minute default
 
     // IXC Reconciliation — configurable interval (default 5 min)
     await ixcQueue.upsertJobScheduler(
@@ -85,6 +89,16 @@ export class QueueSchedulerService implements OnModuleInit, OnModuleDestroy {
       {
         name: JOB_AUDIT_ARCHIVE,
         opts: { attempts: 3, backoff: { type: 'exponential', delay: 15_000 } },
+      },
+    );
+
+    // SLA Monitoring — periodic scan (default 60s)
+    await slaQueue.upsertJobScheduler(
+      'sla-monitor-schedule',
+      { every: slaIntervalMs },
+      {
+        name: JOB_SLA_EVALUATE,
+        opts: { attempts: 3, backoff: { type: 'exponential', delay: 5_000 } },
       },
     );
 
