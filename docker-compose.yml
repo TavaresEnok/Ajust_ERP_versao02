@@ -118,6 +118,9 @@ services:
 
   redis:
     image: redis:7-alpine
+    command: redis-server --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-volatile-lru} --appendonly yes --save 60 1
+    volumes:
+      - redis_data:/data
     ports:
       - "${REDIS_PORT:-8073}:6379"
     healthcheck:
@@ -159,3 +162,4 @@ services:
 volumes:
   postgres_data:
   loki_data:
+  redis_data:
