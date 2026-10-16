@@ -26,6 +26,7 @@ import {
 } from '@prisma/client';
 import { z } from 'zod';
 import type { Response } from 'express';
+import { createReadStream } from 'node:fs';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
@@ -499,5 +500,40 @@ export class ServiceOrdersController {
       req.auth.role || '',
       files || [],
     );
+  }
+
+  @Get(':id/attachments/:attachmentId/download')
+  @ApiOperation({ summary: 'Download seguro de anexo de O.S. com isolamento multi-tenant' })
+  async downloadAttachment(
+    @Param('id') id: string,
+    @Param('attachmentId') attachmentId: string,
+    @Req() req: RequestWithAuth,
+    @Res() res: Response,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+
+    const result = await this.serviceOrdersService.downloadAttachment(
+      req.auth.tenantId,
+      id,
+      attachmentId,
+      req.auth.userId,
+      req.auth.role || '',
+    );
+
+    res.setHeader('content-type', result.mimeType || 'application/octet-stream');
+    res.setHeader(
+      'content-disposition',
+      `attachment; filename="${encodeURIComponent(result.fileName)}"`,
+    );
+    res.setHeader('content-length', result.sizeBytes);
+    res.setHeader('x-content-type-options', 'nosniff');
+
+    const stream = createReadStream(result.filePath);
+    stream.on('error', (err) => {
+      if (!res.headersSent) {
+        res.status(500).json({ error: 'Failed to read attachment file.' });
+      }
+    });
+    stream.pipe(res);
   }
 }

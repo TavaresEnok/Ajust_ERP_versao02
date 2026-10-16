@@ -33,6 +33,7 @@ import {
   ServiceOrderStatus,
   ServiceOrderType,
 } from '@prisma/client';
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rm, writeFile } from 'node:fs/promises';
 import { basename, extname, join } from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -43,6 +44,13 @@ import { CsatService } from '../csat/csat.service';
 import { WorkflowsService } from '../workflows/workflows.service';
 import { SlaEngineService } from '../sla/sla-engine.service';
 import { OsProcessTemplateService } from '../os-process-templates/os-process-templates.service';
+
+export type AttachmentDownloadResult = {
+  fileName: string;
+  mimeType: string;
+  sizeBytes: number;
+  filePath: string;
+};
 
 type CreateOrderInput = {
   tenantId: string;
@@ -1713,6 +1721,67 @@ export class ServiceOrdersService {
     });
 
     return created;
+  }
+
+  async downloadAttachment(
+    tenantId: string,
+    orderId: string,
+    attachmentId: string,
+    authUserId: string,
+    role: string,
+  ): Promise<AttachmentDownloadResult> {
+    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'leitura', 'cliente'].includes(role)) {
+      throw new ForbiddenException('Role is not allowed to download attachments.');
+    }
+
+    const order = await this.prisma.serviceOrder.findFirst({
+      where: { id: orderId, tenantId, deletedAt: null },
+      select: { id: true, isCustomerVisible: true },
+    });
+
+    if (!order) {
+      throw new NotFoundException('Service order not found.');
+    }
+
+    if (role === 'cliente' && !order.isCustomerVisible) {
+      throw new ForbiddenException('Service order is not accessible.');
+    }
+
+    const attachment = await this.prisma.serviceOrderAttachment.findFirst({
+      where: {
+        id: attachmentId,
+        serviceOrderId: orderId,
+      },
+    });
+
+    if (!attachment || !attachment.storageKey) {
+      throw new NotFoundException('Attachment not found.');
+    }
+
+    if (role === 'cliente' && attachment.isInternal) {
+      throw new ForbiddenException('Internal attachment not accessible to customer.');
+    }
+
+    // Validação estrita contra path traversal
+    const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
+    const safePath = validatePathWithinBase(uploadRoot, attachment.storageKey);
+
+    if (!existsSync(safePath)) {
+      throw new NotFoundException('Attachment file not found on disk.');
+    }
+
+    await this.logAudit(tenantId, authUserId, 'EXPORT', 'service_order_attachment', attachment.id, {
+      serviceOrderId: orderId,
+      fileName: attachment.fileName,
+      operation: 'download',
+    });
+
+    return {
+      fileName: attachment.fileName,
+      mimeType: attachment.mimeType,
+      sizeBytes: attachment.sizeBytes,
+      filePath: safePath,
+    };
   }
 
   private assertTransitionAllowed(from: ServiceOrderStatus, to: ServiceOrderStatus, role: Role) {
