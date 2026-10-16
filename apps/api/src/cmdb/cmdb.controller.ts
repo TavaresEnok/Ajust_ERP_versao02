@@ -94,4 +94,57 @@ export class CmdbController {
     const input = LinkOrderSchema.parse(body);
     return this.cmdbService.linkOrder(req.auth.tenantId, assetId, input.orderId);
   }
+
+  // ─── Network Config Snapshots (CMDB-01) ───────────────────────────────────
+
+  @Post(':id/snapshots')
+  createSnapshot(
+    @Req() req: RequestWithAuth,
+    @Param('id') assetId: string,
+    @Body() body: unknown,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
+    const schema = z.object({
+      content: z.string().min(1).max(5_000_000),
+      notes: z.string().trim().max(1000).optional(),
+    });
+    const input = schema.parse(body);
+    return this.cmdbService.createSnapshot(req.auth.tenantId, req.auth.userId, assetId, input);
+  }
+
+  @Get(':id/snapshots')
+  listSnapshots(@Req() req: RequestWithAuth, @Param('id') assetId: string) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    return this.cmdbService.listSnapshots(req.auth.tenantId, assetId);
+  }
+
+  @Get(':id/snapshots/:snapshotId')
+  getSnapshot(
+    @Req() req: RequestWithAuth,
+    @Param('id') assetId: string,
+    @Param('snapshotId') snapshotId: string,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    return this.cmdbService.getSnapshot(req.auth.tenantId, assetId, snapshotId);
+  }
+
+  @Get(':id/snapshots-diff')
+  diffSnapshots(
+    @Req() req: RequestWithAuth,
+    @Param('id') assetId: string,
+    @Req() rawReq: any,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    const fromId = String(rawReq.query?.fromId || '');
+    const toId = String(rawReq.query?.toId || '');
+    if (!fromId || !toId) {
+      throw new UnauthorizedException('fromId e toId query parameters são obrigatórios');
+    }
+    return this.cmdbService.diffSnapshots(req.auth.tenantId, assetId, fromId, toId);
+  }
 }
+

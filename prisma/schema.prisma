@@ -135,6 +135,7 @@ model Tenant {
   occurrenceAnnotations      OccurrenceAnnotation[]
   sectors                    TenantSector[]
   assets                     Asset[]
+  assetConfigSnapshots       AssetConfigSnapshot[]
   changeRequests             ChangeRequest[]
   timeEntries                TimeEntry[]
   notificationConfigs        NotificationConfig[]
@@ -204,6 +205,7 @@ model User {
   timeEntries              TimeEntry[]
   onCallSchedules          OnCallSchedule[]
   createdApiKeys           ApiKey[]
+  createdConfigSnapshots   AssetConfigSnapshot[]
   serviceOrderStatusEvents ServiceOrderStatusEvent[]
 }
 
@@ -714,13 +716,34 @@ model Asset {
   updatedAt    DateTime      @updatedAt
   deletedAt    DateTime?
 
-  tenant        Tenant              @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  createdBy     User?               @relation(fields: [createdById], references: [id], onDelete: SetNull)
-  serviceOrders AssetServiceOrder[]
+  tenant          Tenant                @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  createdBy       User?                 @relation(fields: [createdById], references: [id], onDelete: SetNull)
+  serviceOrders   AssetServiceOrder[]
+  configSnapshots AssetConfigSnapshot[]
 
   @@index([tenantId, status])
   @@index([tenantId, category])
 }
+
+model AssetConfigSnapshot {
+  id          String   @id @default(uuid())
+  tenantId    String
+  assetId     String
+  version     Int      @default(1)
+  content     String
+  notes       String?
+  checksum    String
+  createdById String?
+  createdAt   DateTime @default(now())
+
+  tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  asset     Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
+  createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
+
+  @@index([assetId, createdAt])
+  @@index([tenantId, assetId])
+}
+
 
 model AssetServiceOrder {
   id        String   @id @default(uuid())

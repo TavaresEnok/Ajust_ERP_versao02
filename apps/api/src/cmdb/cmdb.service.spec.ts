@@ -8,6 +8,11 @@ function makePrisma(overrides: any = {}): any {
       create: jest.fn().mockResolvedValue({ id: 'a1' }),
       update: jest.fn().mockResolvedValue({ id: 'a1' }),
     },
+    assetConfigSnapshot: {
+      findFirst: jest.fn().mockResolvedValue(null),
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: 'snap-1', ...data })),
+    },
     assetServiceOrder: {
       upsert: jest.fn().mockResolvedValue({ assetId: 'a1', orderId: 'o1' }),
     },
@@ -18,6 +23,7 @@ function makePrisma(overrides: any = {}): any {
   for (const key of Object.keys(overrides)) base.asset[key] = overrides[key];
   return base;
 }
+
 
 describe('CmdbService.list', () => {
   it('retorna assets do tenant com createdBy selecionado', async () => {
@@ -110,3 +116,85 @@ describe('CmdbService.linkOrder', () => {
     expect(prisma.assetServiceOrder.upsert).not.toHaveBeenCalled();
   });
 });
+
+describe('CmdbService.snapshots (CMDB-01)', () => {
+  it('cria snapshot com version sequencial e checksum SHA-256', async () => {
+    const prisma = makePrisma();
+    prisma.assetConfigSnapshot.findFirst.mockResolvedValueOnce(null); // primeira versão
+    const svc = new CmdbService(prisma);
+
+    const result = await svc.createSnapshot('t1', 'u1', 'a1', {
+      content: '/ip address add address=192.168.88.1/24 interface=ether1',
+      notes: 'Config inicial de borda',
+    });
+
+    expect(prisma.assetConfigSnapshot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          tenantId: 't1',
+          assetId: 'a1',
+          version: 1,
+          checksum: expect.any(String),
+          createdById: 'u1',
+          notes: 'Config inicial de borda',
+        }),
+      }),
+    );
+    expect(result.version).toBe(1);
+  });
+
+  it('incrementa version sequencial quando já existem snapshots anteriores', async () => {
+    const prisma = makePrisma();
+    prisma.assetConfigSnapshot.findFirst.mockResolvedValueOnce({ version: 4 });
+    const svc = new CmdbService(prisma);
+
+    const result = await svc.createSnapshot('t1', 'u1', 'a1', {
+      content: '/routing bgp connection add name=ISP-UPSTREAM',
+    });
+
+    expect(prisma.assetConfigSnapshot.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          version: 5,
+        }),
+      }),
+    );
+    expect(result.version).toBe(5);
+  });
+
+  it('diffSnapshots calcula linhas adicionadas e removidas corretamente', async () => {
+    const prisma = makePrisma();
+    const snapA = {
+      id: 'snap-1',
+      version: 1,
+      content: 'interface GigabitEthernet0/0/1\n ip address 10.0.0.1 255.255.255.0\n shutdown',
+    };
+    const snapB = {
+      id: 'snap-2',
+      version: 2,
+      content: 'interface GigabitEthernet0/0/1\n ip address 10.0.0.1 255.255.255.0\n undo shutdown\n description Link Upstream',
+    };
+
+    prisma.assetConfigSnapshot.findFirst
+      .mockResolvedValueOnce(snapA)
+      .mockResolvedValueOnce(snapB);
+
+    const svc = new CmdbService(prisma);
+    const diff = await svc.diffSnapshots('t1', 'a1', 'snap-1', 'snap-2');
+
+    expect(diff.fromVersion).toBe(1);
+    expect(diff.toVersion).toBe(2);
+    expect(diff.diffLines).toEqual(
+      expect.arrayContaining([
+        { type: 'unchanged', text: 'interface GigabitEthernet0/0/1' },
+        { type: 'unchanged', text: ' ip address 10.0.0.1 255.255.255.0' },
+        { type: 'removed', text: ' shutdown' },
+        { type: 'added', text: ' undo shutdown' },
+        { type: 'added', text: ' description Link Upstream' },
+      ]),
+    );
+    expect(diff.addedLinesCount).toBe(2);
+    expect(diff.removedLinesCount).toBe(1);
+  });
+});
+

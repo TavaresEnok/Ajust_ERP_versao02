@@ -47,12 +47,15 @@ const ConfigureSchema = z.object({
   apiToken: z.string().min(8).optional(),
 });
 
+import { IxcWebhookRateLimitGuard } from './ixc-webhook-rate-limit.guard';
+
 @ApiTags('Integrações')
 @Controller('integrations/ixc')
 export class IxcController {
   constructor(@Inject(IxcService) private readonly ixcService: IxcService) {}
 
   @Post('webhook')
+  @UseGuards(IxcWebhookRateLimitGuard)
   async webhook(
     @Body() body: unknown,
     @Headers('x-ixc-signature') signatureHeader: string | undefined,

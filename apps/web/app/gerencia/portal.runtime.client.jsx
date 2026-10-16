@@ -6,7 +6,8 @@ import {
   PieChart, Users, Settings, LogOut, Sparkles, Terminal, LayoutDashboard, Search, Bell, Menu, X,
   Filter, ChevronDown, ChevronRight, CheckCircle, AlertTriangle, Clock, Calendar,
   ArrowRight, FileText, ChevronLeft, Shield, CheckCheck, HelpCircle, Eye, Copy,
-  RefreshCw, TrendingUp, Sun, Moon, Activity, Plus, Download, ExternalLink, Briefcase, Sliders, User, UserCog, Wrench, Database, Key, Zap
+  RefreshCw, TrendingUp, Sun, Moon, Activity, Plus, Download, ExternalLink, Briefcase, Sliders, User, UserCog, Wrench, Database, Key, Zap,
+  CalendarClock, Server, ShieldCheck
 } from 'lucide-react';
 /* ----------------------------- Theme Context ----------------------------- */
 
@@ -34,6 +35,9 @@ import { ReportsView as ReportsRealView } from './views/reports-view';
 import { TechniciansView } from './views/technicians-view';
 import { ProvidersView } from './views/providers-view';
 import { ServiceTypesView as ServiceTypesViewModule } from './views/service-types-view';
+import { OnCallView } from './views/on-call-view';
+import { CmdbSnapshotsView } from './views/cmdb-snapshots-view';
+import { ActiveSessionsView } from './views/active-sessions-view';
 import { OrderPdfExportModal } from '../components/order-pdf-export-modal';
 import { QuickDispatchModal } from '../components/quick-dispatch-modal';
 
@@ -5310,6 +5314,15 @@ export default function App() {
       case 'workflow_builder':
         return <WorkflowBuilderView dark={dark} tenantId={tenantId} onToast={notify} />;
 
+      case 'on_call':
+        return <OnCallView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'cmdb_snapshots':
+        return <CmdbSnapshotsView dark={dark} tenantId={tenantId} onToast={notify} />;
+
+      case 'active_sessions':
+        return <ActiveSessionsView dark={dark} onToast={notify} />;
+
       default:
         return userRole === 'super_admin' ? (
           <AdminDashboardView orders={orders} tenants={tenants} onSelectOS={setSelectedOS} loading={initialLoading} />
@@ -5413,6 +5426,20 @@ export default function App() {
             active: currentView === 'workflow_builder'
           },
           {
+            key: 'on_call',
+            label: 'Escala Plantão NOC',
+            icon: CalendarClock,
+            onClick: () => setCurrentView('on_call'),
+            active: currentView === 'on_call'
+          },
+          {
+            key: 'cmdb_snapshots',
+            label: 'Ativos & Configs (CMDB)',
+            icon: Server,
+            onClick: () => setCurrentView('cmdb_snapshots'),
+            active: currentView === 'cmdb_snapshots'
+          },
+          {
             key: 'calendar',
             label: 'Calendário',
             icon: Calendar,
@@ -5438,6 +5465,13 @@ export default function App() {
             onClick: () => setCurrentView('tenants'),
             active: currentView === 'tenants',
             role: 'super_admin'
+          },
+          {
+            key: 'active_sessions',
+            label: 'Sessões & Segurança',
+            icon: ShieldCheck,
+            onClick: () => setCurrentView('active_sessions'),
+            active: currentView === 'active_sessions'
           },
           {
             key: 'settings',

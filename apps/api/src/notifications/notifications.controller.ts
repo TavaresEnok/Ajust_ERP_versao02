@@ -95,3 +95,25 @@ export class NotificationsController {
     return this.svc.dispatchWhatsAppOrder(req.auth.tenantId, body);
   }
 }
+
+@ApiTags('Notificações WhatsApp')
+@ApiBearerAuth()
+@ApiResponse({ status: 401, description: 'Não autenticado' })
+@ApiResponse({ status: 403, description: 'Permissão insuficiente' })
+@Controller('notifications/whatsapp')
+@UseGuards(AuthGuard, TenantIsolationGuard)
+export class WhatsAppNotificationController {
+  constructor(@Inject(NotificationsService) private readonly svc: NotificationsService) {}
+
+  @Post('dispatch-order')
+  dispatchWhatsApp(
+    @Req() req: RequestWithAuth,
+    @Body() body: { orderId: string; target?: string; customMessage?: string },
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico']);
+    if (!body?.orderId) throw new BadRequestException('orderId is required');
+    return this.svc.dispatchWhatsAppOrder(req.auth.tenantId, body);
+  }
+}
+

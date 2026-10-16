@@ -1,4 +1,4 @@
-import { UnauthorizedException } from '@nestjs/common';
+import { ForbiddenException, UnauthorizedException } from '@nestjs/common';
 import { AuthService } from './auth.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
@@ -502,4 +502,97 @@ describe('AuthService', () => {
       expect(mockCompare).toHaveBeenCalledTimes(1);
     });
   });
+
+  // ──────────────────────────────────────────────────
+  // SESSIONS MANAGEMENT (SEC-03)
+  // ──────────────────────────────────────────────────
+
+  describe('session management (SEC-03)', () => {
+    it('listActiveSessions retorna sessões ativas com indicador de isCurrent', async () => {
+      const now = new Date();
+      const mockSessions = [
+        {
+          id: 'sess-current',
+          device: 'Chrome Windows',
+          ip: '192.168.1.50',
+          userAgent: 'Mozilla/5.0...',
+          createdAt: new Date(now.getTime() - 3600000),
+          expiresAt: new Date(now.getTime() + 86400000),
+        },
+        {
+          id: 'sess-other',
+          device: 'iPhone Safari',
+          ip: '10.0.0.2',
+          userAgent: 'Mobile Safari',
+          createdAt: new Date(now.getTime() - 7200000),
+          expiresAt: new Date(now.getTime() + 86400000),
+        },
+      ];
+
+      mockPrisma.session.findMany.mockResolvedValue(mockSessions);
+
+      const result = await service.listActiveSessions('user-1', 'sess-current');
+
+      expect(result).toHaveLength(2);
+      expect(result[0].isCurrent).toBe(true);
+      expect(result[1].isCurrent).toBe(false);
+      expect(mockPrisma.session.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            userId: 'user-1',
+            revokedAt: null,
+          }),
+        }),
+      );
+    });
+
+    it('revokeSession permite o próprio usuário revogar sua sessão', async () => {
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'sess-1',
+        userId: 'user-1',
+        tenantId: 'tenant-1',
+        revokedAt: null,
+      });
+      mockPrisma.session.update.mockResolvedValue({ id: 'sess-1' });
+
+      const res = await service.revokeSession('sess-1', 'user-1', 'analista', 'tenant-1');
+
+      expect(res.success).toBe(true);
+      expect(mockPrisma.session.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'sess-1' },
+          data: expect.objectContaining({ revokedAt: expect.any(Date) }),
+        }),
+      );
+    });
+
+    it('revokeSession permite gerente do mesmo tenant revogar sessão de colaborador', async () => {
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'sess-target',
+        userId: 'user-colab',
+        tenantId: 'tenant-1',
+        revokedAt: null,
+      });
+      mockPrisma.session.update.mockResolvedValue({ id: 'sess-target' });
+
+      const res = await service.revokeSession('sess-target', 'manager-1', 'gerente', 'tenant-1');
+
+      expect(res.success).toBe(true);
+      expect(mockPrisma.session.update).toHaveBeenCalled();
+    });
+
+    it('revokeSession proíbe usuário comum de revogar sessão alheia', async () => {
+      mockPrisma.session.findUnique.mockResolvedValue({
+        id: 'sess-target',
+        userId: 'user-colab',
+        tenantId: 'tenant-1',
+        revokedAt: null,
+      });
+
+      await expect(
+        service.revokeSession('sess-target', 'attacker-user', 'analista', 'tenant-1'),
+      ).rejects.toThrow(ForbiddenException);
+    });
+  });
 });
+

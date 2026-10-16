@@ -553,6 +553,102 @@ export class AuthService {
     return { revokedSessions: result.count, targetUserId };
   }
 
+  async listActiveSessions(userId: string, currentSessionId?: string) {
+    const now = new Date();
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        userId,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      select: {
+        id: true,
+        device: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+        expiresAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return sessions.map((s) => ({
+      ...s,
+      isCurrent: s.id === currentSessionId,
+    }));
+  }
+
+  async listTenantUserSessions(tenantId: string, targetUserId: string) {
+    const now = new Date();
+    const membership = await this.prisma.userTenant.findFirst({
+      where: { tenantId, userId: targetUserId },
+    });
+    if (!membership) {
+      throw new NotFoundException('Usuário não pertence a este tenant.');
+    }
+
+    const sessions = await this.prisma.session.findMany({
+      where: {
+        userId: targetUserId,
+        tenantId,
+        revokedAt: null,
+        expiresAt: { gt: now },
+      },
+      select: {
+        id: true,
+        device: true,
+        ip: true,
+        userAgent: true,
+        createdAt: true,
+        expiresAt: true,
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    return sessions;
+  }
+
+  async revokeSession(sessionId: string, actorUserId: string, role?: string | null, tenantId?: string | null) {
+    const session = await this.prisma.session.findUnique({
+      where: { id: sessionId },
+      select: { id: true, userId: true, tenantId: true, revokedAt: true },
+    });
+
+    if (!session) {
+      throw new NotFoundException('Sessão não encontrada.');
+    }
+
+    const isOwner = session.userId === actorUserId;
+    const isSuperAdmin = role === 'super_admin';
+    const isGerente = role === 'gerente' && session.tenantId === tenantId;
+
+    if (!isOwner && !isSuperAdmin && !isGerente) {
+      throw new ForbiddenException('Sem permissão para revogar esta sessão.');
+    }
+
+    if (!session.revokedAt) {
+      await this.prisma.session.update({
+        where: { id: sessionId },
+        data: { revokedAt: new Date() },
+      });
+
+      await this.logAudit(
+        session.tenantId,
+        actorUserId,
+        'LOGOUT',
+        'session',
+        sessionId,
+        {
+          scope: 'session-revoke',
+          targetUserId: session.userId,
+          revokedByActorId: actorUserId,
+        },
+      );
+    }
+
+    return { success: true, sessionId };
+  }
+
   async me(userId: string, tenantId: string | null) {
     const user = await this.prisma.user.findUnique({
       where: { id: userId },

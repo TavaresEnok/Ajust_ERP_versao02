@@ -2,6 +2,7 @@ import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagg
 import {
   Body,
   Controller,
+  Delete,
   ForbiddenException,
   Get,
   HttpCode,
@@ -14,7 +15,9 @@ import {
 } from '@nestjs/common';
 import { z } from 'zod';
 import { RequestWithAuth } from '../common/request-with-auth';
+import { assertAnyRole } from '../common/role-utils';
 import { AuthGuard } from './auth.guard';
+import { TenantIsolationGuard } from './tenant-isolation.guard';
 import { RateLimitGuard } from './rate-limit.guard';
 import { ForgotPasswordRateLimitGuard } from './forgot-password-rate-limit.guard';
 import { TwoFactorRateLimitGuard } from './two-factor-rate-limit.guard';
@@ -182,4 +185,35 @@ export class AuthController {
     }
     return this.authService.revokeAllSessionsForUser(targetUserId, req.auth!.userId);
   }
+
+  @UseGuards(AuthGuard)
+  @Get('sessions')
+  @ApiOperation({ summary: 'Listar sessões ativas do usuário conectado' })
+  async listMySessions(@Req() req: RequestWithAuth) {
+    return this.authService.listActiveSessions(req.auth!.userId, req.auth!.sessionId);
+  }
+
+  @UseGuards(AuthGuard, TenantIsolationGuard)
+  @Get('sessions/user/:targetUserId')
+  @ApiOperation({ summary: 'Listar sessões ativas de um colaborador (Gerente / Super Admin)' })
+  async listUserSessions(@Param('targetUserId') targetUserId: string, @Req() req: RequestWithAuth) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    if (req.auth!.role === 'super_admin' && !req.auth!.tenantId) {
+      return this.authService.listActiveSessions(targetUserId);
+    }
+    return this.authService.listTenantUserSessions(req.auth!.tenantId!, targetUserId);
+  }
+
+  @UseGuards(AuthGuard)
+  @Delete('sessions/:sessionId')
+  @ApiOperation({ summary: 'Revogar uma sessão específica' })
+  async revokeSession(@Param('sessionId') sessionId: string, @Req() req: RequestWithAuth) {
+    return this.authService.revokeSession(
+      sessionId,
+      req.auth!.userId,
+      req.auth!.role,
+      req.auth!.tenantId,
+    );
+  }
 }
+

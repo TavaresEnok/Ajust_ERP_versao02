@@ -45,6 +45,7 @@ import { CsatService } from '../csat/csat.service';
 import { WorkflowsService } from '../workflows/workflows.service';
 import { SlaEngineService } from '../sla/sla-engine.service';
 import { OsProcessTemplateService } from '../os-process-templates/os-process-templates.service';
+import { NotificationsService } from '../notifications/notifications.service';
 
 export type AttachmentDownloadResult = {
   fileName: string;
@@ -251,6 +252,9 @@ export class ServiceOrdersService {
     @Optional()
     @Inject(OsProcessTemplateService)
     private readonly osProcessTemplateService?: OsProcessTemplateService,
+    @Optional()
+    @Inject(NotificationsService)
+    private readonly notificationsService?: NotificationsService,
   ) {}
 
   async create(authUserId: string | null, role: string, input: CreateOrderInput) {
@@ -1549,6 +1553,19 @@ export class ServiceOrdersService {
       this.csatService?.createForOrder(tenantId, order.id).catch((error) => {
         this.logger.warn(`CSAT creation failed for order ${order.id}: ${(error as Error).message}`);
       });
+    }
+
+    // Auto-dispatch WhatsApp notification when order is resolved or closed (COM-01)
+    if (to === 'RESOLVIDA' || to === 'FECHADA') {
+      this.notificationsService
+        ?.dispatchWhatsAppOrder(tenantId, {
+          orderId: updated.id,
+        })
+        .catch((error) => {
+          this.logger.warn(
+            `Auto WhatsApp notification failed for order ${updated.id}: ${(error as Error).message}`,
+          );
+        });
     }
 
     // Trigger workflow automation for this transition

@@ -1,5 +1,6 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Asset, AssetCategory, AssetServiceOrder, AssetStatus, Prisma } from '@prisma/client';
+import { Asset, AssetCategory, AssetConfigSnapshot, AssetServiceOrder, AssetStatus, Prisma } from '@prisma/client';
+import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
 export type AssetWriteInput = {
@@ -14,6 +15,19 @@ export type AssetWriteInput = {
   tags?: string[];
 };
 
+export type DiffLine = {
+  type: 'added' | 'removed' | 'unchanged';
+  text: string;
+};
+
+export type SnapshotDiffResult = {
+  fromVersion: number;
+  toVersion: number;
+  addedLinesCount: number;
+  removedLinesCount: number;
+  diffLines: DiffLine[];
+};
+
 @Injectable()
 export class CmdbService {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
@@ -21,7 +35,10 @@ export class CmdbService {
   async list(tenantId: string): Promise<Asset[]> {
     return this.prisma.asset.findMany({
       where: { tenantId, deletedAt: null },
-      include: { createdBy: { select: { id: true, name: true } } },
+      include: {
+        createdBy: { select: { id: true, name: true } },
+        _count: { select: { configSnapshots: true } },
+      },
       orderBy: { createdAt: 'desc' },
     });
   }
@@ -93,4 +110,145 @@ export class CmdbService {
       update: {},
     });
   }
+
+  // ─── Network Config Snapshots (CMDB-01) ───────────────────────────────────
+
+  async createSnapshot(
+    tenantId: string,
+    actorId: string,
+    assetId: string,
+    input: { content: string; notes?: string },
+  ): Promise<AssetConfigSnapshot> {
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: assetId, tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!asset) throw new NotFoundException('Ativo não encontrado.');
+
+    const latest = await this.prisma.assetConfigSnapshot.findFirst({
+      where: { assetId, tenantId },
+      orderBy: { version: 'desc' },
+      select: { version: true },
+    });
+
+    const nextVersion = (latest?.version ?? 0) + 1;
+    const checksum = createHash('sha256').update(input.content).digest('hex');
+
+    return this.prisma.assetConfigSnapshot.create({
+      data: {
+        tenantId,
+        assetId,
+        version: nextVersion,
+        content: input.content,
+        notes: input.notes,
+        checksum,
+        createdById: actorId,
+      },
+      include: {
+        createdBy: { select: { id: true, name: true } },
+      },
+    });
+  }
+
+  async listSnapshots(tenantId: string, assetId: string) {
+    const asset = await this.prisma.asset.findFirst({
+      where: { id: assetId, tenantId, deletedAt: null },
+      select: { id: true },
+    });
+    if (!asset) throw new NotFoundException('Ativo não encontrado.');
+
+    return this.prisma.assetConfigSnapshot.findMany({
+      where: { assetId, tenantId },
+      select: {
+        id: true,
+        version: true,
+        notes: true,
+        checksum: true,
+        createdAt: true,
+        createdBy: { select: { id: true, name: true } },
+      },
+      orderBy: { version: 'desc' },
+    });
+  }
+
+  async getSnapshot(tenantId: string, assetId: string, snapshotId: string): Promise<AssetConfigSnapshot> {
+    const snapshot = await this.prisma.assetConfigSnapshot.findFirst({
+      where: { id: snapshotId, assetId, tenantId },
+      include: {
+        createdBy: { select: { id: true, name: true } },
+      },
+    });
+    if (!snapshot) throw new NotFoundException('Snapshot de configuração não encontrado.');
+    return snapshot;
+  }
+
+  async diffSnapshots(
+    tenantId: string,
+    assetId: string,
+    fromSnapshotId: string,
+    toSnapshotId: string,
+  ): Promise<SnapshotDiffResult> {
+    const [fromSnap, toSnap] = await Promise.all([
+      this.getSnapshot(tenantId, assetId, fromSnapshotId),
+      this.getSnapshot(tenantId, assetId, toSnapshotId),
+    ]);
+
+    const linesA = fromSnap.content.split('\n');
+    const linesB = toSnap.content.split('\n');
+
+    const diffLines = this.computeLineDiff(linesA, linesB);
+
+    let addedLinesCount = 0;
+    let removedLinesCount = 0;
+    for (const d of diffLines) {
+      if (d.type === 'added') addedLinesCount++;
+      else if (d.type === 'removed') removedLinesCount++;
+    }
+
+    return {
+      fromVersion: fromSnap.version,
+      toVersion: toSnap.version,
+      addedLinesCount,
+      removedLinesCount,
+      diffLines,
+    };
+  }
+
+  /** Algoritmo simples e determinístico de diff linha a linha */
+  private computeLineDiff(a: string[], b: string[]): DiffLine[] {
+    const m = a.length;
+    const n = b.length;
+    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+
+    for (let i = 1; i <= m; i++) {
+      for (let j = 1; j <= n; j++) {
+        if (a[i - 1] === b[j - 1]) {
+          dp[i][j] = dp[i - 1][j - 1] + 1;
+        } else {
+          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
+        }
+      }
+    }
+
+    let i = m;
+    let j = n;
+    const result: DiffLine[] = [];
+
+    while (i > 0 || j > 0) {
+      if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
+        result.push({ type: 'unchanged', text: a[i - 1] });
+        i--;
+        j--;
+      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
+        result.push({ type: 'added', text: b[j - 1] });
+        j--;
+      } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
+        result.push({ type: 'removed', text: a[i - 1] });
+        i--;
+      }
+    }
+
+    return result.reverse();
+  }
 }
+
