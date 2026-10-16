@@ -3,6 +3,7 @@
 import React, { useMemo, useState } from 'react';
 import { Search, Sparkles } from 'lucide-react';
 import { ErpBadge } from '../shared/shared-ui';
+import { Provider360Cockpit } from '@/app/components/provider-360-cockpit';
 
 const cn = (...classes: Array<string | false | null | undefined>) =>
   classes.filter(Boolean).join(' ');
@@ -73,6 +74,7 @@ export function AnalystProvidersLabView({
 }: Props) {
   const [period, setPeriod] = useState<PeriodFilter>('Tudo');
   const [search, setSearch] = useState('');
+  const [selectedCockpitProvider, setSelectedCockpitProvider] = useState<string | null>(null);
 
   const providerRows = useMemo<ProviderRow[]>(() => {
     const scoped = filterByPeriod(Array.isArray(orders) ? orders : [], period);
@@ -109,6 +111,16 @@ export function AnalystProvidersLabView({
       .filter((row) => row.name.toLowerCase().includes(search.toLowerCase().trim()))
       .sort((a, b) => b.total - a.total);
   }, [orders, period, search]);
+
+  if (selectedCockpitProvider) {
+    return (
+      <Provider360Cockpit
+        providerName={selectedCockpitProvider}
+        onBack={() => setSelectedCockpitProvider(null)}
+        dark={dark}
+      />
+    );
+  }
 
   return (
     <div className="space-y-5">
@@ -212,17 +224,31 @@ export function AnalystProvidersLabView({
                     {row.name}
                   </div>
                 </div>
-                <button
-                  onClick={() => onOpenProvider(row.name)}
-                  className={cn(
-                    'px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors',
-                    dark
-                      ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300 hover:bg-cyan-900/50'
-                      : 'bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100',
-                  )}
-                >
-                  Abrir detalhe
-                </button>
+                <div className="flex items-center gap-1.5">
+                  <button
+                    onClick={() => setSelectedCockpitProvider(row.name)}
+                    className={cn(
+                      'px-2.5 py-1.5 rounded-lg border text-xs font-bold transition-colors',
+                      dark
+                        ? 'bg-indigo-950/40 border-indigo-700/50 text-indigo-300 hover:bg-indigo-900/60'
+                        : 'bg-indigo-50 border-indigo-200 text-indigo-700 hover:bg-indigo-100',
+                    )}
+                    title="Ficha Técnica 360º de Infraestrutura e Credenciais"
+                  >
+                    Ficha 360º
+                  </button>
+                  <button
+                    onClick={() => onOpenProvider(row.name)}
+                    className={cn(
+                      'px-3 py-1.5 rounded-lg border text-xs font-bold transition-colors',
+                      dark
+                        ? 'bg-cyan-900/30 border-cyan-700/50 text-cyan-300 hover:bg-cyan-900/50'
+                        : 'bg-cyan-50 border-cyan-200 text-cyan-700 hover:bg-cyan-100',
+                    )}
+                  >
+                    Abrir detalhe
+                  </button>
+                </div>
               </div>
 
               <div className="grid grid-cols-4 gap-2 mt-4">

@@ -15,4 +15,9 @@ docker compose -f "$COMPOSE_FILE" exec -T postgres pg_dump \
   "$POSTGRES_DB" > "$BACKUP_FILE"
 
 test -s "$BACKUP_FILE"
-echo "Backup saved to $BACKUP_FILE"
+echo "Backup salvo com sucesso em: $BACKUP_FILE"
+
+# Retenção automática de 30 dias para evitar esgotamento de disco
+echo "Limpando backups com mais de 30 dias..."
+find "$BACKUP_DIR" -type f -name "${POSTGRES_DB}_*.dump" -mtime +30 -exec rm -f {} +
+echo "Rotina de backup concluída."

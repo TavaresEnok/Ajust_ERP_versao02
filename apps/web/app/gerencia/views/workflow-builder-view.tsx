@@ -26,6 +26,11 @@ import {
   Minus,
   Move,
   ZoomIn,
+  Maximize2,
+  Minimize2,
+  PanelRightClose,
+  PanelRight,
+  RotateCcw,
 } from 'lucide-react';
 import {
   type StepAction,
@@ -1206,6 +1211,11 @@ export function WorkflowBuilderView(_props: {
   const [showTemplates, setShowTemplates] = useState(false);
   const [versionHistory, setVersionHistory] = useState<WorkflowVersionApi[]>([]);
   const [canvasZoom, setCanvasZoom] = useState(100);
+  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isPropertiesOpen, setIsPropertiesOpen] = useState(true);
+  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
+  const [isPanning, setIsPanning] = useState(false);
+  const [panStart, setPanStart] = useState({ x: 0, y: 0 });
 
   const applyWorkflow = useCallback((workflow: WorkflowRuleApi) => {
     const parsed = extractWorkflowSteps(workflow.definition);
@@ -1430,7 +1440,14 @@ export function WorkflowBuilderView(_props: {
   const triggerMeta = TRIGGER_TYPES.find((t) => t.id === triggerType);
 
   return (
-    <div className="flex flex-col h-[calc(100vh-10rem)] -m-6">
+    <div
+      className={cn(
+        'flex flex-col transition-all duration-200',
+        isFullscreen
+          ? 'fixed inset-0 z-50 bg-bg-surface w-screen h-screen overflow-hidden'
+          : 'h-[calc(100vh-8rem)] -m-6',
+      )}
+    >
       {/* Header */}
       <div className="px-6 pt-6 pb-0 shrink-0">
         <div className="flex items-center justify-between mb-4">
@@ -1629,30 +1646,83 @@ export function WorkflowBuilderView(_props: {
                   <button
                     type="button"
                     title="Aumentar zoom"
-                    onClick={() => setCanvasZoom((value) => Math.min(120, value + 10))}
+                    onClick={() => setCanvasZoom((value) => Math.min(130, value + 10))}
                     className="w-7 h-7 inline-flex items-center justify-center rounded-md text-content-secondary hover:text-content-primary hover:bg-bg-surface"
                   >
                     <ZoomIn className="w-3.5 h-3.5" />
                   </button>
+                  <button
+                    type="button"
+                    title="Centralizar / Resetar Posição"
+                    onClick={() => {
+                      setPanOffset({ x: 0, y: 0 });
+                      setCanvasZoom(100);
+                    }}
+                    className="w-7 h-7 inline-flex items-center justify-center rounded-md text-content-secondary hover:text-content-primary hover:bg-bg-surface border-l border-[rgba(0,0,0,0.06)] pl-1 ml-1"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    type="button"
+                    title={isPropertiesOpen ? 'Recolher Painel Lateral' : 'Abrir Painel Lateral'}
+                    onClick={() => setIsPropertiesOpen(!isPropertiesOpen)}
+                    className={cn(
+                      'w-7 h-7 inline-flex items-center justify-center rounded-md transition-colors',
+                      isPropertiesOpen
+                        ? 'text-accent-DEFAULT bg-accent-subtle/50'
+                        : 'text-content-secondary hover:text-content-primary hover:bg-bg-surface',
+                    )}
+                  >
+                    {isPropertiesOpen ? <PanelRightClose className="w-3.5 h-3.5" /> : <PanelRight className="w-3.5 h-3.5" />}
+                  </button>
+                  <button
+                    type="button"
+                    title={isFullscreen ? 'Sair do Modo Expandido' : 'Expandir Tela Inteira'}
+                    onClick={() => setIsFullscreen(!isFullscreen)}
+                    className={cn(
+                      'w-7 h-7 inline-flex items-center justify-center rounded-md font-semibold transition-colors',
+                      isFullscreen
+                        ? 'text-white bg-accent-DEFAULT hover:bg-accent-hover'
+                        : 'text-content-secondary hover:text-content-primary hover:bg-bg-surface',
+                    )}
+                  >
+                    {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+                  </button>
                 </div>
               </div>
 
-              <div className="flex-1 overflow-auto custom-scrollbar bg-bg-subtle">
+              <div
+                className={cn(
+                  'flex-1 overflow-hidden custom-scrollbar bg-bg-subtle relative select-none',
+                  isPanning ? 'cursor-grabbing' : 'cursor-grab',
+                )}
+                onMouseDown={(e) => {
+                  if (e.button !== 0) return;
+                  // Ignora cliques diretos em botões ou selects
+                  const target = e.target as HTMLElement;
+                  if (target.closest('button') || target.closest('select') || target.closest('input')) return;
+                  setIsPanning(true);
+                  setPanStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
+                }}
+                onMouseMove={(e) => {
+                  if (!isPanning) return;
+                  setPanOffset({
+                    x: e.clientX - panStart.x,
+                    y: e.clientY - panStart.y,
+                  });
+                }}
+                onMouseUp={() => setIsPanning(false)}
+                onMouseLeave={() => setIsPanning(false)}
+              >
                 <div
-                  className="p-8"
+                  className="p-8 absolute top-0 left-0 transition-transform duration-75"
                   style={{
-                    minWidth: `${Math.max(1000, 620 + steps.length * 376) * (canvasZoom / 100)}px`,
-                    minHeight: `${560 * (canvasZoom / 100)}px`,
+                    transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${canvasZoom / 100})`,
+                    transformOrigin: '0 0',
+                    width: `${Math.max(1200, 680 + steps.length * 380)}px`,
                   }}
                 >
-                  <div
-                    className="relative"
-                    style={{
-                      width: `${Math.max(1000, 620 + steps.length * 376)}px`,
-                      transform: `scale(${canvasZoom / 100})`,
-                      transformOrigin: 'top left',
-                    }}
-                  >
+                  <div className="relative">
                     <div className="flex items-start">
                       <div className="w-[300px] shrink-0">
                         <div className="rounded-lg border-2 border-amber-200 bg-amber-50">
@@ -1747,14 +1817,14 @@ export function WorkflowBuilderView(_props: {
                               <div
                                 onClick={() => setSelectedStepId(step.id)}
                                 className={cn(
-                                  'group relative rounded-lg border-2 bg-bg-surface p-4 transition-all duration-150 cursor-pointer',
+                                  'group relative rounded-2xl border-2 bg-bg-surface p-5 transition-all duration-200 cursor-pointer shadow-sm hover:shadow-md',
                                   selectedStepId === step.id
-                                    ? 'border-accent-DEFAULT ring-2 ring-accent-DEFAULT/15'
-                                    : 'border-[rgba(0,0,0,0.08)] hover:border-[rgba(37,99,235,0.34)]',
+                                    ? 'border-accent-DEFAULT ring-4 ring-accent-DEFAULT/15 shadow-accent-DEFAULT/10'
+                                    : 'border-[rgba(0,0,0,0.08)] hover:border-accent-DEFAULT/40',
                                 )}
                               >
-                                <div className="absolute -top-4 left-1/2 -translate-x-1/2 w-8 h-8 rounded-full border border-[rgba(0,0,0,0.08)] bg-bg-surface text-content-tertiary flex items-center justify-center">
-                                  <GripVertical className="w-4 h-4 rotate-90" />
+                                <div className="absolute -top-3.5 left-1/2 -translate-x-1/2 px-2 py-0.5 rounded-full border border-[rgba(0,0,0,0.08)] bg-bg-surface text-content-tertiary flex items-center justify-center text-[10px] font-mono shadow-sm">
+                                  <span>#{step.order}</span>
                                 </div>
                                 <div className="flex items-start gap-3">
                                   <div
@@ -1891,15 +1961,27 @@ export function WorkflowBuilderView(_props: {
               </div>
             </div>
 
-            {/* Right panel - Properties */}
-            <div className="w-[320px] shrink-0 bg-bg-surface rounded-xl border border-[rgba(0,0,0,0.06)] shadow-sm flex flex-col">
-              <div className="px-4 py-3 border-b border-[rgba(0,0,0,0.06)]">
+            {/* Right panel - Properties (collapsible) */}
+            <div
+              className={cn(
+                'shrink-0 bg-bg-surface rounded-xl border border-[rgba(0,0,0,0.06)] shadow-sm flex flex-col transition-all duration-200 overflow-hidden',
+                isPropertiesOpen ? 'w-[340px] opacity-100' : 'w-0 border-0 p-0 m-0 opacity-0 pointer-events-none',
+              )}
+            >
+              <div className="px-4 py-3 border-b border-[rgba(0,0,0,0.06)] flex items-center justify-between">
                 <div className="flex items-center gap-2">
                   <Settings2 className="w-4 h-4 text-content-secondary" />
                   <span className="text-sm font-semibold text-content-primary">
                     Configuração do Passo
                   </span>
                 </div>
+                <button
+                  onClick={() => setIsPropertiesOpen(false)}
+                  title="Recolher painel para ter mais espaço de fluxo"
+                  className="p-1 rounded text-content-tertiary hover:text-content-primary hover:bg-bg-subtle transition"
+                >
+                  <X className="w-4 h-4" />
+                </button>
               </div>
 
               <div className="flex-1 overflow-y-auto p-4">

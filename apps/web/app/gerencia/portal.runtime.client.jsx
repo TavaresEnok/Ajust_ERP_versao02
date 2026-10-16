@@ -34,6 +34,8 @@ import { ReportsView as ReportsRealView } from './views/reports-view';
 import { TechniciansView } from './views/technicians-view';
 import { ProvidersView } from './views/providers-view';
 import { ServiceTypesView as ServiceTypesViewModule } from './views/service-types-view';
+import { OrderPdfExportModal } from '../components/order-pdf-export-modal';
+import { QuickDispatchModal } from '../components/quick-dispatch-modal';
 
 /* ----------------------------- Core Helpers ----------------------------- */
 
@@ -961,7 +963,7 @@ const Modal = ({ title, children, onClose, actions, maxWidth = 'max-w-md' }) => 
 
 /* ----------------------------- Drawers ----------------------------- */
 
-const OSDetailsDrawer = ({ os, onClose, onCopyProtocolLink, onOpenOrder }) => {
+const OSDetailsDrawer = ({ os, onClose, onCopyProtocolLink, onOpenOrder, onOpenPdfModal }) => {
   if (!os) return null;
 
   useEffect(() => {
@@ -1051,6 +1053,15 @@ const OSDetailsDrawer = ({ os, onClose, onCopyProtocolLink, onOpenOrder }) => {
         </div>
 
         <div className="p-4 border-t border-slate-100 bg-slate-50 flex gap-2">
+          {onOpenPdfModal && (
+            <button
+              onClick={() => onOpenPdfModal(os)}
+              className="flex-1 py-2 bg-indigo-600 rounded-lg text-sm font-semibold text-white hover:bg-indigo-700 flex items-center justify-center gap-2 shadow-sm"
+            >
+              <FileText size={15} />
+              PDF / WhatsApp
+            </button>
+          )}
           <button
             onClick={() => onCopyProtocolLink(os.protocol)}
             className="flex-1 py-2 bg-white border border-slate-300 rounded-lg text-sm font-medium text-slate-700 hover:bg-slate-100 flex items-center justify-center gap-2"
@@ -5043,6 +5054,8 @@ export default function App() {
   const [userRole, setUserRole] = useState('gerente'); // gerente | super_admin | analyst
   const [currentView, setCurrentView] = useState('manager_dashboard');
   const [selectedOS, setSelectedOS] = useState(null);
+  const [showQuickDispatchModal, setShowQuickDispatchModal] = useState(false);
+  const [pdfExportOS, setPdfExportOS] = useState(null);
 
   const [dark, setDark] = useState(false);
   const toggleTheme = () => setDark(!dark);
@@ -5332,6 +5345,13 @@ export default function App() {
             active: currentView.includes('dashboard')
           },
           {
+            key: 'quick_dispatch',
+            label: '+ Triagem & Nova O.S.',
+            icon: Zap,
+            onClick: () => setShowQuickDispatchModal(true),
+            active: showQuickDispatchModal
+          },
+          {
             key: 'global_orders',
             label: 'Ordens Globais',
             icon: Search,
@@ -5504,15 +5524,56 @@ export default function App() {
                 const url = `${window.location.origin}/gerencia?view=global_orders&os=${encodeURIComponent(protocol)}`;
                 navigator.clipboard.writeText(url);
               }}
-              onOpenOrder={(protocol) => {
-                const order = (orders || []).find((o) => String(o?.protocol || '') === String(protocol));
-                setCurrentView('global_orders');
-                if (order) {
-                  setSelectedOS(order);
-                } else {
-                  notify?.(`O.S ${protocol} não encontrada na carga atual.`);
+              onOpenPdfModal={(os) => setPdfExportOS(os)}
+            />
+          )}
+
+          {pdfExportOS && (
+            <OrderPdfExportModal
+              order={pdfExportOS}
+              onClose={() => setPdfExportOS(null)}
+              dark={dark}
+            />
+          )}
+
+          {showQuickDispatchModal && (
+            <QuickDispatchModal
+              providersList={PROVIDERS}
+              analystsList={['Carlos NOC', 'Eduardo BGP', 'Marcos FTTH', 'Renato Infra']}
+              currentUser={userName}
+              onClose={() => setShowQuickDispatchModal(false)}
+              onSubmit={async (payload) => {
+                const res = await fetch('/api/occurrences', {
+                  method: 'POST',
+                  headers: { 'content-type': 'application/json' },
+                  body: JSON.stringify({
+                    tenantId,
+                    provider: payload.provider,
+                    type: payload.type,
+                    status: payload.directResolution ? 'ENCERRADA' : 'ABERTA',
+                    sector: payload.sector,
+                    origin: payload.origin,
+                    openedByName: payload.openedByName,
+                    analystResponsible: payload.analystResponsible,
+                    description: payload.description,
+                    firstOrder: {
+                      type: payload.type,
+                      status: payload.directResolution ? 'RESOLVIDA' : 'ABERTA',
+                      priority: payload.priority,
+                      description: payload.description,
+                      requester: payload.provider,
+                      analystName: payload.analystResponsible,
+                    },
+                  }),
+                });
+                if (!res.ok) {
+                  const err = await res.json().catch(() => ({}));
+                  throw new Error(err.error || 'Falha ao registrar');
                 }
+                notify?.(payload.directResolution ? 'Atendimento N1 concluído e registrado!' : 'Ordem de serviço gerada com sucesso!');
+                if (tenantId) loadRemoteData(tenantId);
               }}
+              dark={dark}
             />
           )}
 

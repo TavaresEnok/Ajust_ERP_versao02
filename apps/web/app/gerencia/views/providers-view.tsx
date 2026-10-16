@@ -15,6 +15,8 @@ import {
   ChevronUp,
 } from 'lucide-react';
 
+import { Provider360Cockpit } from '@/app/components/provider-360-cockpit';
+
 /* ──────────────────────────────────────────────────────── */
 /* Types                                                    */
 /* ──────────────────────────────────────────────────────── */
@@ -267,6 +269,7 @@ export function ProvidersView({
   const [sortBy, setSortBy] = useState<'total' | 'active' | 'overdue' | 'rate'>('active');
   const [sortDir, setSortDir] = useState<'asc' | 'desc'>('desc');
   const [expandedProvider, setExpandedProvider] = useState<string | null>(null);
+  const [selectedProviderCockpit, setSelectedProviderCockpit] = useState<string | null>(null);
   const [minVolume, setMinVolume] = useState(0);
 
   const load = useCallback(async () => {
@@ -352,6 +355,16 @@ export function ProvidersView({
     'rounded-xl border',
     dark ? 'bg-slate-800/40 border-slate-700/50' : 'bg-white border-slate-200',
   );
+
+  if (selectedProviderCockpit) {
+    return (
+      <Provider360Cockpit
+        providerName={selectedProviderCockpit}
+        onBack={() => setSelectedProviderCockpit(null)}
+        dark={dark}
+      />
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -610,14 +623,16 @@ export function ProvidersView({
                             >
                               {provider.name.charAt(0).toUpperCase()}
                             </div>
-                            <span
+                            <button
+                              onClick={() => setSelectedProviderCockpit(provider.name)}
                               className={cn(
-                                'font-semibold',
-                                dark ? 'text-slate-200' : 'text-slate-800',
+                                'font-semibold text-left hover:underline hover:text-indigo-600 transition flex items-center gap-1',
+                                dark ? 'text-slate-200 hover:text-indigo-400' : 'text-slate-800',
                               )}
+                              title="Abrir Ficha Técnica 360º e Infraestrutura"
                             >
                               {provider.name}
-                            </span>
+                            </button>
                           </div>
                         </td>
 
