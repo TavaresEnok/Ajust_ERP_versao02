@@ -37,7 +37,6 @@ import { QueryState, ErpEmpty } from './contract-form';
 
 const PAGE_SIZE = 200;
 const MASK = '••••••••••••';
-const LONG_NOTES = 400;
 
 type TypeMeta = { icon: ComponentType<{ className?: string }>; chip: string };
 const TYPE_META: Record<string, TypeMeta> = {
@@ -353,6 +352,16 @@ export function CredentialsPage() {
               {filtered.length} registros
             </span>
           </div>
+          <div
+            className={cn(
+              'grid items-center gap-3 border-t border-border px-5 py-2 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase',
+              'grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_minmax(0,0.9fr)]',
+            )}
+          >
+            <span>Equipamento · Provedor</span>
+            <span className="hidden md:block">Host / endereço</span>
+            <span>Usuário</span>
+          </div>
           {grouped.map(([group, rows]) => {
             const meta = typeMeta(group);
             const Icon = meta.icon;
@@ -367,13 +376,16 @@ export function CredentialsPage() {
                 </div>
                 {rows.map((item) => {
                   const active = selected?.id === item.id;
-                  const select = () => setSelectedId(item.id);
+                  const select = () => {
+                    if (selected?.id !== item.id) hideSecret();
+                    setSelectedId(item.id);
+                  };
                   return (
                     <div
                       key={item.id}
                       onClick={select}
                       className={cn(
-                        'grid cursor-pointer grid-cols-[minmax(0,1.3fr)_minmax(0,1.2fr)_auto] items-center gap-3 border-b border-border px-5 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/50 focus-within:bg-muted/50 md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.4fr)_minmax(0,0.9fr)_auto]',
+                        'grid cursor-pointer items-center gap-3 border-b border-border px-5 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/50 focus-within:bg-muted/50 grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_minmax(0,0.9fr)]',
                         active && 'bg-primary/5',
                       )}
                     >
@@ -390,33 +402,23 @@ export function CredentialsPage() {
                           {text(item.provider)}
                         </span>
                       </button>
-                      <p
-                        className="hidden truncate font-mono text-xs md:block"
-                        title={text(item.host)}
-                      >
-                        {text(item.host)}
-                      </p>
-                      <p
-                        className="truncate font-mono text-xs text-muted-foreground"
-                        title={text(item.username)}
-                      >
-                        {text(item.username)}
-                      </p>
-                      <div className="flex gap-1.5">
+                      <div className="hidden min-w-0 items-center gap-2 md:flex">
+                        <p className="min-w-0 truncate font-mono text-xs" title={text(item.host)}>
+                          {text(item.host)}
+                        </p>
                         <IconButton
                           label="Copiar host"
                           onClick={() => void copy(text(item.host, ''), 'Host')}
                         >
                           <Copy />
                         </IconButton>
-                        <IconButton
-                          label={revealed?.id === item.id ? 'Ocultar senha' : 'Revelar senha'}
-                          active={revealed?.id === item.id}
-                          onClick={() => void toggleSecret(item)}
-                        >
-                          {revealed?.id === item.id ? <EyeOff /> : <Eye />}
-                        </IconButton>
                       </div>
+                      <p
+                        className="truncate font-mono text-xs text-muted-foreground"
+                        title={text(item.username)}
+                      >
+                        {text(item.username)}
+                      </p>
                     </div>
                   );
                 })}
@@ -554,17 +556,17 @@ export function CredentialsPage() {
                 <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase">
                   Observações
                 </h3>
-                <div className="max-h-56 overflow-y-auto rounded-xl border border-border bg-muted/40 p-3 text-sm break-words whitespace-pre-wrap">
+                <div className="line-clamp-5 rounded-xl border border-border bg-muted/40 p-3 text-sm break-words whitespace-pre-wrap">
                   {notes || <span className="text-muted-foreground">Sem observações.</span>}
                 </div>
-                {notes.length > LONG_NOTES && (
+                {notes && (
                   <Button
                     variant="outline"
                     size="sm"
                     className="mt-2"
                     onClick={() => setNotesOpen(true)}
                   >
-                    Ver observação completa
+                    Mais detalhes
                   </Button>
                 )}
               </div>
