@@ -7,6 +7,7 @@ import {
   Copy,
   Cpu,
   Eye,
+  ExternalLink,
   EyeOff,
   Globe,
   KeyRound,
@@ -113,6 +114,38 @@ function IconButton({
       {children}
     </button>
   );
+}
+
+function QuickAccess({ onClick, wide }: { onClick: () => void; wide?: boolean }) {
+  return (
+    <button
+      type="button"
+      title="Abrir o link, copiar o usuário e liberar a senha para colar"
+      onClick={(event) => {
+        event.stopPropagation();
+        onClick();
+      }}
+      className={cn(
+        'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5',
+        wide && 'w-full',
+      )}
+    >
+      <ExternalLink />
+      Acessar
+    </button>
+  );
+}
+
+/** Só http/https; endereços sem esquema (ex.: 10.0.0.1) abrem em https. */
+function accessUrl(host: unknown) {
+  const raw = String(host || '').trim();
+  if (!raw) return null;
+  try {
+    const url = new URL(/^[a-z][a-z0-9+.-]*:\/\//i.test(raw) ? raw : `https://${raw}`);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url.toString() : null;
+  } catch {
+    return null;
+  }
 }
 
 export function CredentialsPage() {
@@ -248,6 +281,27 @@ export function CredentialsPage() {
     else toast.error('Não foi possível copiar.');
   }
 
+  // O navegador não preenche formulários de outro site: abre o link, copia o usuário e deixa um
+  // atalho para copiar a senha (consulta auditada) logo em seguida. Nada vai na URL.
+  async function quickAccess(item: ErpRecord) {
+    const url = accessUrl(item.host);
+    if (!url) {
+      toast.error('Esta credencial não tem um endereço válido (http ou https).');
+      return;
+    }
+    // window.open precisa rodar antes de qualquer await para não ser bloqueado como pop-up.
+    window.open(url, '_blank', 'noopener,noreferrer');
+    const user = text(item.username, '');
+    const copied = user ? await copyToClipboard(user) : false;
+    toast(copied ? `Usuário "${user}" copiado. Cole no login.` : 'Link aberto.', {
+      duration: 30000,
+      action: {
+        label: 'Copiar senha',
+        onClick: () => void copySecret(item),
+      },
+    });
+  }
+
   function clearFilters() {
     setSearch('');
     setProvider('Todos');
@@ -355,12 +409,13 @@ export function CredentialsPage() {
           <div
             className={cn(
               'grid items-center gap-3 border-t border-border px-5 py-2 text-[10px] font-semibold tracking-wide text-muted-foreground uppercase',
-              'grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_minmax(0,0.9fr)]',
+              'grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]',
             )}
           >
             <span>Equipamento · Provedor</span>
             <span className="hidden md:block">Host / endereço</span>
             <span>Usuário</span>
+            <span className="w-[92px] text-right">Acesso</span>
           </div>
           {grouped.map(([group, rows]) => {
             const meta = typeMeta(group);
@@ -385,7 +440,7 @@ export function CredentialsPage() {
                       key={item.id}
                       onClick={select}
                       className={cn(
-                        'grid cursor-pointer items-center gap-3 border-b border-border px-5 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/50 focus-within:bg-muted/50 grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_minmax(0,0.9fr)]',
+                        'grid cursor-pointer items-center gap-3 border-b border-border px-5 py-3 text-left transition-colors last:border-b-0 hover:bg-muted/50 focus-within:bg-muted/50 grid-cols-[minmax(0,1.2fr)_minmax(0,1fr)_auto] md:grid-cols-[minmax(0,1.3fr)_minmax(0,1.5fr)_minmax(0,1fr)_auto]',
                         active && 'bg-primary/5',
                       )}
                     >
@@ -413,12 +468,23 @@ export function CredentialsPage() {
                           <Copy />
                         </IconButton>
                       </div>
-                      <p
-                        className="truncate font-mono text-xs text-muted-foreground"
-                        title={text(item.username)}
-                      >
-                        {text(item.username)}
-                      </p>
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p
+                          className="min-w-0 truncate font-mono text-xs text-muted-foreground"
+                          title={text(item.username)}
+                        >
+                          {text(item.username)}
+                        </p>
+                        <IconButton
+                          label="Copiar usuário"
+                          onClick={() => void copy(text(item.username, ''), 'Usuário')}
+                        >
+                          <Copy />
+                        </IconButton>
+                      </div>
+                      <div className="flex w-[92px] justify-end">
+                        <QuickAccess onClick={() => void quickAccess(item)} />
+                      </div>
                     </div>
                   );
                 })}
@@ -551,6 +617,8 @@ export function CredentialsPage() {
                   </div>
                 </div>
               </div>
+
+              <QuickAccess wide onClick={() => void quickAccess(selected)} />
 
               <div>
                 <h3 className="mb-2 text-xs font-semibold text-muted-foreground uppercase">
