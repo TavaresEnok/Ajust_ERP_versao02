@@ -13,6 +13,7 @@ import {
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useErp, useErpAction } from '@/lib/erp/gateway';
 import { errorMessage } from '@/lib/erp/contracts';
+import { copyToClipboard } from '@/lib/erp/clipboard';
 export function SecretReveal({
   recordId,
   title,
@@ -113,14 +114,11 @@ export function SecretReveal({
               <Button
                 variant="outline"
                 onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(secret);
+                  if (await copyToClipboard(secret))
                     toast.success(
                       'Copiado. O conteúdo da área de transferência não é apagado automaticamente.',
                     );
-                  } catch {
-                    toast.error('Não foi possível copiar. Selecione o valor manualmente.');
-                  }
+                  else toast.error('Não foi possível copiar. Selecione o valor manualmente.');
                 }}
               >
                 Copiar segredo
