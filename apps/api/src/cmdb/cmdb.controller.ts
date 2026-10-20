@@ -1,5 +1,6 @@
 import { ApiTags, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
 import {
+  BadRequestException,
   Controller,
   Get,
   Post,
@@ -142,7 +143,7 @@ export class CmdbController {
     const fromId = String(rawReq.query?.fromId || '');
     const toId = String(rawReq.query?.toId || '');
     if (!fromId || !toId) {
-      throw new UnauthorizedException('fromId e toId query parameters são obrigatórios');
+      throw new BadRequestException('fromId e toId query parameters são obrigatórios');
     }
     return this.cmdbService.diffSnapshots(req.auth.tenantId, assetId, fromId, toId);
   }

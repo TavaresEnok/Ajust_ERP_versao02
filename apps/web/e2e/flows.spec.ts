@@ -1,125 +1,61 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 
-test.describe('Authentication Flows', () => {
-  test('successful login redirects to role home', async ({ page }) => {
-    const email = process.env.E2E_WEB_EMAIL || 'gerente@ajust.local';
-    const password = process.env.E2E_WEB_PASSWORD || 'Gerente@123';
-
-    await page.goto('/login');
-    const emailInput = page
-      .locator(
-        'input[type="email"], input[name="email"], input[placeholder*="email" i], input[placeholder*="usuário" i], input[placeholder*="login" i]',
-      )
-      .first();
-    const passwordInput = page.locator('input[type="password"]').first();
-
-    await expect(emailInput).toBeVisible();
-    await expect(passwordInput).toBeVisible();
-    await emailInput.fill(email);
-    await passwordInput.fill(password);
-    await Promise.all([
-      page.waitForURL(/\/(gerencia|analista|cliente)/, { timeout: 25000 }),
-      page.locator('button[type="submit"]').first().click(),
-    ]);
-    await expect(page).not.toHaveURL(/\/login/);
+/** Coleta exceções e respostas 4xx/5xx do BFF durante a navegação. */
+function watchErrors(page: Page) {
+  const errors: string[] = [];
+  page.on('pageerror', (error) => errors.push(`pageerror ${error.message}`));
+  page.on('response', (response) => {
+    const url = new URL(response.url());
+    if (url.pathname.startsWith('/api/') && response.status() >= 400)
+      errors.push(`${response.status()} ${response.request().method()} ${url.pathname}`);
   });
-});
+  return errors;
+}
 
-test.describe('Navigation & Access Control', () => {
-  test('redirects to login when unauthenticated', async ({ page }) => {
+test.describe('Portal da gerência', () => {
+  test('dashboard identifica a sessão', async ({ page }) => {
+    await page.goto('/');
+    await expect(page).toHaveURL(/\/gerencia$/);
+    await expect(page.getByText(/seu dia começa por aqui/i)).toBeVisible();
+    await expect(page.getByText('gerente', { exact: true }).first()).toBeVisible();
+  });
+
+  test('perfil de gerente não acessa outro portal', async ({ page }) => {
+    await page.goto('/analista/ordens');
+    await expect(page).toHaveURL(/\/gerencia$/);
+  });
+
+  test('todas as páginas do menu carregam sem erros do BFF', async ({ page }) => {
+    test.setTimeout(240_000);
     await page.goto('/gerencia');
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test('redirects to login when accessing protected route', async ({ page }) => {
-    await page.goto('/analista');
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test('public pages load without auth', async ({ page }) => {
-    await page.goto('/login');
-    await expect(page.locator('body')).toBeVisible();
-    await page.goto('/forgot-password');
-    await expect(page.locator('body')).toBeVisible();
-  });
-});
-
-test.describe('Page Structure', () => {
-  test('login page has required elements', async ({ page }) => {
-    await page.goto('/login');
-    const inputs = page.locator('input');
-    const buttons = page.locator('button');
-    await expect(inputs.first()).toBeVisible();
-    await expect(buttons.first()).toBeVisible();
-  });
-
-  test('forgot password has email input', async ({ page }) => {
-    await page.goto('/forgot-password');
-    await expect(page.locator('input').first()).toBeVisible();
-  });
-
-  test('reset password has password input', async ({ page }) => {
-    await page.goto('/reset-password');
-    await expect(page.locator('body')).toBeVisible();
-  });
-
-  test('gerencia dashboard loads structure', async ({ page }) => {
-    await page.goto('/gerencia');
-    await page.waitForURL(/\/login/, { timeout: 10000 });
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test('analista loads structure', async ({ page }) => {
-    await page.goto('/analista');
-    await page.waitForURL(/\/login/, { timeout: 10000 });
-    await expect(page).toHaveURL(/\/login/);
-  });
-
-  test('cliente loads structure', async ({ page }) => {
-    await page.goto('/cliente');
-    await page.waitForURL(/\/login/, { timeout: 10000 });
-    await expect(page).toHaveURL(/\/login/);
-  });
-});
-
-test.describe('Visual Regression Checks', () => {
-  test('login page has dark mode support', async ({ page }) => {
-    await page.goto('/login');
-    const html = page.locator('html');
-    await expect(html).toBeVisible();
-  });
-
-  test('no console errors on login page', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(msg.text());
-    });
-    await page.goto('/login');
-    await page.waitForLoadState('networkidle');
-    const realErrors = errors.filter(
-      (e) =>
-        !e.includes('favicon') &&
-        !e.includes('CORS') &&
-        !e.includes('status of 40') &&
-        !e.includes('status of 50'),
+    const routes = await page.$$eval('nav[aria-label="Navegação principal"] a[href]', (links) =>
+      links.map((link) => link.getAttribute('href') as string),
     );
-    expect(realErrors.length).toBe(0);
+    expect(routes.length).toBeGreaterThan(15);
+    const errors = watchErrors(page);
+    for (const route of routes) {
+      await page.goto(route);
+      await page.waitForLoadState('networkidle');
+      await expect(page.getByText(/não foi possível carregar/i)).toHaveCount(0);
+    }
+    expect(errors).toEqual([]);
   });
 
-  test('no console errors on forgot-password page', async ({ page }) => {
-    const errors: string[] = [];
-    page.on('console', (msg) => {
-      if (msg.type() === 'error') errors.push(msg.text());
-    });
-    await page.goto('/forgot-password');
-    await page.waitForLoadState('networkidle');
-    const realErrors = errors.filter(
-      (e) =>
-        !e.includes('favicon') &&
-        !e.includes('CORS') &&
-        !e.includes('status of 40') &&
-        !e.includes('status of 50'),
-    );
-    expect(realErrors.length).toBe(0);
+  test('cria uma ordem de serviço pela interface', async ({ page }) => {
+    const errors = watchErrors(page);
+    const title = `OS e2e ${Date.now()}`;
+    await page.goto('/gerencia/ordens/nova');
+    await page.getByLabel(/^Título/).fill(title);
+    await page.getByLabel(/^Tipo de serviço/).selectOption('LENTIDAO');
+    await page.getByLabel(/^Descrição/).fill('Criada pelo teste e2e do redesign');
+    await page.getByRole('button', { name: /criar ordem/i }).click();
+    await page.waitForURL(/\/gerencia\/ordens\/[0-9a-f-]{36}$/, { timeout: 20000 });
+    await expect(page.getByRole('heading', { name: title })).toBeVisible();
+    expect(errors).toEqual([]);
+  });
+
+  test('ID inexistente mostra o ID solicitado, sem trocar de registro', async ({ page }) => {
+    await page.goto('/gerencia/ativos/registro-inexistente/snapshots');
+    await expect(page.getByText(/registro-inexistente/).first()).toBeVisible();
   });
 });
