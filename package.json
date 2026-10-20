@@ -31,7 +31,7 @@
     "dev": "corepack pnpm -r --parallel dev",
     "build": "corepack pnpm -r build",
     "lint": "corepack pnpm -r lint",
-    "lint:fix": "corepack pnpm exec eslint apps/api apps/worker packages/shared scripts --fix && corepack pnpm --filter @ajust/web exec next lint --fix",
+    "lint:fix": "corepack pnpm exec eslint apps/api apps/worker packages/shared scripts --fix && corepack pnpm --filter @ajust/web exec eslint . --fix",
     "typecheck": "corepack pnpm -r typecheck",
     "test:e2e": "corepack pnpm --filter @ajust/api test:e2e",
     "test:e2e:security": "corepack pnpm --filter @ajust/api test:e2e:security",

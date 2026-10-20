@@ -1,5 +1,4 @@
-import { redirect } from 'next/navigation';
-
-export default function HomePage() {
-  redirect('/login');
+import { Workspace } from '@/components/erp/workspace';
+export default function Page() {
+  return <Workspace />;
 }

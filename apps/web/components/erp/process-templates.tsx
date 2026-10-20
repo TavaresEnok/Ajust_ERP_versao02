@@ -1,0 +1,292 @@
+'use client';
+import { useState } from 'react';
+import { Plus, Trash2, ArrowUp, ArrowDown } from 'lucide-react';
+import { toast } from 'sonner';
+import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog';
+import { Field, FieldGroup, FieldLabel } from '@/components/ui/field';
+import {
+  orderTypes,
+  priorities,
+  type OrderType,
+  type ProcessChildOrder,
+  type ProcessTemplateInput,
+  type ErpRecord,
+} from '@/lib/erp/contracts';
+import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
+import { ContractForm, ConnectionNotice, ErpEmpty, QueryState } from './contract-form';
+import { PageHeading, PanelHeading, StatusBadge } from './primitives';
+type Template = ErpRecord & ProcessTemplateInput;
+export function ProcessTemplatesPage() {
+  const { scope } = useErp();
+  const allowed = !scope || ['super_admin', 'gerente'].includes(scope.role);
+  const query = useErpQuery<Template[]>(allowed ? '/os-process-templates' : null);
+  const action = useErpAction();
+  const [selected, setSelected] = useState<Template | null>(null);
+  const [open, setOpen] = useState(false);
+  const [children, setChildren] = useState<ProcessChildOrder[]>([]);
+  const [triggers, setTriggers] = useState<OrderType[]>([]);
+  const [childIndex, setChildIndex] = useState<number | null>(null);
+  const [childOpen, setChildOpen] = useState(false);
+  const [notice, setNotice] = useState('');
+  function edit(template: Template | null) {
+    setSelected(template);
+    setChildren(template?.definition.childOrders || []);
+    setTriggers(template?.triggerOsTypes || []);
+    setNotice('');
+    setOpen(true);
+  }
+  if (!allowed)
+    return (
+      <PageHeading title="Modelos de processos" description="Esta área exige perfil gerencial." />
+    );
+  return (
+    <>
+      <PageHeading
+        title="Modelos de processos de OS"
+        description="Defina os tipos que disparam um processo e todas as ordens filhas necessárias."
+      >
+        <Button onClick={() => edit(null)}>
+          <Plus data-icon="inline-start" />
+          Novo modelo
+        </Button>
+      </PageHeading>
+      {!query.connected && <ConnectionNotice />}
+      <section className="panel">
+        <PanelHeading
+          title="Modelos cadastrados"
+          description="O backend cria as ordens filhas conforme a definição do processo."
+        />
+        <QueryState
+          loading={query.isLoading}
+          error={query.error}
+          onRetry={() => void query.mutate()}
+        />
+        {query.data?.length
+          ? query.data.map((template) => (
+              <div
+                key={template.id}
+                className="flex items-center justify-between gap-4 border-t border-border p-5"
+              >
+                <div>
+                  <p className="text-xs font-medium">{template.name}</p>
+                  <p className="mt-2 text-[10px] text-muted-foreground">
+                    {template.definition.childOrders.length} ordens filhas ·{' '}
+                    {template.triggerOsTypes.map((type) => orderTypes[type]).join(', ')}
+                  </p>
+                </div>
+                <StatusBadge status={template.enabled ? 'Ativo' : 'Inativo'} />
+                <Button variant="outline" onClick={() => edit(template)}>
+                  Configurar
+                </Button>
+              </div>
+            ))
+          : !query.isLoading && !query.error && <ErpEmpty connected={query.connected} />}
+      </section>
+      <Dialog open={open} onOpenChange={setOpen}>
+        <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-3xl">
+          <DialogHeader>
+            <DialogTitle>{selected ? 'Editar modelo' : 'Novo modelo de processo'}</DialogTitle>
+            <DialogDescription>
+              Definição estruturada compatível com os-process-templates. Alterações não enviadas são
+              apenas rascunhos.
+            </DialogDescription>
+          </DialogHeader>
+          <ContractForm
+            fields={[
+              { name: 'name', label: 'Nome do modelo', required: true, min: 1 },
+              { name: 'description', label: 'Descrição', type: 'textarea' },
+              { name: 'enabled', label: 'Ativar modelo', type: 'checkbox' },
+            ]}
+            values={selected || {}}
+            connected={query.connected}
+            pending={action.pending}
+            draft={!query.connected}
+            label="Salvar modelo no ERP"
+            onSubmit={async (values) => {
+              if (!triggers.length) throw new Error('Selecione ao menos um tipo de disparo.');
+              if (!children.length) throw new Error('Adicione ao menos uma ordem filha.');
+              if (!query.connected) {
+                setNotice('Definição validada. Nenhum modelo foi salvo ou ativado.');
+                return;
+              }
+              await action.execute({
+                path: selected ? `/os-process-templates/${selected.id}` : '/os-process-templates',
+                method: selected ? 'PATCH' : 'POST',
+                body: {
+                  ...values,
+                  triggerOsTypes: triggers,
+                  definition: { childOrders: children },
+                },
+              });
+              await query.mutate();
+              setOpen(false);
+              toast.success('Modelo confirmado pelo ERP');
+            }}
+          >
+            <fieldset className="rounded-lg border border-border p-4">
+              <legend className="px-2 text-xs font-medium">
+                Tipos de OS que disparam o processo *
+              </legend>
+              <FieldGroup className="grid gap-3 sm:grid-cols-3">
+                {Object.entries(orderTypes).map(([code, label]) => (
+                  <Field key={code} orientation="horizontal">
+                    <input
+                      type="checkbox"
+                      id={`trigger-${code}`}
+                      className="accent-primary"
+                      checked={triggers.includes(code as OrderType)}
+                      onChange={(e) =>
+                        setTriggers((values) =>
+                          e.target.checked
+                            ? [...values, code as OrderType]
+                            : values.filter((value) => value !== code),
+                        )
+                      }
+                    />
+                    <FieldLabel htmlFor={`trigger-${code}`}>{label}</FieldLabel>
+                  </Field>
+                ))}
+              </FieldGroup>
+            </fieldset>
+            <div className="flex items-center justify-between">
+              <h2 className="section-title">Ordens filhas</h2>
+              <Button
+                type="button"
+                variant="outline"
+                onClick={() => {
+                  setChildIndex(null);
+                  setChildOpen(true);
+                }}
+              >
+                <Plus data-icon="inline-start" />
+                Adicionar ordem
+              </Button>
+            </div>
+            {children.map((child, index) => (
+              <div
+                className="flex flex-wrap items-center gap-3 rounded-lg border border-border p-4"
+                key={child.id}
+              >
+                <span className="text-xs text-primary">{index + 1}</span>
+                <div className="min-w-0 flex-1">
+                  <p className="text-xs font-medium">{child.title}</p>
+                  <p className="mt-1 text-[10px] text-muted-foreground">
+                    {orderTypes[child.type]} · {priorities[child.priority]} ·{' '}
+                    {child.deadlineHours ? `${child.deadlineHours}h` : 'SLA da política'}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Mover ordem para cima"
+                  disabled={index === 0}
+                  onClick={() =>
+                    setChildren((list) => {
+                      const next = [...list];
+                      [next[index - 1], next[index]] = [next[index], next[index - 1]];
+                      return next;
+                    })
+                  }
+                >
+                  <ArrowUp />
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label="Mover ordem para baixo"
+                  disabled={index === children.length - 1}
+                  onClick={() =>
+                    setChildren((list) => {
+                      const next = [...list];
+                      [next[index + 1], next[index]] = [next[index], next[index + 1]];
+                      return next;
+                    })
+                  }
+                >
+                  <ArrowDown />
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  onClick={() => {
+                    setChildIndex(index);
+                    setChildOpen(true);
+                  }}
+                >
+                  Editar
+                </Button>
+                <Button
+                  type="button"
+                  size="icon-sm"
+                  variant="ghost"
+                  aria-label={`Remover ${child.title}`}
+                  onClick={() => setChildren((list) => list.filter((_, i) => i !== index))}
+                >
+                  <Trash2 />
+                </Button>
+              </div>
+            ))}
+            {notice && (
+              <p role="status" className="text-xs text-primary">
+                {notice}
+              </p>
+            )}
+          </ContractForm>
+        </DialogContent>
+      </Dialog>
+      <Dialog open={childOpen} onOpenChange={setChildOpen}>
+        <DialogContent className="max-h-[85dvh] overflow-y-auto sm:max-w-xl">
+          <DialogHeader>
+            <DialogTitle>Ordem filha do processo</DialogTitle>
+            <DialogDescription>
+              A configuração compõe o rascunho do modelo, sem abrir uma OS agora.
+            </DialogDescription>
+          </DialogHeader>
+          <ContractForm
+            key={childIndex ?? 'new'}
+            draft
+            fields={[
+              { name: 'title', label: 'Título', required: true, min: 1 },
+              { name: 'type', label: 'Tipo', options: orderTypes, required: true },
+              { name: 'priority', label: 'Prioridade', options: priorities, required: true },
+              { name: 'sector', label: 'Setor' },
+              { name: 'origin', label: 'Origem' },
+              { name: 'description', label: 'Descrição', type: 'textarea' },
+              { name: 'deadlineHours', label: 'Prazo em horas', type: 'number', min: 1 },
+              { name: 'tags', label: 'Tags', type: 'list' },
+            ]}
+            values={
+              childIndex === null
+                ? {}
+                : (children[childIndex] as unknown as Record<string, unknown>)
+            }
+            connected={false}
+            onSubmit={async (values) => {
+              if (values.deadlineHours !== undefined && !Number.isInteger(values.deadlineHours))
+                throw new Error('O prazo deve ser um número inteiro de horas.');
+              const child = {
+                ...values,
+                id: childIndex === null ? crypto.randomUUID() : children[childIndex].id,
+              } as unknown as ProcessChildOrder;
+              setChildren((list) =>
+                childIndex === null
+                  ? [...list, child]
+                  : list.map((row, index) => (index === childIndex ? child : row)),
+              );
+              setChildOpen(false);
+            }}
+          />
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}

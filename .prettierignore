@@ -9,3 +9,4 @@ coverage
 prisma/migrations
 **/mockups/**
 .gitleaks.toml
+**/next-env.d.ts

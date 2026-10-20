@@ -6,8 +6,8 @@ MANAGER_LOGIN="${MANAGER_LOGIN:-gerente@ajust.local}"
 MANAGER_PASSWORD="${MANAGER_PASSWORD:-Gerente@123}"
 ANALYST_LOGIN="${ANALYST_LOGIN:-analista@ajust.local}"
 ANALYST_PASSWORD="${ANALYST_PASSWORD:-Analista@123}"
-CLIENT_LOGIN="${CLIENT_LOGIN:-00.000.000/0001-00}"
-CLIENT_PASSWORD="${CLIENT_PASSWORD:-0100}"
+CLIENT_LOGIN="${CLIENT_LOGIN:-cliente-interno@ajust.local}"
+CLIENT_PASSWORD="${CLIENT_PASSWORD:-Cliente@123}"
 
 TMP_DIR="$(mktemp -d)"
 trap 'rm -rf "$TMP_DIR"' EXIT
@@ -83,24 +83,32 @@ login_and_check() {
 JSON
 
   local code
-  code="$(curl -s -c "$cookie_file" -H 'Content-Type: application/json' -d @"$body_file" -o "$resp_file" -w '%{http_code}' "${BASE_URL}/api/auth/login")"
-  assert_code "$code" "200" "POST /api/auth/login"
+  code="$(curl -s -c "$cookie_file" -H 'Content-Type: application/json' -d @"$body_file" -o "$resp_file" -w '%{http_code}' "${BASE_URL}/api/public/auth/login")"
+  assert_code "$code" "200" "POST /api/public/auth/login"
 
   python3 - "$resp_file" "$expected_role" <<'PY'
 import json,sys
 payload=json.load(open(sys.argv[1], 'r', encoding='utf-8'))
 role=sys.argv[2]
-if not payload.get('ok'):
-    print('[web-smoke] login payload missing ok=true')
+homes={'gerente':'/gerencia','super_admin':'/gerencia','analista':'/analista','tecnico':'/analista','cliente':'/cliente','leitura':'/cliente'}
+if payload.get('authenticated') is not True:
+    print('[web-smoke] login payload missing authenticated=true')
     raise SystemExit(1)
-if role and payload.get('user',{}).get('role') != role:
-    print('[web-smoke] login role mismatch', payload.get('user',{}).get('role'), role)
+if role and not str(payload.get('redirectTo','')).startswith(homes.get(role,'?')):
+    print('[web-smoke] login redirect mismatch', payload.get('redirectTo'), role)
     raise SystemExit(1)
 PY
 
   local me_file="$TMP_DIR/me_resp.json"
-  code="$(curl -s -b "$cookie_file" -o "$me_file" -w '%{http_code}' "${BASE_URL}/api/auth/me")"
-  assert_code "$code" "200" "GET /api/auth/me"
+  code="$(curl -s -b "$cookie_file" -o "$me_file" -w '%{http_code}' "${BASE_URL}/api/erp/auth/me")"
+  assert_code "$code" "200" "GET /api/erp/auth/me"
+  python3 - "$me_file" "$expected_role" <<'PY'
+import json,sys
+me=json.load(open(sys.argv[1], 'r', encoding='utf-8'))
+if sys.argv[2] and (me.get('tenant') or {}).get('role') != sys.argv[2]:
+    print('[web-smoke] /auth/me role mismatch', me.get('tenant'), sys.argv[2])
+    raise SystemExit(1)
+PY
 }
 
 # Public login page
@@ -138,7 +146,11 @@ assert_code "$code" "200" "GET /cliente authenticated"
 check_assets "$CLIENT_HTML"
 
 # Logout flow
-code="$(curl -s -b "$MANAGER_COOKIE" -o "$TMP_DIR/logout_resp.json" -w '%{http_code}' -X POST "${BASE_URL}/api/auth/logout")"
-assert_code "$code" "200" "POST /api/auth/logout"
+code="$(curl -s -b "$MANAGER_COOKIE" -o "$TMP_DIR/logout_resp.json" -w '%{http_code}' -X POST "${BASE_URL}/api/session/logout")"
+assert_code "$code" "200" "POST /api/session/logout"
+
+# Session must be revoked after logout
+code="$(curl -s -b "$MANAGER_COOKIE" -o /dev/null -w '%{http_code}' "${BASE_URL}/api/erp/auth/me")"
+assert_code "$code" "401" "GET /api/erp/auth/me after logout"
 
 echo "[web-smoke] OK"
