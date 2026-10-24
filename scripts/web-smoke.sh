@@ -90,7 +90,7 @@ JSON
 import json,sys
 payload=json.load(open(sys.argv[1], 'r', encoding='utf-8'))
 role=sys.argv[2]
-homes={'gerente':'/gerencia','super_admin':'/gerencia','analista':'/analista','tecnico':'/analista','cliente':'/cliente','leitura':'/cliente'}
+homes={'gerente':'/gerencia','super_admin':'/gerencia','analista':'/analista','cliente':'/cliente'}
 if payload.get('authenticated') is not True:
     print('[web-smoke] login payload missing authenticated=true')
     raise SystemExit(1)

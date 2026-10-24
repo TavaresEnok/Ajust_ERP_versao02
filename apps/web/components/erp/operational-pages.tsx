@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { useErpQuery } from '@/lib/erp/gateway';
+import { useErp, useErpQuery } from '@/lib/erp/gateway';
 import { listRecords, useRouteBase, useVisualSource } from '@/lib/erp/visual-data';
 import type { ErpRecord } from '@/lib/erp/contracts';
 import { PageHeading, PanelHeading, StatusBadge, Avatar, ViewLink } from './primitives';
@@ -16,12 +16,19 @@ const userName = (record?: ErpRecord | null) =>
     ? String((record.user as { name?: string }).name || record.userId || '—')
     : String(record?.userName || record?.userId || '—');
 export function OnCallPage() {
+  const { scope } = useErp();
+  const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   const query = useErpQuery<unknown>('/on-call');
   const current = useErpQuery<ErpRecord | null>('/on-call/current');
   const rows = listRecords(query.data);
   const active = current.data;
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const upcoming = [...rows]
-    .filter((row) => new Date(String(row.startsAt)).getTime() > Date.now())
+    .filter((row) => new Date(String(row.startsAt)).getTime() > now)
     .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)))[0];
   return (
     <>
@@ -29,7 +36,7 @@ export function OnCallPage() {
         title="Plantão NOC"
         description="Presença e cobertura para uma operação que não para."
       >
-        <RecordDialog title="Novo plantão" moduleKey="onCall" fields={[]} />
+        {manager && <RecordDialog title="Novo plantão" moduleKey="onCall" fields={[]} />}
       </PageHeading>
       <QueryState
         loading={query.isLoading || current.isLoading}
@@ -68,7 +75,9 @@ export function OnCallPage() {
               <p className="mt-1 text-xs text-muted-foreground">
                 {upcoming
                   ? `${date(upcoming.startsAt)} até ${date(upcoming.endsAt)}`
-                  : 'Cadastre o próximo período de cobertura.'}
+                  : manager
+                    ? 'Cadastre o próximo período de cobertura.'
+                    : 'A gestão ainda não cadastrou uma escala futura.'}
               </p>
             </div>
           </div>
@@ -87,7 +96,7 @@ export function OnCallPage() {
                 <th>Início</th>
                 <th>Fim</th>
                 <th>Orientações</th>
-                <th>Ações</th>
+                {manager && <th>Ações</th>}
               </tr>
             </thead>
             <tbody>
@@ -102,19 +111,21 @@ export function OnCallPage() {
                   <td>{date(row.startsAt)}</td>
                   <td>{date(row.endsAt)}</td>
                   <td>{String(row.notes || '—')}</td>
-                  <td>
-                    <OperationControl
-                      title="Remover plantão"
-                      description="Remover este período de cobertura do ERP?"
-                      path={`/on-call/${encodeURIComponent(row.id)}`}
-                      method="DELETE"
-                      roles={['super_admin', 'gerente']}
-                      after={async () => {
-                        await query.mutate();
-                        await current.mutate();
-                      }}
-                    />
-                  </td>
+                  {manager && (
+                    <td>
+                      <OperationControl
+                        title="Remover plantão"
+                        description="Remover este período de cobertura do ERP?"
+                        path={`/on-call/${encodeURIComponent(row.id)}`}
+                        method="DELETE"
+                        roles={['super_admin', 'gerente']}
+                        after={async () => {
+                          await query.mutate();
+                          await current.mutate();
+                        }}
+                      />
+                    </td>
+                  )}
                 </tr>
               ))}
             </tbody>

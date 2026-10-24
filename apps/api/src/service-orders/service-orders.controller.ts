@@ -34,6 +34,10 @@ import { ServiceOrdersService } from './service-orders.service';
 import { TenantRateLimit, TenantRateLimitGuard } from '../common/tenant-rate-limit.guard';
 
 const CreateOrderSchema = z.object({
+  workflowTemplateCode: z
+    .string()
+    .regex(/^[A-Z0-9_]+$/)
+    .optional(),
   tenantId: z.string().uuid().optional(),
   occurrenceId: z.string().uuid().optional(),
   type: z.nativeEnum(ServiceOrderType),
@@ -53,6 +57,8 @@ const CreateOrderSchema = z.object({
 });
 
 const UpdateOrderSchema = z.object({
+  ownerUserId: z.string().uuid().optional(),
+  assigneeUserId: z.string().uuid().optional(),
   type: z.nativeEnum(ServiceOrderType).optional(),
   priority: z.nativeEnum(Priority).optional(),
   title: z.string().min(3).optional(),
@@ -69,6 +75,13 @@ const UpdateOrderSchema = z.object({
 });
 
 const OccurrenceOrderSchema = z.object({
+  recordCompleted: z.boolean().optional(),
+  workflowTemplateCode: z
+    .string()
+    .regex(/^[A-Z0-9_]+$/)
+    .optional(),
+  ownerUserId: z.string().uuid().optional(),
+  assigneeUserId: z.string().uuid().optional(),
   type: z.nativeEnum(ServiceOrderType),
   status: z.nativeEnum(ServiceOrderStatus).optional(),
   priority: z.nativeEnum(Priority).optional(),
@@ -84,6 +97,7 @@ const OccurrenceOrderSchema = z.object({
 });
 
 const CreateOccurrenceSchema = z.object({
+  customerId: z.string().uuid().optional(),
   tenantId: z.string().uuid().optional(),
   provider: z.string().min(2),
   type: z.string().min(2),
@@ -116,7 +130,7 @@ const ListOccurrencesSchema = z.object({
 });
 
 const CreateAnnotationSchema = z.object({
-  message: z.string().trim().min(2).max(4000),
+  message: z.string().trim().min(2).max(20000),
 });
 
 const TransitionSchema = z.object({
@@ -131,6 +145,8 @@ const ApprovalSchema = z.object({
 });
 
 const ListSchema = z.object({
+  provider: z.string().trim().min(1).max(300).optional(),
+  scope: z.enum(['mine', 'operation']).optional(),
   status: z.nativeEnum(ServiceOrderStatus).optional(),
   priority: z.nativeEnum(Priority).optional(),
   type: z.nativeEnum(ServiceOrderType).optional(),
@@ -180,6 +196,7 @@ export class ServiceOrdersController {
   @ApiResponse({ status: 200, description: 'Lista paginada de ordens' })
   async list(
     @Req() req: RequestWithAuth,
+    @Query('scope') scope?: string,
     @Query('status') status?: ServiceOrderStatus,
     @Query('priority') priority?: Priority,
     @Query('type') type?: ServiceOrderType,
@@ -190,10 +207,13 @@ export class ServiceOrdersController {
     @Query('offset') offset?: string,
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string,
+    @Query('provider') provider?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListSchema.parse({
+      scope,
+      provider,
       status,
       priority,
       type,
@@ -210,7 +230,14 @@ export class ServiceOrdersController {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    return this.serviceOrdersService.list(req.auth.tenantId, input, req.auth.role);
+    return this.serviceOrdersService.list(
+      req.auth.tenantId,
+      {
+        ...input,
+        responsibleUserId: input.scope === 'mine' ? req.auth.userId : undefined,
+      },
+      req.auth.role,
+    );
   }
 
   @Get('summary')
@@ -479,7 +506,29 @@ export class ServiceOrdersController {
     );
   }
 
+  @Patch(':id/annotations/:annotationId')
+  editAnnotation(
+    @Param('id') id: string,
+    @Param('annotationId') annotationId: string,
+    @Body() raw: unknown,
+    @Req() req: RequestWithAuth,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    const input = CreateAnnotationSchema.extend({
+      expectedVersion: z.number().int().positive(),
+    }).parse(raw);
+    return this.serviceOrdersService.editOrderAnnotation(
+      req.auth.tenantId,
+      id,
+      annotationId,
+      req.auth.userId,
+      req.auth.role || '',
+      input.message,
+      input.expectedVersion,
+    );
+  }
   @Patch(':id/transition')
+  @ApiOperation({ summary: 'Alterar situação da ordem' })
   async transition(
     @Param('id') id: string,
     @Body() body: unknown,

@@ -5,7 +5,7 @@ import { ContractForm } from './contract-form';
 import { CalendarBoard } from './calendar-board';
 import { ResourcePage } from './resource-page';
 import { DataReport, ReportTable } from './data-report';
-import { useErpAction } from '@/lib/erp/gateway';
+import { useErp, useErpAction } from '@/lib/erp/gateway';
 import { PanelHeading } from './primitives';
 import type { CalendarConflict } from '@/lib/erp/contracts';
 export function ScheduleWorkspace({
@@ -16,6 +16,8 @@ export function ScheduleWorkspace({
   initialTab?: string;
 }) {
   const action = useErpAction();
+  const { scope } = useErp();
+  const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   const [conflicts, setConflicts] = useState<CalendarConflict | null>(null);
   if (onCall)
     return (
@@ -38,7 +40,7 @@ export function ScheduleWorkspace({
         <TabsList variant="line">
           <TabsTrigger value="calendar">Calendário</TabsTrigger>
           <TabsTrigger value="events">Meus compromissos</TabsTrigger>
-          <TabsTrigger value="team">Agenda da equipe</TabsTrigger>
+          {manager && <TabsTrigger value="team">Agenda da equipe</TabsTrigger>}
           <TabsTrigger value="conflicts">Verificar conflitos</TabsTrigger>
         </TabsList>
       </div>

@@ -1,5 +1,5 @@
 'use client';
-import { useId, useState, type ReactNode } from 'react';
+import { useId, useRef, useState, type ReactNode } from 'react';
 import { Cable, Check, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -201,8 +201,13 @@ export function ContractForm({
 }) {
   const [error, setError] = useState('');
   const [validated, setValidated] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const inFlight = useRef(false);
   async function submit(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setSubmitting(true);
     setError('');
     setValidated(false);
     try {
@@ -214,6 +219,9 @@ export function ContractForm({
       await onSubmit(data);
     } catch (error) {
       setError(errorMessage(error));
+    } finally {
+      inFlight.current = false;
+      setSubmitting(false);
     }
   }
   return (
@@ -241,8 +249,8 @@ export function ContractForm({
             ? 'A alteração só será confirmada após a resposta do servidor.'
             : 'Prévia do formulário. Nenhum dado será salvo.'}
         </p>
-        <Button type="submit" disabled={pending}>
-          {pending
+        <Button type="submit" disabled={pending || submitting}>
+          {pending || submitting
             ? 'Enviando...'
             : draft
               ? 'Aplicar ao rascunho'

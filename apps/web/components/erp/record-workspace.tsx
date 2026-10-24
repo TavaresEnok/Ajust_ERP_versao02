@@ -23,6 +23,8 @@ import { PageHeading, PanelHeading, StatusBadge } from './primitives';
 import { displayValue } from './resource-page';
 import { DataReport } from './data-report';
 import { OperationControl } from './operation-controls';
+import { OperationalOrderPanel } from './operational-workflows';
+import { OrderAnnotations } from './order-annotations';
 export function RecordWorkspace({
   kind,
   id,
@@ -47,10 +49,9 @@ export function RecordWorkspace({
   const [uploadError, setUploadError] = useState('');
   const [uploadKey, setUploadKey] = useState(0);
   const record = Array.isArray(query.data) ? query.data.find((row) => row.id === id) : query.data;
-  const customer =
-    scope?.role === 'cliente' || scope?.role === 'leitura' || (!scope && base === '/cliente');
+  const customer = scope?.role === 'cliente' || (!scope && base === '/cliente');
   const canOperate = scope
-    ? ['super_admin', 'gerente', 'analista', 'tecnico'].includes(scope.role)
+    ? ['super_admin', 'gerente', 'analista'].includes(scope.role)
     : !customer;
   const manager = scope ? ['super_admin', 'gerente'].includes(scope.role) : !customer;
   const connected = action.connected && realId && !!record;
@@ -64,15 +65,39 @@ export function RecordWorkspace({
   const rows = (key: string) =>
     Array.isArray(record?.[key]) ? (record[key] as Record<string, unknown>[]) : [];
   const annotations = rows(kind === 'orders' ? 'occurrences' : 'annotations');
+  // Keep both audit events, but show the solution text only once for a close/resolve pair.
+  const historyAnnotations = annotations.map((note, index) => {
+    const message = String(note.message);
+    const closure = message.match(
+      /^Status alterado de RESOLVIDA para FECHADA\. Motivo:\s*([\s\S]*)$/,
+    );
+    const previous = annotations[index + 1];
+    const resolution =
+      previous &&
+      String(previous.message).match(
+        /^Status alterado de \S+ para RESOLVIDA\. Motivo:\s*([\s\S]*)$/,
+      );
+    return closure &&
+      resolution &&
+      closure[1] === resolution[1] &&
+      note.actorUserId === previous.actorUserId
+      ? {
+          ...note,
+          message: 'Status alterado de RESOLVIDA para FECHADA. Solução registrada na resolução.',
+        }
+      : note;
+  });
   const tabs =
     kind === 'orders'
       ? [
-          'Resumo',
-          ...(!customer ? ['Editar', 'Transição', 'Aprovações'] : []),
-          'Histórico',
+          'Encerramento',
           'Anotações',
-          'Anexos',
+          ...(!customer ? ['Editar'] : []),
+          'Resumo',
+          ...(!customer ? ['Transição', 'Aprovações'] : []),
           ...(!customer ? ['Trabalho', 'SLA'] : []),
+          'Anexos',
+          'Histórico',
         ]
       : kind === 'occurrences'
         ? ['Resumo', 'Editar', 'Ordens vinculadas', 'Anotações', 'Histórico']
@@ -147,6 +172,34 @@ export function RecordWorkspace({
         error={query.error}
         onRetry={() => void query.mutate()}
       />
+      {record?.processInstanceId && !embedded && scope?.role !== 'analista' && (
+        <div className="mb-4 rounded-xl border border-blue-300 p-4 text-xs">
+          Esta O.S. está vinculada a um processo de atendimento.{' '}
+          <Link
+            href={`${base}/processos/${String(record.processInstanceId)}`}
+            className="text-primary"
+          >
+            Ver acompanhamento do atendimento
+          </Link>
+          {record.slaEligible === false && (
+            <p className="mt-2">
+              Meta proposta para o piloto; SLA histórico da origem não informado.
+            </p>
+          )}
+        </div>
+      )}
+      {kind === 'orders' &&
+        record &&
+        !embedded &&
+        canOperate &&
+        !customer &&
+        scope?.role !== 'analista' && (
+          <OperationalOrderPanel
+            orderId={id}
+            processId={record.processInstanceId ? String(record.processInstanceId) : null}
+            base={base}
+          />
+        )}
       {query.connected && realId && !record && !query.isLoading && !query.error && (
         <ErpEmpty connected />
       )}
@@ -164,7 +217,7 @@ export function RecordWorkspace({
           <section className="panel">
             <PanelHeading
               title="Informações do registro"
-              description={record ? 'Dados retornados pelo ERP original' : 'Sem registro carregado'}
+              description={record ? 'Dados do registro no Ajust ERP' : 'Sem registro carregado'}
             />
             {record ? (
               <dl className="grid gap-5 p-6 pt-0 sm:grid-cols-2">
@@ -196,6 +249,7 @@ export function RecordWorkspace({
             <h2 className="section-title mb-5">Editar dados do atendimento</h2>
             <ContractForm
               key={(record?.updatedAt as string) || id}
+              label="Salvar alterações"
               fields={
                 kind === 'orders'
                   ? orderFields.map((field) =>
@@ -284,32 +338,74 @@ export function RecordWorkspace({
             ))}
           </section>
         </TabsContent>
+        <TabsContent value="Encerramento">
+          <section className="panel p-6 space-y-4">
+            <h2 className="section-title">Solução e encerramento</h2>
+            {annotations.filter((n) =>
+              /^(Status alterado de \S+ para (RESOLVIDA|FECHADA)\. Motivo:|Atendimento concluído:|DEMONSTRAÇÃO · Resultado registrado)/.test(
+                String(n.message),
+              ),
+            ).length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                Não há registro de solução ou encerramento identificado nesta O.S. Os registros
+                originais permanecem no Histórico.
+              </p>
+            )}
+            {historyAnnotations
+              .filter((n) =>
+                /^(Status alterado de \S+ para (RESOLVIDA|FECHADA)\. Motivo:|Atendimento concluído:|DEMONSTRAÇÃO · Resultado registrado)/.test(
+                  String(n.message),
+                ),
+              )
+              .map((n) => (
+                <article key={String(n.id)} className="rounded-lg border border-border p-4">
+                  <p className="mb-3 text-xs font-medium">
+                    {String(n.message).includes('para FECHADA.')
+                      ? 'Encerramento'
+                      : 'Solução registrada'}
+                  </p>
+                  <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                    {String(n.message).replace(/^Status alterado de \S+ para \S+\. Motivo:\s*/, '')}
+                  </p>
+                  <p className="mt-3 text-xs text-muted-foreground">
+                    {String(
+                      (n.actorUser as { name?: string })?.name || n.sourceAuthorName || 'Equipe',
+                    )}{' '}
+                    · {new Date(String(n.createdAt)).toLocaleString('pt-BR')}
+                  </p>
+                </article>
+              ))}
+          </section>
+        </TabsContent>
         <TabsContent value="Anotações">
           <section className="panel p-6">
-            <h2 className="section-title mb-5">Atualizações do atendimento</h2>
-            <Alert className="mb-5">
-              <AlertTitle>Visibilidade definida pelo backend</AlertTitle>
-              <AlertDescription>
-                O endpoint original recebe apenas a mensagem. Não existe opção de anotação privada
-                neste contrato; confirme o público antes de enviar.
-              </AlertDescription>
-            </Alert>
-            <ContractForm
-              fields={[
-                {
-                  name: 'message',
-                  label: 'Mensagem',
-                  type: 'textarea',
-                  min: 2,
-                  max: 4000,
-                  required: true,
-                },
-              ]}
-              connected={connected && canOperate}
-              pending={action.pending}
-              onSubmit={(values) => submit('/annotations', 'POST', values)}
-              label="Adicionar anotação"
-            />
+            {kind === 'orders' ? (
+              <OrderAnnotations
+                orderId={id}
+                notes={annotations as ErpRecord[]}
+                refresh={query.mutate}
+              />
+            ) : (
+              <>
+                <h2 className="section-title mb-5">Atualizações do atendimento</h2>
+                <ContractForm
+                  fields={[
+                    {
+                      name: 'message',
+                      label: 'Mensagem',
+                      type: 'textarea',
+                      min: 2,
+                      max: 20000,
+                      required: true,
+                    },
+                  ]}
+                  connected={connected && canOperate}
+                  pending={action.pending}
+                  onSubmit={(values) => submit('/annotations', 'POST', values)}
+                  label="Adicionar anotação"
+                />
+              </>
+            )}
           </section>
         </TabsContent>
         <TabsContent value="Histórico">
@@ -320,11 +416,16 @@ export function RecordWorkspace({
             />
             {annotations.length ? (
               <div className="p-6 pt-0">
-                {annotations.map((row, i) => (
+                {historyAnnotations.map((row, i) => (
                   <div className="timeline-item" key={String(row.id || i)}>
                     <p className="text-xs leading-6">{displayValue(row.message)}</p>
                     <p className="mt-2 text-[10px] text-muted-foreground">
-                      {displayValue(row.createdAt)} · {displayValue(row.actorUserId)}
+                      {displayValue(row.createdAt)} ·{' '}
+                      {displayValue(
+                        (row.actorUser as { name?: string })?.name ||
+                          row.sourceAuthorName ||
+                          'Autor não informado',
+                      )}
                     </p>
                   </div>
                 ))}
@@ -417,22 +518,55 @@ export function RecordWorkspace({
         </TabsContent>
         <TabsContent value="Ordens vinculadas">
           <section className="panel p-6">
-            <h2 className="section-title mb-5">Criar ordem nesta ocorrência</h2>
-            <ContractForm
-              fields={orderFields.filter((f) => !['ownerName'].includes(f.name))}
-              connected={connected && canOperate}
-              pending={action.pending}
-              onSubmit={(values) => submit('/orders', 'POST', values)}
-            />
+            <h2 className="section-title mb-5">
+              Ordens desta ocorrência · {rows('serviceOrders').length} O.S.
+            </h2>
+            {!rows('serviceOrders').length && (
+              <p className="text-sm text-muted-foreground">
+                Nenhuma ordem vinculada a esta ocorrência.
+              </p>
+            )}
             {rows('serviceOrders').map((row, i) => (
               <Link
                 key={String(row.id || i)}
-                href={`${base}/operacoes/orders/${row.id}`}
-                className="mt-5 block rounded-lg border border-border p-4 text-xs"
+                href={`${base}/ordens/${row.id}`}
+                className="mb-3 flex items-center justify-between gap-4 rounded-lg border border-border p-4 text-sm"
               >
-                {displayValue(row.protocol)} · {displayValue(row.title)}
+                <span>
+                  <span className="text-primary">{displayValue(row.protocol)}</span> ·{' '}
+                  {displayValue(row.title)}
+                </span>
+                <StatusBadge
+                  status={
+                    orderStatuses[String(row.status) as keyof typeof orderStatuses] ||
+                    String(row.status)
+                  }
+                />
               </Link>
             ))}
+            {canOperate && (
+              <details className="mt-6 border-t border-border pt-4">
+                <summary className="cursor-pointer text-sm font-medium">
+                  Criar outra O.S. nesta ocorrência
+                </summary>
+                <div className="mt-5">
+                  <ContractForm
+                    fields={orderFields.filter((f) => !['ownerName'].includes(f.name))}
+                    connected={connected && canOperate}
+                    pending={action.pending}
+                    onSubmit={async (values) => {
+                      await action.execute({
+                        path: '/service-orders',
+                        method: 'POST',
+                        body: { ...values, occurrenceId: id },
+                      });
+                      await query.mutate();
+                      toast.success('O.S. criada nesta ocorrência');
+                    }}
+                  />
+                </div>
+              </details>
+            )}
           </section>
         </TabsContent>
         <TabsContent value="Trabalho">

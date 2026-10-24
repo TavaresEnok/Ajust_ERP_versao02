@@ -17,11 +17,22 @@ const LOCKOUT_SECONDS = 15 * 60;
 export class RateLimitGuard implements CanActivate {
   constructor(@Inject(RedisService) private readonly redis: RedisService) {}
 
+  async recordSuccess(request: Request) {
+    const body = request.body as { identifier?: string; email?: string };
+    const identifier = String(body?.identifier || body?.email || this.getClientIp(request))
+      .trim()
+      .toLowerCase();
+    // A successful password validation is not a failed attempt. Do not remove active lockouts.
+    await this.redis.del(`rate-limit:login:${this.getClientIp(request)}:${identifier}`);
+  }
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const ip = this.getClientIp(request);
     const body = request.body as { identifier?: string; email?: string };
-    const identifier = body?.identifier || body?.email || ip;
+    const identifier = String(body?.identifier || body?.email || ip)
+      .trim()
+      .toLowerCase();
 
     const key = `rate-limit:login:${ip}:${identifier}`;
     const lockoutKey = `rate-limit:login:lockout:${ip}:${identifier}`;

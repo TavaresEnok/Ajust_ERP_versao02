@@ -1,8 +1,9 @@
 import type { RoleCode } from './contracts';
 const managers: RoleCode[] = ['super_admin', 'gerente'];
-const operators: RoleCode[] = [...managers, 'analista', 'tecnico'];
+const operators: RoleCode[] = [...managers, 'analista'];
 const sectionRoles: Record<string, RoleCode[]> = {
-  provedores: managers,
+  'relatorios-turno': operators,
+  provedores: operators,
   tecnicos: [...managers, 'cliente'],
   empresas: managers,
   usuarios: [...managers, 'cliente'],
@@ -11,21 +12,21 @@ const sectionRoles: Record<string, RoleCode[]> = {
   ixc: managers,
   notificacoes: managers,
   integracoes: managers,
-  processos: managers,
+  processos: operators,
   automacoes: managers,
   workflows: managers,
   'eventos-tempo-real': managers,
   'calendario-sla': operators,
   'politicas-sla': operators,
   credenciais: operators,
-  ajustpedia: [...operators, 'leitura'],
+  ajustpedia: [...operators],
   mudancas: operators,
   apontamentos: operators,
   ocorrencias: operators,
-  saude: [...managers, 'analista', 'cliente', 'leitura'],
-  // Alinhado aos papéis exigidos pelo CmdbController (GET exige perfil operacional ou leitura).
-  ativos: [...operators, 'leitura'],
-  'configuracoes-ativos': [...operators, 'leitura'],
+  saude: [...managers, 'analista', 'cliente'],
+  // Alinhado aos perfis operacionais exigidos pelo CmdbController.
+  ativos: [...operators],
+  'configuracoes-ativos': [...operators],
 };
 /** Seções de configurações que dependem do IAM (tenants/roles). */
 const companySettingsRoles: RoleCode[] = [...managers, 'cliente'];
@@ -45,9 +46,5 @@ export function canAccessSection(role: RoleCode, section?: string, resource?: st
   return !sectionRoles[section] || sectionRoles[section].includes(role);
 }
 export function portalForRole(role: RoleCode) {
-  return role === 'cliente' || role === 'leitura'
-    ? '/cliente'
-    : role === 'analista' || role === 'tecnico'
-      ? '/analista'
-      : '/gerencia';
+  return role === 'cliente' ? '/cliente' : role === 'analista' ? '/analista' : '/gerencia';
 }

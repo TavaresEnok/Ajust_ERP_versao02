@@ -5,7 +5,6 @@ import { useRouter, useSearchParams, usePathname } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowDownToLine,
-  Printer,
   Zap,
   Search,
   SlidersHorizontal,
@@ -39,15 +38,24 @@ import {
 } from './primitives';
 import { OrderForm } from './order-form';
 import { useVisualSource, useRouteBase } from '@/lib/erp/visual-data';
-import { useErp } from '@/lib/erp/gateway';
+import { useErp, useErpQuery } from '@/lib/erp/gateway';
 import { orderStatuses, orderTypes, priorities, queryPath } from '@/lib/erp/contracts';
 const statuses = Object.values(orderStatuses);
 import { RecordWorkspace } from './record-workspace';
 import { OperationControl } from './operation-controls';
 import { QueryState } from './contract-form';
 import { QuickDispatchDialog } from './quick-dispatch-dialog';
-import { OrderExportDialog } from './order-export-dialog';
-export function OrdersTable({ orders, compact = false }: { orders: Order[]; compact?: boolean }) {
+import { downloadOrderPdf } from '@/lib/erp/order-pdf';
+import { AnalystOrderWork } from './analyst-order-work';
+export function OrdersTable({
+  orders,
+  compact = false,
+  attention,
+}: {
+  orders: Order[];
+  compact?: boolean;
+  attention?: Record<string, { label: string; tone: string }>;
+}) {
   const pathname = usePathname();
   const orderBase = pathname.startsWith('/analista')
     ? '/analista'
@@ -55,7 +63,7 @@ export function OrdersTable({ orders, compact = false }: { orders: Order[]; comp
       ? '/cliente'
       : '/gerencia';
   return (
-    <div className="table-wrap">
+    <div className="table-wrap relative">
       <table className="data-table">
         <thead>
           <tr>
@@ -68,6 +76,7 @@ export function OrdersTable({ orders, compact = false }: { orders: Order[]; comp
             <th>Provedor</th>
             <th>Status</th>
             <th>Prioridade</th>
+            {attention && <th>O que precisa de atenção</th>}
             {!compact && (
               <>
                 <th>Responsável</th>
@@ -118,6 +127,22 @@ export function OrdersTable({ orders, compact = false }: { orders: Order[]; comp
               <td>
                 <Priority value={o.priority} />
               </td>
+              {attention && (
+                <td>
+                  <span
+                    className={cn(
+                      'text-xs',
+                      attention[o.id]?.tone === 'danger'
+                        ? 'text-rose-600 dark:text-rose-400'
+                        : attention[o.id]?.tone === 'warning'
+                          ? 'text-amber-600 dark:text-amber-300'
+                          : 'text-muted-foreground',
+                    )}
+                  >
+                    {attention[o.id]?.label || '—'}
+                  </span>
+                </td>
+              )}
               {!compact && (
                 <>
                   <td>
@@ -156,9 +181,12 @@ export function OrdersPage({
   const orderBase = customer ? '/cliente' : analyst ? '/analista' : '/gerencia';
   const { scope } = useErp();
   const canQuickDispatch =
-    !customer && (!scope || ['super_admin', 'gerente', 'analista', 'tecnico'].includes(scope.role));
+    !customer && !analyst && (!scope || ['super_admin', 'gerente'].includes(scope.role));
   const [quickDispatchOpen, setQuickDispatchOpen] = useState(false);
   const params = useSearchParams();
+  const [orderScope, setOrderScope] = useState(
+    params.get('scope') === 'operation' ? 'operation' : 'mine',
+  );
   const [search, setSearch] = useState('');
   const [status, setStatus] = useState(params.get('status') || 'Todos');
   const [provider, setProvider] = useState('Todos');
@@ -170,6 +198,8 @@ export function OrdersPage({
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');
   const endpoint = queryPath('/service-orders', {
+    scope: analyst ? orderScope : undefined,
+    provider: provider === 'Todos' ? undefined : provider,
     // O controller aceita `search` (mínimo de 2 caracteres) e paginação por offset.
     search: search.trim().length >= 2 ? search.trim() : undefined,
     status: Object.entries(orderStatuses).find(([, label]) => label === status)?.[0],
@@ -182,28 +212,23 @@ export function OrdersPage({
   });
   const { orders } = useOrders(endpoint);
   const source = useVisualSource('orders', endpoint);
-  const providers = [...new Set(orders.map((order) => order.provider))].map((name) => ({
-    id: name,
-    name,
-  }));
-  const scoped = orders;
-  const filtered = scoped.filter(
-    (o) =>
-      (
-        o.title +
-        ' ' +
-        o.id +
-        ' ' +
-        String((o as unknown as { protocol?: string }).protocol || '') +
-        ' ' +
-        o.provider
-      )
-        .toLowerCase()
-        .includes(search.toLowerCase()) &&
-      (status === 'Todos' || o.status === status) &&
-      (provider === 'Todos' || o.provider === provider) &&
-      (priority === 'Todas' || o.priority === priority),
+  const customers = useErpQuery<{ tradeName: string; legalName: string }[]>(
+    !customer ? '/customers' : null,
   );
+  const providers = [
+    ...new Set([
+      ...orders.map((order) => order.provider),
+      ...(customers.data || []).map((c) => c.tradeName || c.legalName),
+    ]),
+  ]
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b, 'pt-BR'))
+    .map((name) => ({
+      id: name,
+      name,
+    }));
+  const scoped = orders;
+  const filtered = scoped;
   const total =
     source.data && typeof source.data === 'object' && 'total' in source.data
       ? Number(source.data.total)
@@ -222,15 +247,24 @@ export function OrdersPage({
   return (
     <>
       <PageHeading
-        title={customer ? 'Meus chamados' : analyst ? 'Minhas ordens' : 'Ordens de serviço'}
+        title={
+          customer
+            ? 'Meus chamados'
+            : analyst && orderScope === 'mine'
+              ? 'Minhas ordens'
+              : 'Ordens de serviço'
+        }
         description={
           customer
             ? 'Acompanhe suas solicitações e o andamento de cada atendimento.'
             : 'Cada atendimento no lugar certo. Sua operação em movimento.'
         }
       >
-        <Link href={`${orderBase}/relatorios`} className="text-link">
-          Relatórios e exportações
+        <Link
+          href={`${orderBase}/${analyst ? 'relatorios-turno' : 'relatorios'}`}
+          className="text-link"
+        >
+          {analyst ? 'Relatórios de turno' : 'Relatórios e exportações'}
         </Link>
         {canQuickDispatch && (
           <Button variant="outline" onClick={() => setQuickDispatchOpen(true)}>
@@ -238,12 +272,38 @@ export function OrdersPage({
             Atendimento rápido
           </Button>
         )}
-        <Button variant="outline" onClick={download}>
-          <ArrowDownToLine data-icon="inline-start" />
-          Exportar
-        </Button>
+        {!analyst && (
+          <Button variant="outline" onClick={download}>
+            <ArrowDownToLine data-icon="inline-start" />
+            Exportar
+          </Button>
+        )}
         <OrderForm />
       </PageHeading>
+      {analyst && (
+        <div className="mb-5 flex flex-wrap gap-2" aria-label="Escopo das ordens">
+          <Button
+            variant={orderScope === 'mine' ? 'default' : 'outline'}
+            aria-pressed={orderScope === 'mine'}
+            onClick={() => {
+              setOrderScope('mine');
+              setPage(1);
+            }}
+          >
+            Minhas ordens
+          </Button>
+          <Button
+            variant={orderScope === 'operation' ? 'default' : 'outline'}
+            aria-pressed={orderScope === 'operation'}
+            onClick={() => {
+              setOrderScope('operation');
+              setPage(1);
+            }}
+          >
+            Todas da Ajust
+          </Button>
+        </div>
+      )}
       <div className="mb-5 grid grid-cols-4 gap-4 metrics-grid">
         {[
           {
@@ -253,13 +313,15 @@ export function OrdersPage({
           },
           {
             label: 'Em andamento',
-            value: scoped.filter((o) => !['Concluída', 'Resolvida', 'Cancelada'].includes(o.status))
-              .length,
+            value: scoped.filter(
+              (o) => !['Concluída', 'Fechada', 'Resolvida', 'Cancelada'].includes(o.status),
+            ).length,
             icon: Clock3,
           },
           {
             label: 'Concluídas',
-            value: scoped.filter((o) => ['Concluída', 'Resolvida'].includes(o.status)).length,
+            value: scoped.filter((o) => ['Concluída', 'Fechada', 'Resolvida'].includes(o.status))
+              .length,
             icon: CheckCircle2,
           },
           {
@@ -338,7 +400,10 @@ export function OrdersPage({
               className="native-select"
               aria-label="Filtrar provedor"
               value={provider}
-              onChange={(e) => setProvider(e.target.value)}
+              onChange={(e) => {
+                setProvider(e.target.value);
+                setPage(1);
+              }}
             >
               <option value="Todos">Todos os provedores</option>
               {providers.map((p) => (
@@ -488,12 +553,23 @@ export function OrdersPage({
     </>
   );
 }
-export function OrderDetail({ id, initialTab = 'Histórico' }: { id: string; initialTab?: string }) {
+export function OrderDetail({
+  id,
+  initialTab = 'Encerramento',
+}: {
+  id: string;
+  initialTab?: string;
+}) {
   const source = useVisualSource('orders');
   const { scope } = useErp();
   const base = useRouteBase();
-  const [tab, setTab] = useState(initialTab);
-  const [exportOpen, setExportOpen] = useState(false);
+  const [tab, setTab] = useState(
+    scope?.role === 'analista' &&
+      !['Encerramento', 'Anotações', 'Editar', 'Anexos', 'Histórico'].includes(initialTab)
+      ? 'Encerramento'
+      : initialTab,
+  );
+  const [exporting, setExporting] = useState(false);
   const order = source.rows.find((row) => row.id === id);
   const raw = source.raw.find((row) => row.id === id);
   if (!order)
@@ -515,34 +591,41 @@ export function OrderDetail({ id, initialTab = 'Histórico' }: { id: string; ini
         <ArrowLeft className="size-3" />
         Todas as ordens
       </Link>
+      {raw?.occurrenceId ? (
+        <nav aria-label="Contexto da O.S." className="mb-5 text-xs text-muted-foreground">
+          <Link className="text-link" href={`${base}/ocorrencias/${raw.occurrenceId}/ordens`}>
+            ← Voltar à ocorrência{' '}
+            {String((raw.occurrence as { number?: string } | undefined)?.number || '')} ·{' '}
+            {String(order.provider || '')}
+          </Link>
+        </nav>
+      ) : (
+        <p className="mb-5 text-xs text-muted-foreground">
+          O.S. avulsa · sem ocorrência vinculada. Registro preservado.
+        </p>
+      )}
       <PageHeading
         title={String(order.title)}
         description={`#${order.protocol} · Criada em ${order.date}`}
       >
         <StatusBadge status={String(order.status)} />
-        <Button variant="outline" onClick={() => setExportOpen(true)}>
-          <Printer data-icon="inline-start" />
-          PDF / Imprimir
-        </Button>
         <Button
           variant="outline"
-          onClick={() =>
-            exportCsv(
-              String(order.protocol),
-              ['Protocolo', 'Título', 'Status', 'Descrição'],
-              [
-                [
-                  String(order.protocol),
-                  String(order.title),
-                  String(order.status),
-                  String(order.description),
-                ],
-              ],
-            )
-          }
+          disabled={exporting}
+          onClick={async () => {
+            if (!raw) return;
+            setExporting(true);
+            try {
+              await downloadOrderPdf(raw);
+            } catch {
+              toast.error('Não foi possível gerar o PDF. Tente novamente.');
+            } finally {
+              setExporting(false);
+            }
+          }}
         >
           <ArrowDownToLine data-icon="inline-start" />
-          Exportar
+          {exporting ? 'Gerando PDF…' : 'Exportar PDF'}
         </Button>
       </PageHeading>
       <div className="grid gap-5 lg:grid-cols-[1fr_300px]">
@@ -563,24 +646,29 @@ export function OrderDetail({ id, initialTab = 'Histórico' }: { id: string; ini
               </div>
             </div>
           </section>
+          {scope?.role !== 'cliente' && raw && tab === 'Encerramento' && (
+            <AnalystOrderWork order={raw} refresh={source.mutate} />
+          )}
           <section className="panel">
             <div className="flex gap-5 overflow-x-auto border-b border-border px-6">
               {[
-                'Resumo',
-                'Histórico',
+                'Encerramento',
                 'Anotações',
-                'Anexos',
                 'Editar',
+                'Resumo',
                 'Transição',
                 'Aprovações',
                 'Trabalho',
                 'SLA',
+                'Anexos',
+                'Histórico',
               ]
-                .filter(
-                  (t) =>
-                    !['cliente', 'leitura'].includes(
-                      scope?.role || (base === '/cliente' ? 'cliente' : ''),
-                    ) || ['Resumo', 'Histórico', 'Anotações', 'Anexos'].includes(t),
+                .filter((t) =>
+                  scope?.role === 'analista'
+                    ? ['Anotações', 'Encerramento', 'Editar', 'Anexos', 'Histórico'].includes(t)
+                    : scope?.role === 'cliente'
+                      ? ['Resumo', 'Histórico', 'Anotações', 'Encerramento', 'Anexos'].includes(t)
+                      : true,
                 )
                 .map((t) => (
                   <button
@@ -620,32 +708,42 @@ export function OrderDetail({ id, initialTab = 'Histórico' }: { id: string; ini
               <p className="mini-label mb-2">Prioridade</p>
               <Priority value={String(order.priority)} />
             </div>
-            <OperationControl
-              title="Alterar status"
-              description="Informe o próximo status e a justificativa. O ERP valida a transição e a versão atual."
-              path={`/service-orders/${encodeURIComponent(id)}/transition`}
-              method="PATCH"
-              body={{ expectedVersion: raw?.version }}
-              fields={[
-                {
-                  name: 'toStatus',
-                  label: 'Próximo status',
-                  options: orderStatuses,
-                  required: true,
-                },
-                {
-                  name: 'reason',
-                  label: 'Justificativa',
-                  type: 'textarea',
-                  required: true,
-                  min: 3,
-                },
-              ]}
-              roles={['super_admin', 'gerente', 'analista', 'tecnico']}
-              after={async () => {
-                await source.mutate();
-              }}
-            />
+            {scope?.role !== 'analista' &&
+              (!raw?.processInstanceId ? (
+                <OperationControl
+                  title="Alterar status"
+                  description="Informe o próximo status e a justificativa. O ERP valida a transição e a versão atual."
+                  path={`/service-orders/${encodeURIComponent(id)}/transition`}
+                  method="PATCH"
+                  body={{ expectedVersion: raw?.version }}
+                  fields={[
+                    {
+                      name: 'toStatus',
+                      label: 'Próximo status',
+                      options: orderStatuses,
+                      required: true,
+                    },
+                    {
+                      name: 'reason',
+                      label: 'Justificativa',
+                      type: 'textarea',
+                      required: true,
+                      min: 3,
+                    },
+                  ]}
+                  roles={['super_admin', 'gerente', 'analista']}
+                  after={async () => {
+                    await source.mutate();
+                  }}
+                />
+              ) : (
+                <Link
+                  className="text-link"
+                  href={`${base}/processos/${String(raw.processInstanceId)}`}
+                >
+                  Acompanhar e concluir pelo processo
+                </Link>
+              ))}
             <div>
               <p className="mini-label mb-2">Provedor</p>
               <span className="text-xs">{String(order.provider)}</span>
@@ -658,43 +756,48 @@ export function OrderDetail({ id, initialTab = 'Histórico' }: { id: string; ini
               </span>
             </div>
             <div>
-              <p className="mini-label mb-2">Prazo SLA</p>
+              <p className="mini-label mb-2">
+                {raw?.slaEligible === false ? 'Prazo' : 'Prazo SLA'}
+              </p>
               <p className="flex items-center gap-2 text-xs">
                 <Clock3 className="size-3.5 text-warning" />
                 {String(order.deadline)}
               </p>
             </div>
-            <OperationControl
-              title="Concluir atendimento"
-              description="Confirme a resolução desta ordem. A transição será validada pelo ERP."
-              path={`/service-orders/${encodeURIComponent(id)}/transition`}
-              method="PATCH"
-              body={{ toStatus: 'RESOLVIDA', expectedVersion: raw?.version }}
-              fields={[
-                {
-                  name: 'reason',
-                  label: 'Solução aplicada',
-                  type: 'textarea',
-                  min: 3,
-                  required: true,
-                },
-              ]}
-              roles={['super_admin', 'gerente', 'analista', 'tecnico']}
-              after={async () => {
-                await source.mutate();
-              }}
-            />
-            <OperationControl
-              title="Emitir pesquisa CSAT"
-              description="Emitir pesquisa para esta ordem."
-              path="/csat/create-for-order"
-              body={{ orderId: id }}
-              roles={['super_admin', 'gerente', 'analista']}
-            />
+            {scope?.role !== 'analista' && !raw?.processInstanceId && (
+              <OperationControl
+                title="Concluir atendimento"
+                description="Confirme a resolução desta ordem. A transição será validada pelo ERP."
+                path={`/service-orders/${encodeURIComponent(id)}/transition`}
+                method="PATCH"
+                body={{ toStatus: 'RESOLVIDA', expectedVersion: raw?.version }}
+                fields={[
+                  {
+                    name: 'reason',
+                    label: 'Solução aplicada',
+                    type: 'textarea',
+                    min: 3,
+                    required: true,
+                  },
+                ]}
+                roles={['super_admin', 'gerente', 'analista']}
+                after={async () => {
+                  await source.mutate();
+                }}
+              />
+            )}
+            {scope?.role !== 'analista' && (
+              <OperationControl
+                title="Emitir pesquisa CSAT"
+                description="Emitir pesquisa para esta ordem."
+                path="/csat/create-for-order"
+                body={{ orderId: id }}
+                roles={['super_admin', 'gerente', 'analista']}
+              />
+            )}
           </div>
         </aside>
       </div>
-      {raw && <OrderExportDialog order={raw} open={exportOpen} onOpenChange={setExportOpen} />}
     </>
   );
 }

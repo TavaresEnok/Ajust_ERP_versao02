@@ -38,8 +38,7 @@ export function OrderExportDialog({
 }) {
   const action = useErpAction();
   const { scope } = useErp();
-  const canDispatch =
-    !!scope && ['super_admin', 'gerente', 'analista', 'tecnico'].includes(scope.role);
+  const canDispatch = !!scope && ['super_admin', 'gerente', 'analista'].includes(scope.role);
   const [target, setTarget] = useState('');
   const [error, setError] = useState('');
   const [sent, setSent] = useState(false);

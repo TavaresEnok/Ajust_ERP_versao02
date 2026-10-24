@@ -81,6 +81,7 @@ const SERVER_ONLY_KEYS = new Set([
   'keyHash',
   'twoFactorSecretEnc',
   'secretEnc',
+  'sourceNoteEnc',
   'webhookSecretEnc',
   'apiTokenEnc',
 ]);
@@ -154,7 +155,12 @@ export async function forwardToApi(request: NextRequest, segments: string[], hoo
       match.status === 404 ? 'Recurso não encontrado.' : 'Método não permitido.',
     );
 
-  const auth = await accessTokenFor(request);
+  let auth: Awaited<ReturnType<typeof accessTokenFor>>;
+  try {
+    auth = await accessTokenFor(request);
+  } catch {
+    return json(503, 'ERP temporariamente indisponível. Sua sessão foi preservada.');
+  }
   if (!auth) {
     const response = json(401, 'Sessão expirada.');
     clearAuthCookies(response.cookies);

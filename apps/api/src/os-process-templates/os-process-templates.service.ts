@@ -165,6 +165,11 @@ export class OsProcessTemplateService {
     },
     actorUserId: string,
   ): Promise<void> {
+    const managed = await this.prisma.serviceOrder.findFirst({
+      where: { id: order.id, tenantId },
+      select: { processInstanceId: true },
+    });
+    if (!managed || managed.processInstanceId) return;
     const templates = await this.prisma.osProcessTemplate.findMany({
       where: { tenantId, enabled: true },
     });

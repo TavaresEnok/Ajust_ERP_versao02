@@ -48,12 +48,13 @@ export const changeStatuses = {
 export type OrderType = keyof typeof orderTypes;
 export type OrderStatus = keyof typeof orderStatuses;
 export type PriorityCode = keyof typeof priorities;
-export type RoleCode = 'super_admin' | 'gerente' | 'analista' | 'tecnico' | 'cliente' | 'leitura';
+export type RoleCode = 'super_admin' | 'gerente' | 'analista' | 'cliente';
 export interface ErpScope {
   userId: string;
   tenantId: string;
   role: RoleCode;
   sessionKey: string;
+  customerId?: string | null;
 }
 export interface CreateOrderInput {
   type: OrderType;

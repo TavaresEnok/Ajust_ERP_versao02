@@ -1,6 +1,7 @@
 import {
   CanActivate,
   ExecutionContext,
+  ForbiddenException,
   Inject,
   Injectable,
   UnauthorizedException,
@@ -8,6 +9,8 @@ import {
 import { verify } from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
 import { RequestWithAuth } from '../common/request-with-auth';
+import { customerPortalRequestAllowed } from './customer-portal-access';
+import { isActiveRole } from '../common/role-utils';
 
 type AccessPayload = {
   sub: string;
@@ -74,6 +77,7 @@ export class AuthGuard implements CanActivate {
 
     // Resolve papel atual do banco (garante papel atualizado mesmo com token antigo)
     let role = payload.role ?? null;
+    let customerId: string | undefined;
     if (session.tenantId) {
       const membership = await this.prisma.userTenant.findUnique({
         where: {
@@ -83,6 +87,7 @@ export class AuthGuard implements CanActivate {
           },
         },
         select: {
+          customerId: true,
           role: { select: { code: true } },
           tenant: { select: { status: true, deletedAt: true } },
         },
@@ -96,13 +101,29 @@ export class AuthGuard implements CanActivate {
       }
 
       role = membership.role.code;
+      if (role === 'cliente' && membership.customerId) {
+        const customer = await this.prisma.customer.findFirst({
+          where: { id: membership.customerId, tenantId: session.tenantId, deletedAt: null },
+          select: { id: true },
+        });
+        if (!customer) throw new ForbiddenException('Vínculo do cliente inválido ou inativo.');
+        if (!customerPortalRequestAllowed(req.method, req.path, session.tenantId)) {
+          throw new ForbiddenException(
+            'Esta conta acessa somente os atendimentos do cliente vinculado.',
+          );
+        }
+        customerId = customer.id;
+      }
     }
 
+    if (!isActiveRole(role))
+      throw new UnauthorizedException('Perfil de acesso descontinuado ou inválido.');
     req.auth = {
       userId: payload.sub,
       sessionId: payload.sid,
       tenantId: payload.tenantId ?? null,
       role,
+      ...(customerId ? { customerId } : {}),
     };
 
     return true;

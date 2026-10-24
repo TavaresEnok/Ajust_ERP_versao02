@@ -1,0 +1,1 @@
+ALTER TABLE "Tenant" ADD COLUMN "orderOrigins" TEXT[] NOT NULL DEFAULT ARRAY[]::TEXT[];

@@ -15,8 +15,7 @@ import { ContractForm, QueryState } from './contract-form';
 
 export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
   const { scope } = useErp();
-  const allowed =
-    !scope || ['super_admin', 'gerente', 'analista', 'cliente', 'leitura'].includes(scope.role);
+  const allowed = !scope || ['super_admin', 'gerente', 'analista', 'cliente'].includes(scope.role);
   const catalog = useErpQuery<unknown>(allowed ? '/service-catalog?activeOnly=true' : null);
   const [selected, setSelected] = useState('');
   const [pendingSelection, setPendingSelection] = useState<string | null>(null);
@@ -68,7 +67,7 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
           </select>
           <FieldDescription>
             {catalog.connected
-              ? 'Preenche título, descrição, tipo e prioridade; você pode ajustar antes de enviar. O contrato de OS não recebe serviceCatalogId.'
+              ? 'Escolha um serviço para preencher os dados iniciais ou descreva o atendimento manualmente.'
               : 'Os serviços da empresa aparecerão após conectar o ERP. O preenchimento manual permanece disponível.'}
           </FieldDescription>
         </Field>
@@ -81,7 +80,7 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
       {service && (
         <div className="rounded-lg border border-border p-4">
           <p className="text-xs text-muted-foreground">
-            Estimativa do catálogo:{' '}
+            Tempo estimado de trabalho:{' '}
             {typeof service.estimatedMinutes === 'number'
               ? `${service.estimatedMinutes} min`
               : 'não informada'}
@@ -100,7 +99,19 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
           )}
         </div>
       )}
-      <ContractForm {...props} key={selected || 'manual'} values={values} />
+      <ContractForm
+        {...props}
+        key={selected || 'manual'}
+        values={values}
+        onSubmit={(data) =>
+          props.onSubmit({
+            ...data,
+            ...(service?.workflowTemplateCode
+              ? { workflowTemplateCode: service.workflowTemplateCode }
+              : {}),
+          })
+        }
+      />
       <Dialog
         open={pendingSelection !== null}
         onOpenChange={(open) => !open && setPendingSelection(null)}

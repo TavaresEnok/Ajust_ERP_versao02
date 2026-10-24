@@ -53,12 +53,11 @@ export function SlaWorkspace() {
   const policyFields: FieldSpec[] = [
     ...(!editing
       ? [
-          { name: 'priority', label: 'Prioridade', options: priorities, required: true },
-          { name: 'isOverride', label: 'Regra específica por tipo', type: 'checkbox' as const },
           {
             name: 'serviceOrderType',
-            label: 'Tipo de serviço (somente regra específica)',
+            label: 'Tipo de serviço',
             options: orderTypes,
+            required: true,
           },
         ]
       : []),
@@ -111,8 +110,8 @@ export function SlaWorkspace() {
         <TabsContent value="Políticas">
           <section className="panel">
             <PanelHeading
-              title="Prazos por prioridade e tipo"
-              description="Regras específicas substituem a regra base para o tipo escolhido."
+              title="Prazos por tipo de serviço"
+              description="O prazo do tipo vale para todos os provedores e prioridades. Serviços sem política usam o padrão provisório de 48 horas úteis; revise com a gestão."
             >
               {manager && (
                 <Button
@@ -138,7 +137,6 @@ export function SlaWorkspace() {
                 <table className="data-table">
                   <thead>
                     <tr>
-                      <th>Prioridade</th>
                       <th>Aplicação</th>
                       <th>Prazo</th>
                       <th>Situação</th>
@@ -148,7 +146,6 @@ export function SlaWorkspace() {
                   <tbody>
                     {policies.data.map((policy) => (
                       <tr key={policy.id}>
-                        <td>{priorities[policy.priority as keyof typeof priorities]}</td>
                         <td>
                           {policy.isOverride
                             ? orderTypes[policy.serviceOrderType as keyof typeof orderTypes]
@@ -369,7 +366,11 @@ export function SlaWorkspace() {
                       type: 'time',
                       required: true,
                     },
-                    { name: 'endTime', label: 'Fim do expediente', type: 'time', required: true },
+                    {
+                      name: 'endTime',
+                      label: 'Fim da contagem diária (HH:MM; 24:00 para dia completo)',
+                      required: true,
+                    },
                   ]
             }
             values={
@@ -381,10 +382,8 @@ export function SlaWorkspace() {
             onSubmit={async (values) => {
               if (dialog === 'policy') {
                 if (!Number.isInteger(values.hours)) throw new Error('O prazo deve ser inteiro.');
-                if (values.isOverride && !values.serviceOrderType)
-                  throw new Error('Selecione o tipo da regra específica.');
-                if (!editing && !values.isOverride && values.serviceOrderType)
-                  throw new Error('Uma regra base não pode selecionar um tipo de serviço.');
+                if (!editing && !values.serviceOrderType)
+                  throw new Error('Selecione o tipo de serviço.');
               }
               if (!action.connected) {
                 setValidated('Campos e regras validados. Nenhuma alteração enviada.');
@@ -400,7 +399,12 @@ export function SlaWorkspace() {
                       ? '/sla/calendar'
                       : '/sla/calendar/exceptions',
                 method: dialog === 'policy' && editing ? 'PATCH' : 'POST',
-                body: dialog === 'day' ? { ...values, dayOfWeek: day } : values,
+                body:
+                  dialog === 'day'
+                    ? { ...values, dayOfWeek: day }
+                    : dialog === 'policy' && !editing
+                      ? { ...values, priority: 'NORMAL', isOverride: true }
+                      : values,
               });
               await Promise.all([policies.mutate(), calendar.mutate()]);
               setDialog(null);

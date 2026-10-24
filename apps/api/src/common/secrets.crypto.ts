@@ -40,7 +40,7 @@ export function decryptSecret(value: string | null | undefined) {
 
   const raw = value.slice(PREFIX.length);
   const [ivB64, tagB64, dataB64] = raw.split('.');
-  if (!ivB64 || !tagB64 || !dataB64) {
+  if (!ivB64 || !tagB64 || dataB64 === undefined) {
     throw new Error('Invalid encrypted secret format.');
   }
 

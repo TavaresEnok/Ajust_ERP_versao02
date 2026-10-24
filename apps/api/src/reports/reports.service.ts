@@ -1,6 +1,7 @@
 import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { Prisma, Priority, ServiceOrderStatus, ServiceOrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { buildServiceTypeAnalytics } from './service-type-analytics';
 
 @Injectable()
 export class ReportsService {
@@ -26,6 +27,11 @@ export class ReportsService {
     options?: { periodStart?: string; periodEnd?: string; daysBack?: number },
   ) {
     const whereClause: Prisma.ServiceOrderWhereInput = { tenantId, deletedAt: null };
+    if (
+      options?.daysBack !== undefined &&
+      (!Number.isInteger(options.daysBack) || options.daysBack < 1 || options.daysBack > 3650)
+    )
+      throw new BadRequestException('daysBack deve estar entre 1 e 3650.');
 
     if (options?.periodStart || options?.periodEnd) {
       const periodStart = options.periodStart
@@ -34,6 +40,8 @@ export class ReportsService {
       const periodEnd = options.periodEnd
         ? this.parsePeriodDate(options.periodEnd, 'periodEnd')
         : undefined;
+      if (periodStart && periodEnd && periodStart > periodEnd)
+        throw new BadRequestException('O início deve ser anterior ao fim do período.');
       whereClause.createdAt = {};
       if (periodStart) whereClause.createdAt.gte = periodStart;
       if (periodEnd) whereClause.createdAt.lte = periodEnd;
@@ -48,6 +56,7 @@ export class ReportsService {
       select: {
         id: true,
         requester: true,
+        occurrence: { select: { provider: true, customerId: true } },
         priority: true,
         status: true,
         timeEntries: {
@@ -61,10 +70,11 @@ export class ReportsService {
 
     for (const rawOrder of orders) {
       const order = rawOrder;
-      const p = order.requester || 'Interno';
+      const p = order.occurrence?.customerId || order.occurrence?.provider?.trim() || 'Interno';
       if (!providersData.has(p)) {
         providersData.set(p, {
-          name: p,
+          name: order.occurrence?.provider?.trim() || 'Interno',
+          customerId: order.occurrence?.customerId || null,
           totalOrders: 0,
           criticalOrders: 0,
           closedOrders: 0,
@@ -114,7 +124,9 @@ export class ReportsService {
   }
 
   async getManagerKPIs(tenantId: string, options?: { daysBack?: number }) {
-    const days = options?.daysBack || 30;
+    const days = options?.daysBack ?? 30;
+    if (!Number.isInteger(days) || days < 1 || days > 3650)
+      throw new BadRequestException('daysBack deve estar entre 1 e 3650.');
     const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     const orders = await this.prisma.serviceOrder.findMany({
@@ -128,6 +140,8 @@ export class ReportsService {
         id: true,
         analystName: true,
         status: true,
+        pausedAt: true,
+        slaEligible: true,
         priority: true,
         createdAt: true,
         deadlineAt: true,
@@ -141,6 +155,10 @@ export class ReportsService {
     let totalOpen = 0;
     let totalClosed = 0;
     let slaBreaches = 0;
+    let measuredClosed = 0;
+    let resolutionTotalMs = 0;
+    let slaEvaluated = 0;
+    let slaMet = 0;
 
     for (const order of orders) {
       const analyst = order.analystName || 'Unassigned';
@@ -151,6 +169,7 @@ export class ReportsService {
           closed: 0,
           slaBreaches: 0,
           totalResolutionTimeMs: 0,
+          measuredClosed: 0,
         });
       }
 
@@ -161,18 +180,39 @@ export class ReportsService {
         totalClosed++;
         pData.closed += 1;
         // Usa a data efetiva de resolução (resolvedAt ou closedAt), evitando distorções por atualizações posteriores em updatedAt
-        const effectiveResolution = order.resolvedAt || order.closedAt || order.updatedAt;
-        const diffMs = Math.max(
-          0,
-          new Date(effectiveResolution).getTime() - new Date(order.createdAt).getTime(),
-        );
-        pData.totalResolutionTimeMs += diffMs;
-      } else {
+        const effectiveResolution = order.resolvedAt || order.closedAt;
+        const finished = effectiveResolution ? new Date(effectiveResolution).getTime() : NaN;
+        const created = new Date(order.createdAt).getTime();
+        if (
+          Number.isFinite(finished) &&
+          Number.isFinite(created) &&
+          finished >= created &&
+          finished <= Date.now()
+        ) {
+          const diffMs = finished - created;
+          pData.totalResolutionTimeMs += diffMs;
+          pData.measuredClosed++;
+          measuredClosed++;
+          resolutionTotalMs += diffMs;
+          const deadline = order.deadlineAt ? new Date(order.deadlineAt).getTime() : NaN;
+          if (order.slaEligible !== false && Number.isFinite(deadline)) {
+            slaEvaluated++;
+            if (finished <= deadline) slaMet++;
+          }
+        }
+      } else if (order.status !== 'CANCELADA') {
         totalOpen++;
         pData.open += 1;
       }
 
-      if (order.deadlineAt && new Date() > new Date(order.deadlineAt) && !isClosed) {
+      if (
+        order.slaEligible !== false &&
+        !order.pausedAt &&
+        order.deadlineAt &&
+        new Date() > new Date(order.deadlineAt) &&
+        !isClosed &&
+        order.status !== 'CANCELADA'
+      ) {
         slaBreaches++;
         pData.slaBreaches += 1;
       }
@@ -181,7 +221,9 @@ export class ReportsService {
     const performanceByAnalyst = Array.from(analystKPIs.values()).map((a) => ({
       ...a,
       tmrHours:
-        a.closed > 0 ? Math.round((a.totalResolutionTimeMs / a.closed / 3600000) * 10) / 10 : 0,
+        a.measuredClosed > 0
+          ? Math.round((a.totalResolutionTimeMs / a.measuredClosed / 3600000) * 10) / 10
+          : null,
     }));
 
     return {
@@ -189,9 +231,70 @@ export class ReportsService {
         totalOpen,
         totalClosed,
         slaBreaches,
+        tmrHours: measuredClosed
+          ? Math.round((resolutionTotalMs / measuredClosed / 3600000) * 10) / 10
+          : null,
+        measuredClosed,
+        slaPercentage: slaEvaluated ? Math.round((slaMet / slaEvaluated) * 1000) / 10 : null,
+        slaEvaluated,
+        slaMet,
+        scope: 'ORDERS_CREATED_IN_PERIOD',
       },
       performanceByAnalyst,
     };
+  }
+
+  async getServiceTypes(
+    tenantId: string,
+    filters: {
+      periodStart?: string;
+      periodEnd?: string;
+      daysBack?: number;
+      provider?: string;
+      source?: string;
+    },
+  ) {
+    const where: Prisma.ServiceOrderWhereInput = { tenantId, deletedAt: null };
+    if (filters.source === 'SGP' || filters.source === 'ERP') where.sourceSystem = filters.source;
+    else if (filters.source) throw new BadRequestException('Origem inválida. Use SGP ou ERP.');
+    const start = filters.periodStart
+      ? this.parsePeriodDate(filters.periodStart, 'periodStart')
+      : undefined;
+    const end = filters.periodEnd
+      ? this.parsePeriodDate(filters.periodEnd, 'periodEnd')
+      : undefined;
+    if (start && end && start > end)
+      throw new BadRequestException('O início deve ser anterior ao fim do período.');
+    if (
+      filters.daysBack !== undefined &&
+      (!Number.isInteger(filters.daysBack) || filters.daysBack < 1 || filters.daysBack > 3650)
+    ) {
+      throw new BadRequestException('daysBack deve estar entre 1 e 3650.');
+    }
+    if (start || end)
+      where.createdAt = { ...(start ? { gte: start } : {}), ...(end ? { lte: end } : {}) };
+    else if (filters.daysBack)
+      where.createdAt = { gte: new Date(Date.now() - filters.daysBack * 86400000) };
+    const orders = await this.prisma.serviceOrder.findMany({
+      where,
+      select: {
+        type: true,
+        status: true,
+        priority: true,
+        sourceMetadata: true,
+        createdAt: true,
+        closedAt: true,
+        resolvedAt: true,
+        deadlineAt: true,
+        slaEligible: true,
+        analystName: true,
+        assigneeUserId: true,
+        requester: true,
+        occurrence: { select: { type: true, provider: true, customerId: true } },
+        timeEntries: { select: { minutes: true } },
+      },
+    });
+    return buildServiceTypeAnalytics(orders, filters.provider);
   }
 
   async getServiceOrderFlow(
@@ -251,15 +354,20 @@ export class ReportsService {
       };
     }
     if (filters.sla === 'overdue') {
+      orderWhere.pausedAt = null;
+      orderWhere.slaEligible = true;
       orderWhere.status = { in: activeStatuses };
       orderWhere.deadlineAt = { lt: now };
     } else if (filters.sla === 'risk') {
+      orderWhere.pausedAt = null;
+      orderWhere.slaEligible = true;
       orderWhere.status = { in: activeStatuses };
       orderWhere.deadlineAt = {
         gte: now,
         lte: new Date(now.getTime() + 2 * 60 * 60 * 1000),
       };
     } else if (filters.sla === 'ok') {
+      orderWhere.slaEligible = true;
       orderWhere.OR = [
         { status: { in: ['FECHADA', 'CANCELADA'] as ServiceOrderStatus[] } },
         { deadlineAt: { gt: new Date(now.getTime() + 2 * 60 * 60 * 1000) } },
@@ -270,6 +378,8 @@ export class ReportsService {
       where: orderWhere,
       select: {
         id: true,
+        slaEligible: true,
+        pausedAt: true,
         status: true,
         priority: true,
         protocol: true,
@@ -333,6 +443,8 @@ export class ReportsService {
         Math.round((now.getTime() - createdAt.getTime()) / 60000),
       );
       if (
+        o.slaEligible !== false &&
+        !o.pausedAt &&
         o.deadlineAt &&
         now > deadlineAt &&
         !['FECHADA', 'RESOLVIDA', 'CANCELADA'].includes(o.status)

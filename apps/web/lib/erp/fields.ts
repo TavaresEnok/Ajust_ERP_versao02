@@ -16,7 +16,16 @@ export type FieldSpec = {
     | 'uuid'
     | 'json';
   reference?: {
-    resource: 'users' | 'orders' | 'occurrences' | 'changes' | 'tenants' | 'events' | 'sectors';
+    resource:
+      | 'users'
+      | 'customers'
+      | 'orders'
+      | 'occurrences'
+      | 'changes'
+      | 'tenants'
+      | 'events'
+      | 'sectors'
+      | 'origins';
     value?: 'id' | 'name';
   };
   options?: Readonly<Record<string, string>>;

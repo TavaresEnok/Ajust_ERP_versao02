@@ -18,6 +18,7 @@ import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { KnowledgeService } from './knowledge.service';
+import { VaultAccessEntriesSchema } from '../common/vault-content';
 
 const ListArticlesSchema = z.object({
   search: z.string().trim().min(2).optional(),
@@ -41,23 +42,38 @@ const UpdateArticleSchema = z.object({
 });
 
 const CreateCredentialSchema = z.object({
+  accessEntries: VaultAccessEntriesSchema.optional(),
+  totpSecret: z.string().max(2048).optional(),
+  parentCredentialId: z.string().uuid().optional(),
+  accessMethod: z
+    .enum(['WEB', 'SSH', 'WINBOX', 'RDP', 'TELNET', 'ANYDESK', 'BANCO', 'SEM_ACESSO', 'OUTROS'])
+    .optional(),
   tenantId: z.string().uuid().optional(),
   provider: z.string().min(2),
   equipmentType: z.string().min(2).optional(),
   equipmentName: z.string().min(1).optional(),
   environment: z.string().min(2),
-  host: z.string().min(2),
-  username: z.string().min(2),
-  secret: z.string().min(1),
+  host: z.string().default(''),
+  username: z.string().default(''),
+  secret: z.string().default(''),
+  protectedContent: z.string().max(100000).optional(),
   notes: z.string().optional(),
 });
 
 const UpdateCredentialSchema = z.object({
+  expectedUpdatedAt: z.string().datetime().optional(),
+  accessEntries: VaultAccessEntriesSchema.optional(),
+  totpSecret: z.string().max(2048).optional(),
+  removeTotp: z.boolean().optional(),
+  accessMethod: z
+    .enum(['WEB', 'SSH', 'WINBOX', 'RDP', 'TELNET', 'ANYDESK', 'BANCO', 'SEM_ACESSO', 'OUTROS'])
+    .optional(),
+  protectedContent: z.string().max(100000).optional(),
   provider: z.string().min(2).optional(),
   equipmentType: z.string().min(2).optional(),
   equipmentName: z.string().optional(),
   environment: z.string().min(2).optional(),
-  host: z.string().min(2).optional(),
+  host: z.string().optional(),
   username: z.string().optional(),
   secret: z.string().min(1).optional(),
   notes: z.string().nullable().optional(),
@@ -247,6 +263,23 @@ export class KnowledgeController {
     });
   }
 
+  @Get('credentials/summary')
+  async credentialSummary(@Req() req: RequestWithAuth) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException();
+    return this.knowledgeService.credentialSummary(req.auth.role || '', req.auth.tenantId);
+  }
+
+  @Post('credentials/:id/totp')
+  async credentialTotp(@Req() req: RequestWithAuth, @Param('id') id: string) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException();
+    return this.knowledgeService.credentialTotp(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+    );
+  }
+
   @Post('credentials/:id/reveal')
   async revealCredential(@Req() req: RequestWithAuth, @Param('id') id: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
@@ -257,6 +290,12 @@ export class KnowledgeController {
       req.auth.tenantId,
       id,
     );
+  }
+
+  @Get('credentials/:id/history')
+  async credentialHistory(@Req() req: RequestWithAuth, @Param('id') id: string) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    return this.knowledgeService.credentialHistory(req.auth.role || '', req.auth.tenantId, id);
   }
 
   @Patch('credentials/:id')

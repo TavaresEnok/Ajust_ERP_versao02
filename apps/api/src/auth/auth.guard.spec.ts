@@ -34,6 +34,7 @@ describe('AuthGuard', () => {
   const prisma = {
     session: { findUnique: jest.fn() },
     userTenant: { findUnique: jest.fn() },
+    customer: { findFirst: jest.fn() },
   };
   let guard: AuthGuard;
 
@@ -143,5 +144,59 @@ describe('AuthGuard', () => {
     await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
     expect(prisma.userTenant.findUnique).not.toHaveBeenCalled();
     expect(request.auth?.role).toBe('super_admin');
+  });
+  it.each(['tecnico', 'leitura', 'unknown'])(
+    'rejects removed/invalid database role %s even with a valid token',
+    async (role) => {
+      prisma.userTenant.findUnique.mockResolvedValue({
+        role: { code: role },
+        tenant: { status: 'ACTIVE', deletedAt: null },
+      });
+      await expect(
+        guard.canActivate(
+          makeContext({ headers: { authorization: 'Bearer token' } } as Partial<RequestWithAuth>),
+        ),
+      ).rejects.toThrow('Perfil de acesso descontinuado ou inválido.');
+    },
+  );
+  it('resolves linked customer from the database and rejects invalid customer linkage', async () => {
+    prisma.userTenant.findUnique.mockResolvedValue({
+      customerId: 'customer-1',
+      role: { code: 'cliente' },
+      tenant: { status: 'ACTIVE', deletedAt: null },
+    });
+    prisma.customer.findFirst.mockResolvedValue({ id: 'customer-1' });
+    const request = {
+      headers: { authorization: 'Bearer token' },
+      method: 'GET',
+      path: '/customer-portal',
+    } as Partial<RequestWithAuth>;
+    await expect(guard.canActivate(makeContext(request))).resolves.toBe(true);
+    expect(prisma.customer.findFirst).toHaveBeenCalledWith({
+      where: { id: 'customer-1', tenantId: 'tenant-1', deletedAt: null },
+      select: { id: true },
+    });
+    expect(request.auth?.customerId).toBe('customer-1');
+    prisma.customer.findFirst.mockResolvedValue(null);
+    await expect(guard.canActivate(makeContext(request))).rejects.toThrow(
+      'Vínculo do cliente inválido ou inativo.',
+    );
+  });
+  it('blocks legacy endpoints for linked clients before the controller executes', async () => {
+    prisma.userTenant.findUnique.mockResolvedValue({
+      customerId: 'customer-1',
+      role: { code: 'cliente' },
+      tenant: { status: 'ACTIVE', deletedAt: null },
+    });
+    prisma.customer.findFirst.mockResolvedValue({ id: 'customer-1' });
+    await expect(
+      guard.canActivate(
+        makeContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'GET',
+          path: '/service-orders',
+        } as Partial<RequestWithAuth>),
+      ),
+    ).rejects.toThrow('Esta conta acessa somente os atendimentos do cliente vinculado.');
   });
 });

@@ -90,7 +90,7 @@ export class NotificationsController {
     @Body() body: { orderId: string; target?: string; customMessage?: string },
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     if (!body?.orderId) throw new BadRequestException('orderId is required');
     return this.svc.dispatchWhatsAppOrder(req.auth.tenantId, body);
   }
@@ -111,9 +111,8 @@ export class WhatsAppNotificationController {
     @Body() body: { orderId: string; target?: string; customMessage?: string },
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     if (!body?.orderId) throw new BadRequestException('orderId is required');
     return this.svc.dispatchWhatsAppOrder(req.auth.tenantId, body);
   }
 }
-

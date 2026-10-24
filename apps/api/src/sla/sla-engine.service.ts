@@ -36,8 +36,8 @@ export class SlaEngineService {
         const isWeekend = i === 0 || i === 6;
         result[i] = {
           isWorkDay: !isWeekend,
-          startTime: '08:00',
-          endTime: '18:00',
+          startTime: '00:00',
+          endTime: '24:00',
         };
       }
     }
@@ -84,8 +84,8 @@ export class SlaEngineService {
       where: { tenantId_dayOfWeek: { tenantId, dayOfWeek } },
     });
     const isWorkDay = data.isWorkDay ?? existing?.isWorkDay ?? true;
-    const startTime = data.startTime ?? existing?.startTime ?? '08:00';
-    const endTime = data.endTime ?? existing?.endTime ?? '18:00';
+    const startTime = data.startTime ?? existing?.startTime ?? '00:00';
+    const endTime = data.endTime ?? existing?.endTime ?? '24:00';
     if (isWorkDay) this.assertValidSchedule(startTime, endTime);
 
     return this.prisma.businessCalendar.upsert({
@@ -99,8 +99,8 @@ export class SlaEngineService {
         tenantId,
         dayOfWeek,
         isWorkDay: data.isWorkDay ?? true,
-        startTime: data.startTime ?? '08:00',
-        endTime: data.endTime ?? '18:00',
+        startTime: data.startTime ?? '00:00',
+        endTime: data.endTime ?? '24:00',
       },
     });
   }
@@ -182,15 +182,17 @@ export class SlaEngineService {
       : undefined;
     if (typeOverride) return typeOverride;
 
-    const legacyExactMatch = policies.find(
-      (policy) =>
-        !policy.isOverride && policy.priority === priority && policy.serviceOrderType === type,
-    );
+    const legacyExactMatch = type
+      ? policies.find((policy) => policy.serviceOrderType === type)
+      : undefined;
     if (legacyExactMatch) return legacyExactMatch;
 
+    // A prioridade ordena a fila, não altera o prazo acordado do serviço.
     const priorityPolicy = policies.find(
       (policy) =>
-        !policy.isOverride && policy.priority === priority && policy.serviceOrderType === null,
+        !policy.isOverride &&
+        policy.priority === Priority.NORMAL &&
+        policy.serviceOrderType === null,
     );
     if (priorityPolicy) return priorityPolicy;
 
@@ -263,7 +265,7 @@ export class SlaEngineService {
       const exception = await this.getCalendarExceptionForWallDate(tenantId, current);
       if (exception && !exception.isWorkDay) {
         current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
+        current.setHours(0, 0, 0, 0);
         await this.adjustWithExceptions(current, tenantId, calendar);
         continue;
       }
@@ -282,11 +284,13 @@ export class SlaEngineService {
       } else {
         remainingMinutes -= minutesToEndOfDay;
         current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
+        current.setHours(0, 0, 0, 0);
         await this.adjustWithExceptions(current, tenantId, calendar);
       }
     }
 
+    if (remainingMinutes > 0)
+      throw new BadRequestException('Calendário sem capacidade para calcular o prazo.');
     return fromZonedTime(current, timezone);
   }
 
@@ -358,18 +362,18 @@ export class SlaEngineService {
 
       if (exception && !exception.isWorkDay) {
         date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
+        date.setHours(0, 0, 0, 0);
         continue;
       }
 
       if (!exception && (!dayConfig || !dayConfig.isWorkDay)) {
         date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
+        date.setHours(0, 0, 0, 0);
         continue;
       }
 
-      const startTime = exception?.startTime || dayConfig?.startTime || '08:00';
-      const endTime = exception?.endTime || dayConfig?.endTime || '18:00';
+      const startTime = exception?.startTime || dayConfig?.startTime || '00:00';
+      const endTime = exception?.endTime || dayConfig?.endTime || '24:00';
       const [startH, startM] = startTime.split(':').map(Number);
       const [endH, endM] = endTime.split(':').map(Number);
       const startMinutes = startH * 60 + startM;
@@ -378,7 +382,7 @@ export class SlaEngineService {
 
       if (currentMinutes >= endMinutes) {
         date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
+        date.setHours(0, 0, 0, 0);
         continue;
       }
 
@@ -454,7 +458,7 @@ export class SlaEngineService {
       const exception = await this.getCalendarExceptionForWallDate(tenantId, current);
       if (exception && !exception.isWorkDay) {
         current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
+        current.setHours(0, 0, 0, 0);
         await this.adjustWithExceptions(current, tenantId, calendar);
         continue;
       }
@@ -470,7 +474,7 @@ export class SlaEngineService {
 
       if (eod.getTime() < endWall.getTime()) {
         current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
+        current.setHours(0, 0, 0, 0);
         await this.adjustWithExceptions(current, tenantId, calendar);
       } else {
         break;
@@ -547,6 +551,8 @@ export class SlaEngineService {
     return this.prisma.serviceOrder.findMany({
       where: {
         tenantId,
+        slaEligible: true,
+        pausedAt: null,
         deletedAt: null,
         status: { in: ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS'] },
         deadlineAt: { lt: new Date() },

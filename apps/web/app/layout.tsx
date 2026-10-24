@@ -6,7 +6,7 @@ import { headers } from 'next/headers';
 import { parseScope, SCOPE_HEADER } from '@/lib/bff/scope';
 import { ErpSessionProvider } from '@/lib/erp/session-provider';
 
-const themeScript = `(function(){try{var t=document.cookie.match(/(?:^|; )ajust-theme=(light|dark)(?:;|$)/);var d=t?t[1]==='dark':window.matchMedia('(prefers-color-scheme: dark)').matches;document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){}})()`;
+const themeScript = `(function(){try{var t=document.cookie.match(/(?:^|; )ajust-theme=(light|dark)(?:;|$)/);var d=t?t[1]==='dark':true;document.documentElement.classList.toggle('dark',d);document.documentElement.style.colorScheme=d?'dark':'light';}catch(e){}})()`;
 
 export const metadata: Metadata = {
   title: 'Ajust ERP · Gestão que conecta',

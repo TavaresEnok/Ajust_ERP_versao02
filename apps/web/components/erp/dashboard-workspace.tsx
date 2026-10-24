@@ -6,7 +6,7 @@ import { DataReport } from './data-report';
 import { ResourcePage } from './resource-page';
 export function DashboardWorkspace({ base }: { base: string }) {
   const { scope, transport } = useErp();
-  if (base === '/cliente' || scope?.role === 'cliente' || scope?.role === 'leitura')
+  if (base === '/cliente' || scope?.role === 'cliente')
     return <ResourcePage moduleKey="orders" base={base} />;
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   return (

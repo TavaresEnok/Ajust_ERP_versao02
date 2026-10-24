@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef, useId } from 'react';
 import { Input } from '@/components/ui/input';
 import { Button } from '@/components/ui/button';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
@@ -43,6 +43,17 @@ export function ReferenceField({
   const [search, setSearch] = useState('');
   const [remoteSearch, setRemoteSearch] = useState('');
   const [selected, setSelected] = useState(value || '');
+  const [open, setOpen] = useState(false);
+  const [active, setActive] = useState(0);
+  const box = useRef<HTMLDivElement>(null);
+  const listId = useId();
+  useEffect(() => {
+    const close = (e: PointerEvent) => {
+      if (!box.current?.contains(e.target as Node)) setOpen(false);
+    };
+    document.addEventListener('pointerdown', close);
+    return () => document.removeEventListener('pointerdown', close);
+  }, []);
   useEffect(() => {
     const form = document.getElementById(id)?.closest('form');
     const reset = () => {
@@ -55,12 +66,14 @@ export function ReferenceField({
   }, [id, value]);
   const paths = {
     users: '/calendar/users',
+    customers: '/customers',
     orders: '/service-orders',
     occurrences: '/service-orders/occurrences',
     changes: '/change-management',
     tenants: '/iam/tenants',
     events: '/calendar/events',
     sectors: `/iam/tenants/${scope?.tenantId}/sectors`,
+    origins: `/iam/tenants/${scope?.tenantId}/order-origins`,
   };
   const paginated = reference.resource === 'orders' || reference.resource === 'occurrences';
   const path = queryPath(
@@ -83,16 +96,31 @@ export function ReferenceField({
   const options = data.flatMap((row: unknown) => {
     if (!row || typeof row !== 'object') return [];
     const record = row as Record<string, unknown>;
+    if (
+      reference.resource === 'users' &&
+      ['ownerUserId', 'assigneeUserId'].includes(field.name) &&
+      !['analista', 'gerente', 'super_admin'].includes(String(record.role).toLowerCase())
+    )
+      return [];
     if (typeof record.id !== 'string') return [];
     const label =
       [
         record.protocol || record.number,
-        record.title || record.tradeName || record.name,
-        record.email,
+        reference.resource === 'occurrences' ? record.provider : undefined,
+        reference.resource === 'occurrences' ? record.type : undefined,
+        record.title || record.tradeName || record.legalName || record.name,
+        reference.resource === 'users' && ['ownerUserId', 'assigneeUserId'].includes(field.name)
+          ? undefined
+          : record.email,
       ]
         .filter((value) => typeof value === 'string' || typeof value === 'number')
         .join(' · ') || record.id;
-    const optionValue = reference.value === 'name' ? record.name : record.id;
+    const optionValue =
+      reference.value === 'name'
+        ? reference.resource === 'customers'
+          ? record.tradeName || record.legalName
+          : record.name
+        : record.id;
     return typeof optionValue === 'string' ? [{ value: optionValue, label }] : [];
   });
   const filtered = options.filter((option) =>
@@ -100,6 +128,117 @@ export function ReferenceField({
       .toLocaleLowerCase('pt-BR')
       .includes(search.toLocaleLowerCase('pt-BR')),
   );
+  const searchable = ['customers', 'users', 'sectors', 'origins'].includes(reference.resource);
+  if (searchable) {
+    const visible = filtered.slice(0, 5);
+    const choose = (option: { value: string; label: string }) => {
+      setSelected(option.value);
+      setOpen(false);
+      setSearch('');
+      document.getElementById(id)?.focus();
+    };
+    return (
+      <div
+        ref={box}
+        className="relative"
+        onKeyDown={(e) => {
+          if (e.key === 'Escape') {
+            setOpen(false);
+            document.getElementById(id)?.focus();
+          }
+          if (open && ['ArrowDown', 'ArrowUp'].includes(e.key)) {
+            e.preventDefault();
+            setActive((i) =>
+              Math.max(0, Math.min(visible.length - 1, i + (e.key === 'ArrowDown' ? 1 : -1))),
+            );
+          }
+          if (open && e.key === 'Enter') {
+            e.preventDefault();
+            if (visible[active]) choose(visible[active]);
+          }
+        }}
+      >
+        <input
+          type="text"
+          name={field.name}
+          value={selected}
+          required={field.required}
+          onChange={() => {}}
+          tabIndex={-1}
+          aria-label={`${field.label} selecionado`}
+          className="sr-only"
+          onInvalid={() => {
+            setOpen(true);
+          }}
+        />
+        <Button
+          id={id}
+          type="button"
+          variant="outline"
+          className="w-full justify-between font-normal"
+          aria-haspopup="listbox"
+          aria-expanded={open}
+          aria-controls={listId}
+          onClick={() => {
+            setOpen(!open);
+            setSearch('');
+            setActive(0);
+          }}
+        >
+          <span className="truncate">
+            {options.find((o) => o.value === selected)?.label ||
+              selected ||
+              'Selecione um registro'}
+          </span>
+          <span aria-hidden>▾</span>
+        </Button>
+        {open && (
+          <div className="absolute z-50 mt-1 w-full rounded-lg border border-border bg-card p-2 shadow-lg">
+            <Input
+              autoFocus
+              role="combobox"
+              aria-label={`Buscar opções de ${field.label}`}
+              aria-expanded={open}
+              aria-controls={listId}
+              aria-activedescendant={visible[active] ? `${listId}-${active}` : undefined}
+              placeholder="Digite para pesquisar…"
+              value={search}
+              onChange={(e) => {
+                setSearch(e.target.value);
+                setActive(0);
+              }}
+            />
+            <div role="listbox" id={listId} aria-label={field.label} className="mt-1">
+              {visible.map((o, i) => (
+                <button
+                  type="button"
+                  role="option"
+                  aria-selected={selected === o.value}
+                  id={`${listId}-${i}`}
+                  key={o.value}
+                  className={`block w-full truncate rounded-md px-3 py-2 text-left text-sm hover:bg-muted ${active === i ? 'bg-muted' : ''}`}
+                  onClick={() => choose(o)}
+                >
+                  {o.label}
+                </button>
+              ))}
+            </div>
+            <p role="status" className="px-3 py-2 text-xs text-muted-foreground">
+              {query.isLoading
+                ? 'Carregando…'
+                : query.error
+                  ? 'Não foi possível carregar as opções.'
+                  : !filtered.length
+                    ? 'Nenhum registro encontrado.'
+                    : filtered.length > 5
+                      ? 'Mostrando 5 resultados. Digite mais caracteres para refinar.'
+                      : `${filtered.length} resultado(s)`}
+            </p>
+          </div>
+        )}
+      </div>
+    );
+  }
   if (!query.connected || !allowed)
     return (
       <div className="flex flex-col gap-2">
@@ -117,7 +256,7 @@ export function ReferenceField({
         </p>
       </div>
     );
-  if (reference.value === 'name')
+  if (reference.value === 'name' && reference.resource !== 'customers')
     return (
       <div className="flex flex-col gap-2">
         <Input

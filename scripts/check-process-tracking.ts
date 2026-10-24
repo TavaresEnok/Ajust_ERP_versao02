@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import { trackingSteps, type FlowInstance, type FlowStep } from '../apps/web/lib/erp/operational-flow';
+const step = (nodeId: string, status: string, attempt = 1): FlowStep => ({ id: `${nodeId}-${attempt}`, nodeId, status, attempt, enteredAt: '2026-10-22T10:00:00Z', evidence: {} });
+const instance = (status: string, steps: FlowStep[]) => ({ status, steps }) as FlowInstance;
+const parallel = [step('a', 'ACTIVE'), step('b', 'ACTIVE'), step('c', 'WAITING'), step('d', 'COMPLETED')];
+assert.deepEqual(trackingSteps(instance('ACTIVE', parallel)).map((s) => s.displayStatus), ['ACTIVE', 'ACTIVE', 'WAITING', 'COMPLETED']);
+assert.equal(trackingSteps(instance('HISTORICAL', parallel)).length, 0);
+assert.equal(trackingSteps(instance('SUPERSEDED', parallel)).length, 0);
+assert.equal(trackingSteps(instance('ACTIVE', [step('a', 'ACTIVE', 2), step('a', 'COMPLETED', 1)]))[0].displayStatus, 'ACTIVE');
+assert.equal(trackingSteps(instance('PAUSED', [step('a', 'ACTIVE')]))[0].displayStatus, 'WAITING');
+assert.equal(trackingSteps(instance('FAILED', [step('a', 'ACTIVE')]))[0].displayStatus, 'FAILED');
+assert.equal(trackingSteps(instance('CANCELED', [step('a', 'ACTIVE')]))[0].displayStatus, 'CANCELED');
+assert.equal(trackingSteps(instance('FAILED', [step('a', 'COMPLETED')]))[0].displayStatus, 'COMPLETED');
+console.log('8 verificações de estados reais do acompanhamento aprovadas.');

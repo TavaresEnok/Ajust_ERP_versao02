@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Timer, ShieldCheck, ArrowDownToLine, CheckCircle2, ClipboardList } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -18,11 +19,16 @@ import { OperationControl } from './operation-controls';
 import { cn } from '@/lib/utils';
 const value = (data: unknown) => (data === undefined || data === null ? '—' : String(data));
 export function ReportsPage() {
+  const params = useSearchParams();
   const base = useRouteBase();
   const { scope } = useErp();
   const [period, setPeriod] = useState('month');
   const [tab, setTab] = useState(
-    !scope || ['super_admin', 'gerente'].includes(scope.role) ? 'Visão gerencial' : 'Provedores',
+    !scope || ['super_admin', 'gerente'].includes(scope.role)
+      ? params.get('tab') === 'team'
+        ? 'Performance da equipe'
+        : 'Visão gerencial'
+      : 'Provedores',
   );
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   const daysBack = period === 'week' ? 7 : period === 'quarter' ? 90 : 30;
@@ -30,7 +36,7 @@ export function ReportsPage() {
     overview?: Record<string, unknown>;
     performanceByAnalyst?: ErpRecord[];
   }>(manager ? `/reports/manager-kpi?daysBack=${daysBack}` : null);
-  const health = useErpQuery<unknown>('/reports/operational-health');
+  const health = useErpQuery<unknown>(`/reports/operational-health?daysBack=${daysBack}`);
   const tenants = useVisualSource('providers');
   const source = useVisualSource('orders');
   const overview = kpi.data?.overview;
@@ -90,6 +96,11 @@ export function ReportsPage() {
           Exportar dados consultados
         </Button>
       </PageHeading>
+      <p className="mb-5 text-xs leading-6 text-muted-foreground">
+        Indicadores das O.S. criadas no período selecionado, considerando sua situação atual.
+        Resolução usa apenas datas válidas, não tempo trabalhado. Cancelamentos não são conclusões
+        nem ordens ativas.
+      </p>
       <div className="mb-6 flex gap-6 overflow-x-auto border-b border-border">
         {[
           ...(manager ? ['Visão gerencial', 'Performance da equipe'] : []),
@@ -128,21 +139,21 @@ export function ReportsPage() {
               label="Abertas"
               value={value(overview?.totalOpen)}
               change="ERP"
-              foot="no período consultado"
+              foot="entre as criadas no período"
               icon={ClipboardList}
             />
             <Metric
               label="Concluídas"
               value={value(overview?.totalClosed)}
               change="ERP"
-              foot="resolvidas e fechadas"
+              foot="resolvidas/fechadas entre as criadas no período"
               icon={CheckCircle2}
             />
             <Metric
               label="Tempo de resolução"
-              value={overview?.tmrHours !== undefined ? `${overview.tmrHours} h` : '—'}
+              value={overview?.tmrHours != null ? `${overview.tmrHours} h` : 'Sem base'}
               change="ERP"
-              foot="média retornada pelo servidor"
+              foot={`${overview?.measuredClosed ?? 0} conclusões com datas válidas`}
               icon={Timer}
             />
             <Metric
@@ -165,7 +176,7 @@ export function ReportsPage() {
           <section className="panel">
             <PanelHeading
               title="Performance por provedor"
-              description="Indicadores do relatório de saúde operacional. O período deste relatório usa os filtros de saúde abaixo."
+              description="Agrupamento pelo cliente da ocorrência. O período acompanha o filtro superior; a consulta personalizada abaixo é independente."
             />
             <ProviderReport
               rows={providers}
@@ -323,9 +334,7 @@ function ProviderReport({
           </thead>
           <tbody>
             {rows.map((row, index) => {
-              const tenant = tenants.find(
-                (tenant) => tenant.id === row.tenantId || tenant.id === row.id,
-              );
+              const tenant = tenants.find((tenant) => tenant.id === row.customerId);
               return (
                 <tr key={row.id || index}>
                   <td>

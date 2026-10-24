@@ -40,6 +40,7 @@ const details: Record<string, string[]> = {
   servicos: ['detalhes', 'editar'],
   'politicas-sla': ['detalhes', 'editar'],
   workflows: [],
+  processos: [],
   automacoes: [],
   mudancas: [],
 };
@@ -51,6 +52,7 @@ const sections = new Set([
   'plantao',
   'credenciais',
   'notas',
+  'relatorios-turno',
   'relatorios',
   'seguranca',
   'notificacoes',

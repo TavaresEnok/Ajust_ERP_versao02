@@ -63,7 +63,7 @@ export class TimeTrackingController {
     @Query('to') to?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     const input = ListTimeEntriesSchema.parse({ orderId, from, to });
     if (input.orderId) return this.svc.listByOrder(req.auth.tenantId, input.orderId);
     return this.svc.listByTenant(req.auth.tenantId, input.from, input.to);
@@ -72,14 +72,14 @@ export class TimeTrackingController {
   @Get('summary')
   summary(@Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.svc.summary(req.auth.tenantId);
   }
 
   @Post()
   create(@Req() req: RequestWithAuth, @Body() body: unknown) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.svc.create(
       req.auth.tenantId,
       req.auth.userId,
@@ -90,7 +90,7 @@ export class TimeTrackingController {
   @Delete(':id')
   remove(@Req() req: RequestWithAuth, @Param('id') id: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.svc.remove(req.auth.tenantId, id, req.auth.userId, req.auth.role || '');
   }
 }

@@ -21,6 +21,7 @@ const securityHeaders = [
 ];
 
 const nextConfig = {
+  devIndicators: false,
   ...(isDev
     ? {
         allowedDevOrigins: ['localhost', '127.0.0.1', 'http://SERVIDOR_IP:8070', 'SERVIDOR_IP'],

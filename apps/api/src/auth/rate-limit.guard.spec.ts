@@ -15,6 +15,7 @@ describe('RateLimitGuard', () => {
     get: jest.fn(),
     incrEx: jest.fn(),
     set: jest.fn(),
+    del: jest.fn().mockResolvedValue(1),
   };
   let guard: RateLimitGuard;
 
@@ -24,6 +25,14 @@ describe('RateLimitGuard', () => {
     redis.incrEx.mockResolvedValue(1);
     redis.set.mockResolvedValue(undefined);
     guard = new RateLimitGuard(redis as unknown as RedisService);
+  });
+  it('clears the attempt counter after a successful login without removing lockouts', async () => {
+    await guard.recordSuccess({
+      ip: '127.0.0.1',
+      body: { identifier: ' User@Example.COM ' },
+    } as any);
+    expect(redis.del).toHaveBeenCalledWith('rate-limit:login:127.0.0.1:user@example.com');
+    expect(redis.del).toHaveBeenCalledTimes(1);
   });
 
   it('uses the trusted Express client IP instead of spoofable forwarded headers', async () => {

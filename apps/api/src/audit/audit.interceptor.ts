@@ -15,7 +15,12 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       mergeMap(async (response: unknown) => {
         // Log changes (POST, PATCH, PUT, DELETE)
-        if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(method)) {
+        // Shift reports audit safe metadata inside their transaction. Never copy a
+        // private draft into the tenant-wide audit feed through the generic interceptor.
+        if (
+          ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) &&
+          !/^\/shift-reports(?:\/|$)/.test(String(url).split('?')[0])
+        ) {
           const tenantId = auth?.tenantId;
           const userId = auth?.userId;
 
@@ -45,7 +50,10 @@ export class AuditInterceptor implements NestInterceptor {
                     method,
                     url,
                     statusCode,
-                    traceId: (headers['x-trace-id'] as string) || (headers['x-request-id'] as string) || undefined,
+                    traceId:
+                      (headers['x-trace-id'] as string) ||
+                      (headers['x-request-id'] as string) ||
+                      undefined,
                     body: this.sanitizeBody(body),
                   } as Prisma.InputJsonValue,
                 },
@@ -157,7 +165,9 @@ export class AuditInterceptor implements NestInterceptor {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        /(password|token|secret|api.?key|authorization|credential)/i.test(key)
+        /(password|token|secret|api.?key|authorization|credential|protectedContent|sourceNote|accessEntries)/i.test(
+          key,
+        )
           ? '[REDACTED]'
           : this.sanitizeValue(item),
       ]),

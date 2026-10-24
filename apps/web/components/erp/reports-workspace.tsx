@@ -20,7 +20,7 @@ export function FlowReport() {
       title="Trilha de ordens e transições"
       flow
       path="/reports/service-order-flow"
-      roles={[...managers, 'analista', 'leitura']}
+      roles={[...managers, 'analista']}
       fields={[
         ...period,
         { name: 'priority', label: 'Prioridade', options: priorities },

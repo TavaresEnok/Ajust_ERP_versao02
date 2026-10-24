@@ -103,7 +103,7 @@ export function ResourcePage({
           .filter((f) => !['tenantId', 'password'].includes(f.name))
           .map((f) =>
             f.name === 'roleCode' && scope?.role === 'cliente'
-              ? { ...f, options: { cliente: 'Cliente', leitura: 'Somente leitura' } }
+              ? { ...f, options: { cliente: 'Cliente' } }
               : f,
           )
       : config.fields.filter(
@@ -123,7 +123,7 @@ export function ResourcePage({
     )
     .map((f) =>
       f.name === 'roleCode' && scope?.role === 'cliente'
-        ? { ...f, options: { cliente: 'Cliente', leitura: 'Somente leitura' } }
+        ? { ...f, options: { cliente: 'Cliente' } }
         : f,
     );
   const RecordForm = moduleKey === 'orders' && !editing ? OrderContractForm : ContractForm;

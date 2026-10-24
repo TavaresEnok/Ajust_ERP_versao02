@@ -33,7 +33,7 @@ export class ReportsController {
     @Query('periodEnd') periodEnd?: string,
     @Query('daysBack') daysBack?: string,
   ) {
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura', 'cliente']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'cliente']);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     return this.svc.getOperationalHealth(req.auth.tenantId, {
       periodStart,
@@ -53,6 +53,28 @@ export class ReportsController {
     });
   }
 
+  @Get('service-types')
+  @UseGuards(TenantRateLimitGuard)
+  @TenantRateLimit(30, 60)
+  getServiceTypes(
+    @Req() req: RequestWithAuth,
+    @Query('periodStart') periodStart?: string,
+    @Query('periodEnd') periodEnd?: string,
+    @Query('daysBack') daysBack?: string,
+    @Query('provider') provider?: string,
+    @Query('source') source?: string,
+  ) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    return this.svc.getServiceTypes(req.auth.tenantId, {
+      periodStart,
+      periodEnd,
+      daysBack: daysBack === undefined ? undefined : Number(daysBack),
+      provider,
+      source,
+    });
+  }
+
   @Get('service-order-flow')
   @UseGuards(TenantRateLimitGuard)
   @TenantRateLimit(15, 60) // 15 req/min — consulta mais pesada
@@ -67,7 +89,7 @@ export class ReportsController {
     @Query('sector') sector?: string,
     @Query('sla') sla?: string,
   ) {
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     return this.svc.getServiceOrderFlow(req.auth.tenantId, {
       periodStart,

@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 
 export type ServiceCatalogWriteInput = {
   name: string;
+  workflowTemplateCode?: string | null;
   category?: ServiceOrderType;
   description?: string;
   estimatedMinutes?: number;
@@ -16,7 +17,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Servidor DNS Recursivo (Unbound / Bind)',
     category: ServiceOrderType.DNS,
-    description: 'Instalação, tunning de cache DNS, DoT/DoH e regras de redirecionamento para clientes do ISP.',
+    description:
+      'Instalação, tunning de cache DNS, DoT/DoH e regras de redirecionamento para clientes do ISP.',
     estimatedMinutes: 180,
     defaultPriority: Priority.ALTA,
     checklist: [
@@ -29,7 +31,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Cluster Proxmox VE (HA, ZFS e Backups PBS)',
     category: ServiceOrderType.PROXMOX,
-    description: 'Instalação ou reestruturação de nós Proxmox VE, storage local ZFS, interfaces bond e backup integrado.',
+    description:
+      'Instalação ou reestruturação de nós Proxmox VE, storage local ZFS, interfaces bond e backup integrado.',
     estimatedMinutes: 240,
     defaultPriority: Priority.ALTA,
     checklist: [
@@ -42,7 +45,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Sessão BGP e Anúncio de Bloco ASN (PTT / IX.br e Trânsito)',
     category: ServiceOrderType.BGP,
-    description: 'Ativação de novas sessões BGP IPv4/IPv6, filtros RPKI, comunidades e otimização de tráfego.',
+    description:
+      'Ativação de novas sessões BGP IPv4/IPv6, filtros RPKI, comunidades e otimização de tráfego.',
     estimatedMinutes: 120,
     defaultPriority: Priority.CRITICA,
     checklist: [
@@ -55,7 +59,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Firewall de Borda e Proteção MikroTik / pfSense',
     category: ServiceOrderType.FIREWALL,
-    description: 'Fechamento de portas críticas, proteção contra brute force (SSH, Winbox), FastTrack e QoS.',
+    description:
+      'Fechamento de portas críticas, proteção contra brute force (SSH, Winbox), FastTrack e QoS.',
     estimatedMinutes: 120,
     defaultPriority: Priority.ALTA,
     checklist: [
@@ -68,7 +73,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Implantação e Otimização CGNAT (Port-Block Allocation)',
     category: ServiceOrderType.ROTEAMENTO_CGNAT,
-    description: 'Configuração de bloco 100.64.0.0/10 com distribuição balanceada de portas públicas e logging de conexões.',
+    description:
+      'Configuração de bloco 100.64.0.0/10 com distribuição balanceada de portas públicas e logging de conexões.',
     estimatedMinutes: 150,
     defaultPriority: Priority.ALTA,
     checklist: [
@@ -81,7 +87,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Auditoria e Diagnóstico Geral de Rede de Provedor',
     category: ServiceOrderType.AUDITORIA,
-    description: 'Mapeamento completo da infraestrutura de rede, topologia, roteamento e segurança com relatório técnico.',
+    description:
+      'Mapeamento completo da infraestrutura de rede, topologia, roteamento e segurança com relatório técnico.',
     estimatedMinutes: 300,
     defaultPriority: Priority.NORMAL,
     checklist: [
@@ -94,7 +101,8 @@ const DEFAULT_ISP_CATALOG = [
   {
     name: 'Infraestrutura de Datacenter e Enlaces de Borda',
     category: ServiceOrderType.INFRAESTRUTURA,
-    description: 'Substituição de switches de agregação, nobreaks, caixas de fusão e cabos ópticos de distribuição.',
+    description:
+      'Substituição de switches de agregação, nobreaks, caixas de fusão e cabos ópticos de distribuição.',
     estimatedMinutes: 180,
     defaultPriority: Priority.NORMAL,
     checklist: [
@@ -126,23 +134,16 @@ export class ServiceCatalogService {
     tenantId: string,
     filter?: { category?: ServiceOrderType; activeOnly?: boolean },
   ): Promise<ServiceCatalogItem[]> {
-    let items = await this.prisma.serviceCatalogItem.findMany({
+    const items = await this.prisma.serviceCatalogItem.findMany({
       where: {
         tenantId,
         ...(filter?.category ? { category: filter.category } : {}),
-        ...(filter?.activeOnly !== undefined ? { active: filter.activeOnly } : {}),
+        ...(filter?.activeOnly === true ? { active: true } : {}),
       },
       orderBy: [{ category: 'asc' }, { name: 'asc' }],
     });
 
-    // Se o tenant ainda não tiver itens no catálogo, faz seed automático com os serviços padrão de ISP
-    if (items.length === 0 && (!filter || Object.keys(filter).length === 0)) {
-      await this.seedDefaults(tenantId);
-      items = await this.prisma.serviceCatalogItem.findMany({
-        where: { tenantId },
-        orderBy: [{ category: 'asc' }, { name: 'asc' }],
-      });
-    }
+    // Reads must not silently seed fictitious/default ISP services into a consulting workspace.
 
     return items;
   }
@@ -160,6 +161,7 @@ export class ServiceCatalogService {
       data: {
         tenantId,
         name: input.name,
+        workflowTemplateCode: input.workflowTemplateCode,
         category: input.category ?? ServiceOrderType.CONSULTORIA_GERAL,
         description: input.description,
         estimatedMinutes: input.estimatedMinutes ?? 120,
@@ -179,6 +181,7 @@ export class ServiceCatalogService {
     if (!item) throw new NotFoundException('Item de catálogo não encontrado');
 
     const data: Prisma.ServiceCatalogItemUpdateInput = {
+      ...(input.workflowTemplateCode !== undefined ? { workflowTemplateCode: input.workflowTemplateCode } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.category !== undefined ? { category: input.category } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),

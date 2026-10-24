@@ -54,9 +54,10 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
       serviceOrderOccurrence: { create: jest.fn() },
       serviceOrderApproval: { findFirst: jest.fn() },
       auditLog: { create: jest.fn() },
-      occurrence: { findFirst: jest.fn() },
+      occurrence: { findFirst: jest.fn().mockResolvedValue({ id: 'occ-1' }), update: jest.fn() },
       userTenant: { findMany: jest.fn().mockResolvedValue([]) },
     } as any;
+    mockPrisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(mockPrisma));
 
     mockSlaEngine = {
       findApplicablePolicy: jest.fn().mockResolvedValue({ hours: 24, priority: Priority.NORMAL }),
@@ -73,6 +74,85 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
   // ──────────────────────────────────────────────────────────────
   // transition
   // ──────────────────────────────────────────────────────────────
+
+  describe('analyst personal listing', () => {
+    it('filters provider before pagination while preserving personal scope and provider search', async () => {
+      mockPrisma.serviceOrder.findMany.mockResolvedValue([]);
+      await service.list(
+        'tenant-1',
+        {
+          responsibleUserId: 'analyst-1',
+          provider: 'MEGANET',
+          search: 'MEGANET',
+          limit: 8,
+          offset: 8,
+        },
+        'analista',
+      );
+      const args = mockPrisma.serviceOrder.findMany.mock.calls[0][0];
+      expect(args.take).toBe(8);
+      expect(args.skip).toBe(8);
+      expect(args.where.tenantId).toBe('tenant-1');
+      expect(args.where.AND).toEqual([
+        { OR: [{ ownerUserId: 'analyst-1' }, { assigneeUserId: 'analyst-1' }] },
+        {
+          OR: [
+            { requester: { equals: 'MEGANET', mode: 'insensitive' } },
+            { occurrence: { provider: { equals: 'MEGANET', mode: 'insensitive' } } },
+          ],
+        },
+      ]);
+      expect(args.where.OR).toEqual(
+        expect.arrayContaining([
+          { requester: { contains: 'MEGANET', mode: 'insensitive' } },
+          { occurrence: { provider: { contains: 'MEGANET', mode: 'insensitive' } } },
+        ]),
+      );
+    });
+    it('restricts owner/executor before pagination and preserves tenant and search filters', async () => {
+      mockPrisma.serviceOrder.findMany.mockResolvedValue([]);
+      await service.list(
+        'tenant-1',
+        {
+          responsibleUserId: 'analyst-1',
+          search: 'DNS',
+          limit: 8,
+          offset: 8,
+        },
+        'analista',
+      );
+      expect(mockPrisma.serviceOrder.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: expect.objectContaining({
+            tenantId: 'tenant-1',
+            deletedAt: null,
+            AND: [{ OR: [{ ownerUserId: 'analyst-1' }, { assigneeUserId: 'analyst-1' }] }],
+            OR: expect.arrayContaining([{ title: { contains: 'DNS', mode: 'insensitive' } }]),
+          }),
+          take: 8,
+          skip: 8,
+        }),
+      );
+    });
+
+    it('preserves the existing operation-wide listing when no personal filter is supplied', async () => {
+      mockPrisma.serviceOrder.findMany.mockResolvedValue([]);
+      await service.list('tenant-1', {}, 'analista');
+      const { where } = mockPrisma.serviceOrder.findMany.mock.calls[0][0];
+      expect(where).toEqual({ tenantId: 'tenant-1', deletedAt: null });
+    });
+
+    it('does not remove customer visibility restrictions when combined with personal scope', async () => {
+      mockPrisma.serviceOrder.findMany.mockResolvedValue([]);
+      await service.list('tenant-1', { responsibleUserId: 'customer-1' }, 'cliente');
+      expect(mockPrisma.serviceOrder.findMany.mock.calls[0][0].where).toMatchObject({
+        tenantId: 'tenant-1',
+        deletedAt: null,
+        isCustomerVisible: true,
+        AND: [{ OR: [{ ownerUserId: 'customer-1' }, { assigneeUserId: 'customer-1' }] }],
+      });
+    });
+  });
 
   describe('transition', () => {
     it('ABERTA → EM_ANALISE deve criar ServiceOrderOccurrence e ServiceOrderStatusEvent', async () => {
@@ -140,12 +220,13 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
       expect(mockPrisma.serviceOrder.update).not.toHaveBeenCalled();
     });
 
-    it('RESOLVIDA → FECHADA com ordem CRITICA atrasada deve falhar sem aprovacao', async () => {
+    it('preserva aprovação explicitamente exigida em uma ordem legada', async () => {
       const pastDeadline = new Date(Date.now() - 3600000);
       const order = makeOrder({
         status: ServiceOrderStatus.RESOLVIDA,
         priority: Priority.CRITICA,
         deadlineAt: pastDeadline,
+        requiresApproval: true,
       });
       mockPrisma.serviceOrder.findFirst.mockResolvedValue(order);
       mockPrisma.serviceOrderApproval.findFirst.mockResolvedValue(null);
@@ -165,6 +246,26 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
         orderBy: { createdAt: 'desc' },
       });
       expect(mockPrisma.serviceOrder.update).not.toHaveBeenCalled();
+    });
+
+    it('permite ao analista concluir ordem crítica atrasada sem aprovação de rotina', async () => {
+      const order = makeOrder({
+        status: ServiceOrderStatus.RESOLVIDA,
+        priority: Priority.CRITICA,
+        deadlineAt: new Date(Date.now() - 3600000),
+        requiresApproval: false,
+      });
+      mockPrisma.serviceOrder.findFirst.mockResolvedValue(order);
+      mockPrisma.serviceOrder.update.mockResolvedValue({
+        ...order,
+        status: ServiceOrderStatus.FECHADA,
+      });
+      const result = await service.transition('tenant-1', 'order-1', 'user-1', 'analista', {
+        toStatus: ServiceOrderStatus.FECHADA,
+        reason: 'Solução validada e registrada',
+      });
+      expect(result.status).toBe(ServiceOrderStatus.FECHADA);
+      expect(mockPrisma.serviceOrderApproval.findFirst).not.toHaveBeenCalled();
     });
 
     it('FECHADA → EM_ANALISE deve reabrir e incrementar reopenedCount', async () => {
@@ -219,6 +320,7 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
   describe('create', () => {
     const validInput = {
       tenantId: 'tenant-1',
+      occurrenceId: 'occ-1',
       type: ServiceOrderType.ROMPIMENTO as ServiceOrderType,
       priority: Priority.NORMAL as Priority,
       title: 'Nova OS',
@@ -227,6 +329,12 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
       sector: 'TI',
       origin: 'Phone',
     };
+    it('não permite criar O.S. sem uma ocorrência', async () => {
+      await expect(
+        service.create('user-1', 'super_admin', { ...validInput, occurrenceId: undefined }),
+      ).rejects.toThrow('Novo atendimento');
+      expect(mockPrisma.serviceOrder.create).not.toHaveBeenCalled();
+    });
 
     it('deve criar uma OS com protocolo gerado', async () => {
       mockPrisma.serviceOrder.count.mockResolvedValue(5);

@@ -68,7 +68,7 @@ export function OrderBoard({
                       title="Alterar etapa"
                       description="O ERP valida as transições permitidas e a versão da ordem antes de salvar."
                       path={`/service-orders/${encodeURIComponent(row.id)}/transition`}
-                      roles={['super_admin', 'gerente', 'analista', 'tecnico']}
+                      roles={['super_admin', 'gerente', 'analista']}
                       body={
                         typeof row.version === 'number'
                           ? { expectedVersion: row.version }

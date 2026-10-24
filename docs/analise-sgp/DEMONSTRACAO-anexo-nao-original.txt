@@ -1,0 +1,15 @@
+DEMONSTRAÇÃO — NÃO É O ARQUIVO ORIGINAL DO SGP
+============================================
+
+Este arquivo foi gerado exclusivamente para apresentar e testar o recurso
+de anexos do Ajust ERP: listagem, armazenamento e download autenticado.
+
+Ele não foi importado do SGP e não contém evidências de atendimento,
+diagnósticos, configurações de equipamentos ou dados técnicos reais.
+Não comprova a execução, validação ou conclusão de nenhum serviço.
+
+O anexo original referenciado pelo SGP continua pendente de download
+autorizado. Este arquivo demonstrativo não o substitui no histórico
+de origem e não altera o status da ordem de serviço.
+
+Origem deste documento: Ajust ERP — demonstração solicitada pelo usuário.

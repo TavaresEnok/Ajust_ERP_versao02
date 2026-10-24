@@ -55,7 +55,7 @@ export class CmdbController {
   @Get()
   list(@Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.cmdbService.list(req.auth.tenantId);
   }
 
@@ -99,11 +99,7 @@ export class CmdbController {
   // ─── Network Config Snapshots (CMDB-01) ───────────────────────────────────
 
   @Post(':id/snapshots')
-  createSnapshot(
-    @Req() req: RequestWithAuth,
-    @Param('id') assetId: string,
-    @Body() body: unknown,
-  ) {
+  createSnapshot(@Req() req: RequestWithAuth, @Param('id') assetId: string, @Body() body: unknown) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     const schema = z.object({
@@ -117,7 +113,7 @@ export class CmdbController {
   @Get(':id/snapshots')
   listSnapshots(@Req() req: RequestWithAuth, @Param('id') assetId: string) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.cmdbService.listSnapshots(req.auth.tenantId, assetId);
   }
 
@@ -128,18 +124,14 @@ export class CmdbController {
     @Param('snapshotId') snapshotId: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.cmdbService.getSnapshot(req.auth.tenantId, assetId, snapshotId);
   }
 
   @Get(':id/snapshots-diff')
-  diffSnapshots(
-    @Req() req: RequestWithAuth,
-    @Param('id') assetId: string,
-    @Req() rawReq: any,
-  ) {
+  diffSnapshots(@Req() req: RequestWithAuth, @Param('id') assetId: string, @Req() rawReq: any) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'tecnico', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     const fromId = String(rawReq.query?.fromId || '');
     const toId = String(rawReq.query?.toId || '');
     if (!fromId || !toId) {
@@ -148,4 +140,3 @@ export class CmdbController {
     return this.cmdbService.diffSnapshots(req.auth.tenantId, assetId, fromId, toId);
   }
 }
-

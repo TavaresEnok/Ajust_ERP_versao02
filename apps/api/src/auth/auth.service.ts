@@ -17,6 +17,7 @@ import { EmailService } from '../common/email.service';
 import { decryptSecret } from '../common/secrets.crypto';
 import { TotpService } from './totp.service';
 import { BootstrapTokenService } from './bootstrap-token.service';
+import { isActiveRole } from '../common/role-utils';
 
 type LoginInput = {
   identifier: string;
@@ -160,7 +161,21 @@ export class AuthService {
         (membership) => membership.tenant.status === 'ACTIVE' && !membership.tenant.deletedAt,
       ) ?? memberships[0];
     const roleCode = selectedMembership.role.code;
-    const isClientFirstLogin = roleCode === 'cliente' && !user.lastLoginAt;
+    if (!isActiveRole(roleCode))
+      throw new ForbiddenException('Perfil de acesso descontinuado ou inválido.');
+    // Explicit admin password provisioning is distinct from CNPJ/OTP self-onboarding.
+    // This flag is database-managed; it cannot be set through login or PATCH /auth/me.
+    const provisioning = (user.sourceMetadata as Record<string, unknown> | null)
+      ?.accessProvisioning;
+    const adminProvisionedCustomer =
+      roleCode === 'cliente' &&
+      !!selectedMembership.customerId &&
+      !!provisioning &&
+      typeof provisioning === 'object' &&
+      !Array.isArray(provisioning) &&
+      (provisioning as Record<string, unknown>).method === 'ADMIN_PROVISIONED';
+    const isClientFirstLogin =
+      roleCode === 'cliente' && !user.lastLoginAt && !adminProvisionedCustomer;
 
     if (isClientFirstLogin && !usedCnpjFallback) {
       await this.logAudit(
@@ -434,6 +449,8 @@ export class AuthService {
     }
 
     const roleCode = membership?.role.code ?? null;
+    if (membership && !isActiveRole(roleCode))
+      throw new UnauthorizedException('Perfil de acesso descontinuado ou inválido.');
 
     const nextRefreshToken = this.signRefreshToken({
       sub: session.userId,
@@ -608,7 +625,12 @@ export class AuthService {
     return sessions;
   }
 
-  async revokeSession(sessionId: string, actorUserId: string, role?: string | null, tenantId?: string | null) {
+  async revokeSession(
+    sessionId: string,
+    actorUserId: string,
+    role?: string | null,
+    tenantId?: string | null,
+  ) {
     const session = await this.prisma.session.findUnique({
       where: { id: sessionId },
       select: { id: true, userId: true, tenantId: true, revokedAt: true },
@@ -632,18 +654,11 @@ export class AuthService {
         data: { revokedAt: new Date() },
       });
 
-      await this.logAudit(
-        session.tenantId,
-        actorUserId,
-        'LOGOUT',
-        'session',
-        sessionId,
-        {
-          scope: 'session-revoke',
-          targetUserId: session.userId,
-          revokedByActorId: actorUserId,
-        },
-      );
+      await this.logAudit(session.tenantId, actorUserId, 'LOGOUT', 'session', sessionId, {
+        scope: 'session-revoke',
+        targetUserId: session.userId,
+        revokedByActorId: actorUserId,
+      });
     }
 
     return { success: true, sessionId };
@@ -675,6 +690,7 @@ export class AuthService {
       name: user.name,
       email: user.email,
       twoFactorEnabled: user.twoFactorEnabled,
+      customerId: selectedTenant?.role.code === 'cliente' ? selectedTenant.customerId : null,
       tenant: selectedTenant
         ? {
             id: selectedTenant.tenant.id,

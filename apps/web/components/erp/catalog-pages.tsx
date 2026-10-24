@@ -211,6 +211,13 @@ export function CatalogPage({
           />
         )}
       </PageHeading>
+      {!isService && (
+        <div className="panel mb-5 p-5 text-sm leading-7">
+          <strong>SLA contratual pendente de configuração.</strong> Defina as políticas da Ajust
+          antes de usar os indicadores como compromisso contratual. As metas dos fluxos de
+          demonstração não representam SLA homologado.
+        </div>
+      )}
       <div className="mb-5">
         <input
           value={search}

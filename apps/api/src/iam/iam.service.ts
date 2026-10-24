@@ -110,6 +110,7 @@ export class IamService {
         ...(scopeTenantId ? { id: scopeTenantId } : {}),
       },
       orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { users: true, sectors: true } } },
     });
   }
 
@@ -397,7 +398,7 @@ export class IamService {
   }
 
   async listUsersByTenant(tenantId: string) {
-    return this.prisma.userTenant.findMany({
+    const members = await this.prisma.userTenant.findMany({
       where: {
         tenantId,
         user: { deletedAt: null },
@@ -413,12 +414,33 @@ export class IamService {
             twoFactorEnabled: true,
             lastLoginAt: true,
             createdAt: true,
+            sourceSystem: true,
+            externalId: true,
+            sourceMetadata: true,
           },
         },
       },
       orderBy: {
         createdAt: 'desc',
       },
+    });
+    const grouped = await this.prisma.serviceOrder.groupBy({
+      by: ['assigneeUserId', 'status'],
+      where: { tenantId, sourceSystem: 'SGP', deletedAt: null, assigneeUserId: { not: null } },
+      _count: { _all: true },
+    });
+    return members.map((member) => {
+      const stats = grouped.filter((row) => row.assigneeUserId === member.userId);
+      return {
+        ...member,
+        activeOrderCount: stats
+          .filter((row) => !['FECHADA', 'RESOLVIDA', 'CANCELADA'].includes(row.status))
+          .reduce((n, row) => n + row._count._all, 0),
+        completedOrderCount: stats
+          .filter((row) => ['FECHADA', 'RESOLVIDA'].includes(row.status))
+          .reduce((n, row) => n + row._count._all, 0),
+        metricsScope: 'IMPORTED_SGP_ORDERS',
+      };
     });
   }
 
@@ -630,6 +652,27 @@ export class IamService {
             : 'application/octet-stream';
 
     return { fileName, mimeType, buffer };
+  }
+
+  async listOrderOrigins(tenantId: string) {
+    const tenant = await this.prisma.tenant.findFirst({
+      where: { id: tenantId, deletedAt: null },
+      select: { orderOrigins: true },
+    });
+    if (!tenant) throw new NotFoundException('Empresa não encontrada.');
+    return tenant.orderOrigins.map((name) => ({ id: name, name }));
+  }
+
+  async saveOrderOrigins(tenantId: string, names: string[]) {
+    await this.prisma.tenant.update({
+      where: { id: tenantId },
+      data: {
+        orderOrigins: [...new Set(names.map((name) => name.trim()))].sort((a, b) =>
+          a.localeCompare(b, 'pt-BR'),
+        ),
+      },
+    });
+    return this.listOrderOrigins(tenantId);
   }
 
   async listTenantSectors(tenantId: string) {

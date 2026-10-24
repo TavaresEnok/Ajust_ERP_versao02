@@ -169,10 +169,10 @@ describe('SlaEngineService', () => {
     });
 
     it('calcula calendário do tenant no fuso configurado, não no UTC do servidor', async () => {
-      const start = new Date('2026-06-01T10:00:00Z'); // 07:00 em São Paulo
+      const start = new Date('2026-06-01T02:00:00Z'); // Domingo 23h no fuso local.
       const result = await service.calculateTargetDate(start, 2, 'tenant-1');
 
-      expect(result).toEqual(new Date('2026-06-01T13:00:00Z')); // 10:00 em São Paulo
+      expect(result).toEqual(new Date('2026-06-01T05:00:00Z')); // Segunda 02h local, após duas horas úteis.
     });
   });
 
@@ -251,7 +251,7 @@ describe('SlaEngineService', () => {
         hours: 4,
       });
       const generic = makePolicy({
-        priority: Priority.CRITICA,
+        priority: Priority.NORMAL,
         serviceOrderType: null,
         hours: 8,
       });
@@ -345,7 +345,7 @@ describe('SlaEngineService', () => {
 
     it('funciona sem informar ServiceOrderType', async () => {
       const policy = makePolicy({
-        priority: Priority.BAIXA,
+        priority: Priority.NORMAL,
         serviceOrderType: null,
         hours: 72,
       });
@@ -354,6 +354,12 @@ describe('SlaEngineService', () => {
       const result = await service.findApplicablePolicy('tenant-1', Priority.BAIXA);
 
       expect(result).toEqual(policy);
+    });
+    it('não reduz prazo genérico ao mudar a prioridade para crítica', async () => {
+      const normal = makePolicy({ priority: Priority.NORMAL, serviceOrderType: null, hours: 48 });
+      const critical = makePolicy({ priority: Priority.CRITICA, serviceOrderType: null, hours: 4 });
+      mockPrisma.slaPolicy.findMany.mockResolvedValue([critical, normal]);
+      expect(await service.findApplicablePolicy('tenant-1', Priority.CRITICA)).toEqual(normal);
     });
   });
 });

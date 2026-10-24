@@ -15,7 +15,7 @@ import {
 } from './contracts';
 
 export const visualModules: Record<string, string> = {
-  providers: 'tenants',
+  providers: 'customers',
   technicians: 'users',
   tenants: 'tenants',
   assets: 'assets',
@@ -31,7 +31,7 @@ export const visualModules: Record<string, string> = {
   workflows: 'workflows',
 };
 export const routeModules: Record<string, string> = {
-  provedores: 'tenants',
+  provedores: 'customers',
   tecnicos: 'users',
   empresas: 'tenants',
   ativos: 'assets',
@@ -57,7 +57,7 @@ export function listRecords(data: unknown): ErpRecord[] {
 }
 const text = (value: unknown, fallback = '—') =>
   value === undefined || value === null || value === '' ? fallback : String(value);
-const date = (value: unknown) => (value ? new Date(String(value)).toLocaleString('pt-BR') : '—');
+const date = (value: unknown) => (value ? new Date(String(value)).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' }) : '—');
 const label = (labels: Readonly<Record<string, string>>, value: unknown) =>
   labels[String(value)] || text(value);
 export function visualRecord(key: string, record: ErpRecord): ErpRecord {
@@ -83,6 +83,7 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
       {
         ACTIVE: 'Ativo',
         INACTIVE: 'Inativo',
+        BLOCKED: 'Acesso bloqueado',
         SUSPENDED: 'Suspenso',
         ATIVO: 'Ativo',
         INATIVO: 'Inativo',
@@ -95,14 +96,14 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
   if (['providers', 'tenants'].includes(key))
     return {
       ...common,
-      email: text(r.techContactEmail),
-      city: text(r.city),
+      email: text(r.techContactEmail || (r.contacts as { emails?: string[] })?.emails?.[0]),
+      city: text(r.city || (r.address as { cidade?: string })?.cidade),
       document: text(r.taxId),
       orders: text(r.orderCount),
       active: text(r.activeOrderCount),
       sla: text(r.slaPercentage),
-      users: text(r.userCount),
-      sectors: text(r.sectorCount),
+      users: text(r.userCount ?? (r._count as { users?: number })?.users),
+      sectors: text(r.sectorCount ?? (r._count as { sectors?: number })?.sectors),
     };
   if (key === 'technicians')
     return {
@@ -120,7 +121,7 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
       title: text(r.title),
       text: text(r.content, ''),
       category: Array.isArray(r.tags) ? text(r.tags[0], 'Sem categoria') : 'Sem categoria',
-      author: text(r.authorName),
+      author: text(r.authorName || (r.author as { name?: string })?.name, 'Autor não informado'),
       date: date(r.updatedAt),
       tags: Array.isArray(r.tags) ? r.tags : [],
       status: r.isPublished ? 'Publicado' : 'Rascunho',
@@ -159,13 +160,15 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
       ...common,
       title: text(r.title),
       protocol: text(r.protocol),
-      provider: text(r.provider || r.tenantName),
+      provider: text(
+        r.provider || (r.occurrence as ErpRecord | undefined)?.provider || r.tenantName,
+      ),
       analyst: text(r.analystName || r.ownerName),
       status: label(orderStatuses, r.status),
       priority: label(priorities, r.priority),
       type: label(orderTypes, r.type),
       date: date(r.createdAt),
-      deadline: date(r.deadlineAt),
+      deadline: `${r.slaEligible === false ? 'Meta demonstrativa · ' : ''}${date(r.deadlineAt)}`,
       description: text(r.description, ''),
     };
   if (key === 'incidents')

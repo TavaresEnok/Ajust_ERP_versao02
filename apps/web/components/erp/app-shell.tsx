@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useState, type ReactNode } from 'react';
+import { Fragment, useEffect, useState, type ReactNode } from 'react';
+import { PasswordGenerator } from './password-generator';
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
@@ -38,9 +39,21 @@ import { TenantLogo, useTenantIdentity } from './tenant-identity';
 export function AppShell({ children }: { children: ReactNode }) {
   const { dark, ready, toggle } = useAppTheme();
   const path = usePathname();
-  const page = getPage(path);
+  const originalPage = getPage(path);
   const { scope, transport } = useErp();
-  const navigation = getPortalNavigation(path, scope?.role);
+  const portalNavigation = getPortalNavigation(path, scope?.role);
+  const scopedCustomer = scope?.role === 'cliente' && !!scope.customerId;
+  const navigation = scopedCustomer
+    ? portalNavigation
+        .map((group) => ({
+          ...group,
+          items: group.items.filter((item) => {
+            const section = item.path.split('/')[2];
+            return !section || ['ordens', 'agenda', 'notas', 'seguranca'].includes(section);
+          }),
+        }))
+        .filter((group) => group.items.length)
+    : portalNavigation;
   const identity = useTenantIdentity();
   const name = identity.name || (scope ? 'Usuário autenticado' : 'Prévia sem sessão');
   const tenantName = identity.tenantName || (scope ? 'Empresa autenticada' : 'Ajust Tecnologia');
@@ -50,6 +63,11 @@ export function AppShell({ children }: { children: ReactNode }) {
       : path.startsWith('/analista')
         ? '/analista'
         : '/gerencia';
+  const visibleItems = navigation.flatMap((group) => group.items);
+  const page =
+    visibleItems.find((item) => item.path === path) ||
+    visibleItems.find((item) => item.path !== base && path.startsWith(item.path + '/')) ||
+    originalPage;
   const [mobile, setMobile] = useState(false);
   const [searchOpen, setSearchOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -67,7 +85,10 @@ export function AppShell({ children }: { children: ReactNode }) {
     window.addEventListener('keydown', handler);
     return () => window.removeEventListener('keydown', handler);
   }, []);
-  const results = [...navigation.flatMap((group) => group.items), ...portalItems].filter((n) =>
+  const results = [
+    ...navigation.flatMap((group) => group.items),
+    ...(scope?.role === 'analista' ? [] : portalItems),
+  ].filter((n) =>
     (n.title + ' ' + n.description)
       .toLocaleLowerCase('pt-BR')
       .includes(query.toLocaleLowerCase('pt-BR')),
@@ -110,10 +131,9 @@ export function AppShell({ children }: { children: ReactNode }) {
           className="flex-1 overflow-y-auto px-3 pb-5 [scrollbar-width:thin]"
           aria-label="Navegação principal"
         >
-          {navigation.map((group) => (
-            <div key={group.label}>
-              <p className="nav-label">{group.label}</p>
-              {group.items.map((item) => (
+          {navigation.map((group) => {
+            const links = group.items.map((item) => (
+              <Fragment key={item.path}>
                 <Link
                   key={item.path}
                   href={item.path}
@@ -125,9 +145,32 @@ export function AppShell({ children }: { children: ReactNode }) {
                   <span>{item.title}</span>
                   {item.count && <span className="nav-count">{item.count}</span>}
                 </Link>
-              ))}
-            </div>
-          ))}
+                {item.path.endsWith('/credenciais') && <PasswordGenerator />}
+              </Fragment>
+            ));
+            return group.collapsible ? (
+              <details
+                key={group.label}
+                className="group/nav"
+                open={
+                  group.items.some(
+                    (item) => path === item.path || path.startsWith(item.path + '/'),
+                  ) || undefined
+                }
+              >
+                <summary className="nav-label flex cursor-pointer list-none items-center justify-between rounded-md focus-visible:outline-2 focus-visible:outline-primary">
+                  {group.label}
+                  <ChevronDown className="size-3 transition-transform group-open/nav:rotate-180" />
+                </summary>
+                {links}
+              </details>
+            ) : (
+              <div key={group.label}>
+                <p className="nav-label">{group.label}</p>
+                {links}
+              </div>
+            );
+          })}
         </nav>
         <div className="border-t border-border px-3 pt-2 pb-3">
           <button className="nav-item w-full" onClick={() => setHelp(true)}>

@@ -33,6 +33,7 @@ export function ErpSessionProvider({
             tenantId: scope.tenantId,
             role: scope.role,
             sessionKey: scope.sessionKey,
+            customerId: scope.customerId,
           }
         : null,
     [scope],

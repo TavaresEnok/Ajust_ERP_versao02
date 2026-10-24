@@ -11,6 +11,7 @@ function makePrisma(overrides: any = {}): any {
       delete: jest.fn().mockResolvedValue({ id: 'tpl1' }),
     },
     serviceOrder: {
+      findFirst: jest.fn().mockResolvedValue({ id: 'source', processInstanceId: null }),
       create: jest.fn().mockResolvedValue({ id: 'o1', protocol: 'WF-abc' }),
     },
     serviceOrderOccurrence: {
@@ -165,6 +166,14 @@ describe('OsProcessTemplateService.remove', () => {
 });
 
 describe('OsProcessTemplateService.executeForOrder', () => {
+  it('does not run legacy child generation for an order owned by the operational engine', async () => {
+    const prisma = makePrisma();
+    prisma.serviceOrder.findFirst.mockResolvedValueOnce({ id: 'o1', processInstanceId: 'run1' });
+    const svc = new OsProcessTemplateService(prisma, makeAudit());
+    await svc.executeForOrder('t1', { id: 'o1', protocol: 'OS-1', type: 'AUDITORIA' }, 'u1');
+    expect(prisma.osProcessTemplate.findMany).not.toHaveBeenCalled();
+    expect(prisma.serviceOrder.create).not.toHaveBeenCalled();
+  });
   it('não faz nada se nenhum template bate com type', async () => {
     const prisma = makePrisma();
     prisma.osProcessTemplate.findMany.mockResolvedValueOnce([

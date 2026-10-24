@@ -30,6 +30,22 @@ export class WorkflowActionExecutor {
 
   async executeNode(node: WorkflowNode, ctx: WorkflowContext): Promise<ActionResult> {
     const base = { nodeId: node.id, subtype: node.subtype, status: 'SUCCESS' as const };
+    if (
+      ctx.order?.operationalProcess &&
+      [
+        'task_service',
+        'action_close_order',
+        'action_assign',
+        'action_escalate',
+        'action_webhook',
+      ].includes(node.subtype)
+    )
+      return {
+        ...base,
+        status: 'SKIPPED',
+        error:
+          'Execução operacional controla ordens, responsáveis e dependências; este evento permite apenas notificações e CSAT.',
+      };
 
     try {
       switch (node.subtype) {
@@ -196,12 +212,18 @@ export class WorkflowActionExecutor {
       typeof ctx.order?.id === 'string'
         ? await this.prisma.serviceOrder.findFirst({
             where: { id: ctx.order.id, tenantId: ctx.tenantId, deletedAt: null },
-            select: { id: true, occurrenceId: true },
+            select: { id: true, occurrenceId: true, processInstanceId: true },
           })
         : null;
     if (typeof ctx.order?.id === 'string' && !sourceOrder) {
       throw new Error('Order not found in workflow tenant');
     }
+    if (sourceOrder?.processInstanceId)
+      return {
+        ...base,
+        status: 'SKIPPED',
+        error: 'O.S. sob autoridade do processo de atendimento.',
+      };
 
     const policy = await this.slaEngine.findApplicablePolicy(
       ctx.tenantId,
@@ -267,9 +289,11 @@ export class WorkflowActionExecutor {
     if (!ctx.order?.id) return { ...base, status: 'SKIPPED', error: 'Missing order id' };
     const current = await this.prisma.serviceOrder.findFirst({
       where: { id: ctx.order.id, tenantId: ctx.tenantId, deletedAt: null },
-      select: { id: true, status: true, tenantId: true },
+      select: { id: true, status: true, tenantId: true, processInstanceId: true },
     });
     if (!current) return { ...base, status: 'SKIPPED', error: 'Order not found' };
+    if (current.processInstanceId)
+      return { ...base, status: 'SKIPPED', error: 'Order managed by a human process' };
     if (
       current.status === ServiceOrderStatus.FECHADA ||
       current.status === ServiceOrderStatus.CANCELADA

@@ -37,15 +37,15 @@ describe('ServiceCatalogService', () => {
       expect(result[0].category).toBe('DNS');
     });
 
-    it('faz seed automático caso a lista esteja vazia', async () => {
+    it('does not create fictitious default services while reading an empty catalog', async () => {
       mockPrisma.serviceCatalogItem.findMany
         .mockResolvedValueOnce([]) // primeira chamada vazia
         .mockResolvedValueOnce([{ id: 'seed-1', name: 'DNS Recursivo' }]); // chamada após seed
       mockPrisma.serviceCatalogItem.create.mockResolvedValue({});
 
       const result = await svc.list('tenant-1');
-      expect(mockPrisma.serviceCatalogItem.create).toHaveBeenCalled();
-      expect(result).toHaveLength(1);
+      expect(mockPrisma.serviceCatalogItem.create).not.toHaveBeenCalled();
+      expect(result).toHaveLength(0);
     });
   });
 

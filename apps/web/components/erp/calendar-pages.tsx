@@ -1,10 +1,12 @@
 'use client';
 import { useRouteBase } from '@/lib/erp/visual-data';
-import { RecordWorkspace } from './record-workspace';
+import { OrderForm } from './order-form';
+import { OccurrenceAttendance } from './occurrence-attendance';
 import { ScheduleWorkspace } from './schedule-workspace';
 import { OperationControl } from './operation-controls';
 import { useErp } from '@/lib/erp/gateway';
 import { queryPath } from '@/lib/erp/contracts';
+import { modules } from '@/lib/erp/modules';
 import { useVisualSource } from '@/lib/erp/visual-data';
 import { QueryState } from './contract-form';
 import { useState } from 'react';
@@ -78,12 +80,41 @@ const initialEvents = [
 ];
 export function CalendarPage() {
   const portalBase = useRouteBase();
+  const { scope } = useErp();
   const [month, setMonth] = useState(() => new Date().getMonth());
   const [year, setYear] = useState(() => new Date().getFullYear());
-  const [view, setView] = useState('Mês');
+  const [view, setView] = useState(() =>
+    ['super_admin', 'gerente'].includes(scope?.role || '') ? 'Equipe' : 'Mês',
+  );
   const [selected, setSelected] = useState(() => new Date().getDate());
-  const { scope } = useErp();
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
+  const appointmentFields = manager
+    ? undefined
+    : modules.calendar.fields
+        .filter((field) =>
+          [
+            'title',
+            'description',
+            'type',
+            'startAt',
+            'endAt',
+            'allDay',
+            'assigneeId',
+            'meetingLink',
+            'location',
+            'serviceOrderId',
+          ].includes(field.name),
+        )
+        .map((field) => ({
+          ...field,
+          label:
+            (
+              { assigneeId: 'Responsável', serviceOrderId: 'Ordem de serviço vinculada' } as Record<
+                string,
+                string
+              >
+            )[field.name] || field.label,
+        }));
   const endpoint = queryPath(
     view === 'Equipe' && manager ? '/calendar/events/all' : '/calendar/events',
     {
@@ -94,6 +125,10 @@ export function CalendarPage() {
   const [events, setEvents] = useDemoCollection('events', initialEvents, endpoint);
   const source = useVisualSource('events', endpoint);
   const [detail, setDetail] = useState<(typeof initialEvents)[number] | null>(null);
+  const detailRecord = source.raw.find((row) => row.id === String(detail?.id));
+  const canEditDetail =
+    manager ||
+    (!!detailRecord && !detailRecord.isGlobal && detailRecord.createdById === scope?.userId);
   const monthName = new Date(year, month).toLocaleDateString('pt-BR', {
     month: 'long',
     year: 'numeric',
@@ -117,6 +152,7 @@ export function CalendarPage() {
       >
         <RecordDialog
           title="Novo compromisso"
+          contractFields={appointmentFields}
           fields={[
             { name: 'name', label: 'Título do compromisso' },
             { name: 'date', label: 'Data', type: 'date', value: '2026-10-16' },
@@ -312,20 +348,24 @@ export function CalendarPage() {
       {detail && (
         <RecordDialog
           title="Detalhes do compromisso"
+          readOnly={!canEditDetail}
+          contractFields={appointmentFields}
           moduleKey="calendar"
           recordId={String(detail.id)}
-          record={source.raw.find((row) => row.id === String(detail.id))}
+          record={detailRecord}
           footer={
-            <OperationControl
-              title="Remover compromisso"
-              description="Confirme a remoção deste compromisso da agenda."
-              path={`/calendar/events/${encodeURIComponent(String(detail.id))}`}
-              method="DELETE"
-              after={async () => {
-                await source.mutate();
-                setDetail(null);
-              }}
-            />
+            canEditDetail ? (
+              <OperationControl
+                title="Remover compromisso"
+                description="Confirme a remoção deste compromisso da agenda."
+                path={`/calendar/events/${encodeURIComponent(String(detail.id))}`}
+                method="DELETE"
+                after={async () => {
+                  await source.mutate();
+                  setDetail(null);
+                }}
+              />
+            ) : undefined
           }
           open={!!detail}
           onOpenChange={(o) => !o && setDetail(null)}
@@ -390,88 +430,16 @@ export function OccurrencesPage({
   initialTab?: string;
 }) {
   const portalBase = useRouteBase();
-  const [items, setItems] = useDemoCollection('incidents', initialIncidents);
-  const [tab, setTab] = useState(initialTab);
+  const [items] = useDemoCollection('incidents', initialIncidents);
   const { orders } = useOrders();
-  const selected = items.find((i) => i.id === id);
-  if (id && !selected)
-    return (
-      <PageHeading
-        title="Ocorrência indisponível"
-        description={`Registro ${id} não encontrado na consulta atual.`}
-      />
-    );
-  if (id && selected)
-    return (
-      <>
-        <Link href={portalBase + '/ocorrencias'} className="mb-4 text-link">
-          <ArrowLeft />
-          Todas as ocorrências
-        </Link>
-        <PageHeading title={selected.title} description={selected.id + ' · ' + selected.provider}>
-          <StatusBadge status={selected.status} />
-        </PageHeading>
-        <div className="mb-6 flex flex-wrap gap-3">
-          {['Resumo', 'Editar', 'Ordens vinculadas', 'Anotações', 'Histórico'].map((name) => (
-            <Button
-              key={name}
-              variant={tab === name ? 'secondary' : 'outline'}
-              onClick={() => setTab(name)}
-            >
-              {name}
-            </Button>
-          ))}
-        </div>
-        <section className="panel p-6">
-          <h2 className="section-title mb-5">Acompanhamento do incidente</h2>
-          <RecordWorkspace
-            key={`${id}-${tab}`}
-            kind="occurrences"
-            id={id}
-            base={portalBase}
-            embedded
-            initialTab={tab}
-          />
-        </section>
-      </>
-    );
+  if (id) return <OccurrenceAttendance id={id} initialTab={initialTab} />;
   return (
     <>
       <PageHeading
         title="Ocorrências"
         description="Do primeiro sinal à resolução. Incidentes sob controle."
       >
-        <RecordDialog
-          title="Nova ocorrência"
-          fields={[
-            { name: 'title', label: 'Título do incidente' },
-            {
-              name: 'provider',
-              label: 'Provedor',
-              options: ['Conecta Telecom', 'Veloz Fibra', 'NetMais', 'Linknet'],
-            },
-            {
-              name: 'priority',
-              label: 'Prioridade',
-              options: ['Normal', 'Alta', 'Crítica'],
-            },
-            { name: 'description', label: 'Descrição', type: 'textarea' },
-          ]}
-          onSave={(v) =>
-            setItems((i) => [
-              {
-                id: 'INC-' + Date.now(),
-                title: v.title,
-                provider: v.provider,
-                priority: v.priority,
-                status: 'Aberta',
-                orders: 0,
-                time: 'Agora',
-              },
-              ...i,
-            ])
-          }
-        />
+        <OrderForm />
       </PageHeading>
       <div className="metrics-grid mb-6 grid grid-cols-3 gap-4">
         <Metric

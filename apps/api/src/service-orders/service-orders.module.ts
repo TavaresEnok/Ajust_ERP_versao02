@@ -7,6 +7,9 @@ import { OsProcessTemplatesModule } from '../os-process-templates/os-process-tem
 import { NotificationsModule } from '../notifications/notifications.module';
 import { ServiceOrdersController } from './service-orders.controller';
 import { ServiceOrdersService } from './service-orders.service';
+import { ServiceProcessesModule } from '../service-processes/service-processes.module';
+import { OrderOperationsService } from './order-operations.service';
+import { OrderOperationsController } from './order-operations.controller';
 
 @Module({
   imports: [
@@ -16,9 +19,10 @@ import { ServiceOrdersService } from './service-orders.service';
     SlaModule,
     OsProcessTemplatesModule,
     NotificationsModule,
+    ServiceProcessesModule,
   ],
-  controllers: [ServiceOrdersController],
-  providers: [ServiceOrdersService],
+  controllers: [OrderOperationsController, ServiceOrdersController],
+  providers: [ServiceOrdersService, OrderOperationsService],
   exports: [ServiceOrdersService],
 })
 export class ServiceOrdersModule {}

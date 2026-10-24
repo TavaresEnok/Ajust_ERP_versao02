@@ -1,22 +1,15 @@
 'use client';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Pie, PieChart, Cell } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { useVisualSource } from '@/lib/erp/visual-data';
+import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
+import { buildAnalystOverview, ANALYST_TIMEZONE } from '@/lib/erp/analyst-workspace';
 import { orderStatuses } from '@/lib/erp/contracts';
-function periodStart(period: string) {
-  const date = new Date();
-  if (period === 'week') date.setDate(date.getDate() - 6);
-  else if (period === 'quarter') date.setMonth(date.getMonth() - 3);
-  else date.setDate(1);
-  date.setHours(0, 0, 0, 0);
-  return date;
-}
 export function useStatusData() {
-  const query = useVisualSource('orders');
+  const query = useOperationalOrders('operation');
   return Object.entries(orderStatuses)
     .map(([status, name], index) => ({
       name,
-      value: query.raw.filter((row) => row.status === status).length,
+      value: (query.data || []).filter((row) => row.status === status).length,
       color: `var(--chart-${(index % 5) + 1})`,
     }))
     .filter((row) => row.value > 0);
@@ -28,27 +21,20 @@ export function VolumeChart({
   period?: string;
   tenantId?: string;
 }) {
-  const query = useVisualSource('orders');
-  const start = periodStart(period);
-  const groups = new Map<string, { day: string; opened: number; closed: number }>();
-  query.raw
-    .filter((row) => !tenantId || row.tenantId === tenantId)
-    .forEach((row) => {
-      const created = new Date(String(row.createdAt));
-      if (!Number.isFinite(created.getTime()) || created < start) return;
-      const key = created.toISOString().slice(0, 10);
-      const group = groups.get(key) || {
-        day: created.toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' }),
-        opened: 0,
-        closed: 0,
-      };
-      group.opened += 1;
-      if (['RESOLVIDA', 'FECHADA'].includes(String(row.status))) group.closed += 1;
-      groups.set(key, group);
-    });
-  const data = [...groups.entries()]
-    .sort(([a], [b]) => a.localeCompare(b))
-    .map(([, group]) => group);
+  const query = useOperationalOrders('operation');
+  const rows = (query.data || []).filter((row) => !tenantId || row.tenantId === tenantId);
+  const data = buildAnalystOverview(
+    rows,
+    period === 'week' ? 7 : period === 'quarter' ? 90 : 30,
+    new Date(),
+  ).series.map((row) => ({
+    ...row,
+    day: new Date(`${row.day}T12:00:00-03:00`).toLocaleDateString('pt-BR', {
+      timeZone: ANALYST_TIMEZONE,
+      day: '2-digit',
+      month: '2-digit',
+    }),
+  }));
   return (
     <ChartContainer
       config={{

@@ -45,11 +45,18 @@ export function TenantsPage({
         >
           <StatusBadge status={String(tenant.status)} />
         </PageHeading>
+        <p className="panel mb-5 p-5 text-sm leading-7">
+          Este é o ambiente da empresa operadora Ajust. Os seis provedores atendidos estão no
+          cadastro de Provedores, dentro deste ambiente, sem duplicação em tenants. Dados legais e
+          Os dados legais e contatos da própria Ajust precisam ser preenchidos com documentação
+          real.
+        </p>
         <div className="mb-6 flex gap-5 overflow-auto border-b border-border">
           {[
             'Dados da empresa',
             'Identidade visual',
             'Setores',
+            'Origens de O.S.',
             'Usuários e permissões',
             'SLA',
             'Auditoria',
@@ -68,7 +75,7 @@ export function TenantsPage({
             </button>
           ))}
         </div>
-        {['Dados da empresa', 'Identidade visual', 'Setores'].includes(tab) ? (
+        {['Dados da empresa', 'Identidade visual', 'Setores', 'Origens de O.S.'].includes(tab) ? (
           <TenantAdministration
             key={`${id}-${tab}`}
             id={id}
@@ -114,6 +121,13 @@ export function TenantsPage({
       >
         <RecordDialog title="Nova empresa" moduleKey="tenants" fields={[]} />
       </PageHeading>
+      <p className="panel mb-5 p-5 text-sm leading-7">
+        Tenant é o ambiente da empresa operadora, não cada provedor atendido.{' '}
+        <Link href={`${base}/provedores`} className="text-link">
+          Os provedores atendidos estão em Provedores.
+        </Link>{' '}
+        Não criamos empresas, documentos fiscais ou contatos fictícios para preencher esta tela.
+      </p>
       <div className="mb-5 flex max-w-sm items-center gap-2 rounded-lg border border-border bg-card px-3 py-2">
         <Search className="size-4 text-muted-foreground" />
         <input

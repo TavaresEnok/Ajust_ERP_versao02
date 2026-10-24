@@ -23,6 +23,7 @@ import { ServiceCatalogService, ServiceCatalogWriteInput } from './service-catal
 
 const ServiceCatalogSchema = z.object({
   name: z.string().min(3).max(120),
+  workflowTemplateCode: z.string().regex(/^[A-Z0-9_]+$/).nullable().optional(),
   category: z.nativeEnum(ServiceOrderType).optional(),
   description: z.string().max(500).optional(),
   estimatedMinutes: z.number().int().min(5).max(1440).optional(),
@@ -51,7 +52,7 @@ export class ServiceCatalogController {
     @Query('category') category?: ServiceOrderType,
     @Query('activeOnly') activeOnly?: string,
   ) {
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura', 'cliente']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'cliente']);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     return this.serviceCatalog.list(req.auth.tenantId, {
@@ -63,7 +64,7 @@ export class ServiceCatalogController {
   @Get(':id')
   @ApiOperation({ summary: 'Buscar serviço por ID' })
   async getById(@Req() req: RequestWithAuth, @Param('id') id: string) {
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura', 'cliente']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'cliente']);
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     return this.serviceCatalog.getById(req.auth.tenantId, id);
