@@ -25,13 +25,13 @@ const CalendarDaySchema = z.object({
   dayOfWeek: z.number().int().min(0).max(6),
   isWorkDay: z.boolean().optional(),
   startTime: z.string().regex(TIME_PATTERN).optional(),
-  endTime: z.string().regex(TIME_PATTERN).optional(),
+  endTime: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/).optional(),
 });
 const CalendarExceptionSchema = z.object({
   date: z.string().date(),
   isWorkDay: z.boolean().optional(),
   startTime: z.string().regex(TIME_PATTERN).optional(),
-  endTime: z.string().regex(TIME_PATTERN).optional(),
+  endTime: z.string().regex(/^(([01]\d|2[0-3]):[0-5]\d|24:00)$/).optional(),
   reason: z.string().trim().max(500).optional(),
 });
 const SimulateSchema = z.object({

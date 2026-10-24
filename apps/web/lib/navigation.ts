@@ -35,7 +35,8 @@ export type NavItem = {
   count?: string;
   description: string;
 };
-export const navigation: { label: string; items: NavItem[] }[] = [
+export type NavGroup = { label: string; items: NavItem[]; collapsible?: boolean };
+export const navigation: NavGroup[] = [
   {
     label: 'Visão geral',
     items: [
@@ -46,23 +47,27 @@ export const navigation: { label: string; items: NavItem[] }[] = [
         description: 'Acompanhe os indicadores e a evolução da sua operação.',
       },
       {
+        title: 'Relatórios de turno',
+        path: '/gerencia/relatorios-turno',
+        icon: ClipboardList,
+        description: 'Passagem de turno, atividades e pendências da equipe.',
+      },
+      {
         title: 'Ordens de serviço',
         path: '/gerencia/ordens',
         icon: ClipboardList,
-        count: '48',
         description: 'Organize, acompanhe e gerencie todas as suas ordens de serviço.',
       },
       {
-        title: 'Trilha de ordens',
+        title: 'Histórico e transições',
         path: '/gerencia/trilha-os',
         icon: Workflow,
-        description: 'Cada etapa visível, da abertura até a conclusão.',
+        description: 'Consulte o histórico das O.S. e as transições observadas.',
       },
       {
         title: 'Agenda',
         path: '/gerencia/agenda',
         icon: CalendarDays,
-        count: '5',
         description: 'Seus compromissos e os da sua equipe em um só lugar.',
       },
       {
@@ -130,10 +135,10 @@ export const navigation: { label: string; items: NavItem[] }[] = [
         description: 'Apontamentos de tempo por ordem de serviço.',
       },
       {
-        title: 'Modelos de processos',
+        title: 'Acompanhamento dos atendimentos',
         path: '/gerencia/processos',
         icon: ListChecks,
-        description: 'Gatilhos por tipo de serviço e criação de ordens filhas.',
+        description: 'Execuções reais, O.S. vinculadas, responsáveis, pendências e progresso.',
       },
     ],
   },
@@ -179,7 +184,7 @@ export const navigation: { label: string; items: NavItem[] }[] = [
         title: 'Tipos de serviço',
         path: '/gerencia/servicos',
         icon: Layers,
-        description: 'Seu catálogo de serviços e modelos de atendimento.',
+        description: 'Volume, resolução e responsáveis por tipo de demanda; catálogo e modelos.',
       },
       {
         title: 'Políticas de SLA',
@@ -188,10 +193,10 @@ export const navigation: { label: string; items: NavItem[] }[] = [
         description: 'Defina prazos, prioridades e regras de atendimento.',
       },
       {
-        title: 'Workflows',
+        title: 'Fluxos de atendimento',
         path: '/gerencia/workflows',
         icon: Workflow,
-        description: 'Fluxos claros para cada etapa do atendimento.',
+        description: 'Crie e publique fluxos de atendimento e configure automações por evento.',
       },
     ],
   },
@@ -296,8 +301,54 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
       : path.startsWith('/analista')
         ? '/analista'
         : '/gerencia';
-  const customer = role === 'cliente' || role === 'leitura' || (!role && portal === '/cliente');
-  const analyst = role === 'analista' || role === 'tecnico' || (!role && portal === '/analista');
+  const customer = role === 'cliente' || (!role && portal === '/cliente');
+  const analyst = role === 'analista' || (!role && portal === '/analista');
+  if (analyst) {
+    const groups = [
+      {
+        label: 'Meu trabalho',
+        sections: ['', 'ordens', 'provedores', 'agenda', 'sla', 'relatorios-turno'],
+      },
+      { label: 'Conhecimento', sections: ['ajustpedia', 'credenciais', 'notas'] },
+      {
+        label: 'Ferramentas técnicas',
+        sections: ['ativos', 'plantao'],
+        collapsible: true,
+      },
+      { label: 'Minha conta', sections: ['seguranca', 'configuracoes'], collapsible: true },
+    ];
+    return groups.map(
+      ({ label, sections, collapsible }): NavGroup => ({
+        label,
+        collapsible,
+        items: sections.flatMap((section) => {
+          const item = navigation
+            .flatMap((g) => g.items)
+            .find((n) => (n.path.split('/').filter(Boolean)[1] || '') === section);
+          if (!item || (role && !canAccessSection(role, section))) return [];
+          return [
+            {
+              ...item,
+              title:
+                section === ''
+                  ? 'Meu painel'
+                  : section === 'ordens'
+                    ? 'Minhas ordens'
+                    : section === 'ativos'
+                      ? 'Equipamentos e configurações'
+                      : section === 'plantao'
+                        ? 'Escala de plantão'
+                        : section === 'processos'
+                          ? 'Acompanhar atendimentos'
+                          : item.title,
+              path: item.path.replace(/^\/(gerencia|analista|cliente)/, portal),
+              count: undefined,
+            },
+          ];
+        }),
+      }),
+    );
+  }
   const customerSections = new Set([
     'ordens',
     'agenda',
@@ -310,28 +361,6 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
     'seguranca',
     'empresa',
   ]);
-  const analystSections = new Set([
-    'ordens',
-    'trilha-os',
-    'agenda',
-    'ocorrencias',
-    'sla',
-    'saude',
-    'plantao',
-    'ativos',
-    'ajustpedia',
-    'credenciais',
-    'notas',
-    'relatorios',
-    'servicos',
-    'configuracoes',
-    'seguranca',
-    'apontamentos',
-    'mudancas',
-    'calendario-sla',
-    'configuracoes-ativos',
-    'operacoes',
-  ]);
   return navigation
     .map((group) => ({
       ...group,
@@ -340,12 +369,7 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
           const parts = item.path.split('/').filter(Boolean);
           if (!parts[1]) return true;
           if (role && !canAccessSection(role, parts[1], parts[2])) return false;
-          return customer
-            ? customerSections.has(parts[1])
-            : analyst
-              ? analystSections.has(parts[1]) &&
-                !(parts[1] === 'operacoes' && ['users', 'audit'].includes(parts[2]))
-              : true;
+          return !customer || customerSections.has(parts[1]);
         })
         .map((item) => ({
           ...item,

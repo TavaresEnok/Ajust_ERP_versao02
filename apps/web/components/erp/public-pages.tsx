@@ -21,6 +21,25 @@ import { useRouter } from 'next/navigation';
 import { useErpPublicAction, useErpPublicQuery } from '@/lib/erp/gateway';
 import { errorMessage, type BffAuthResult, type PublicSurvey } from '@/lib/erp/contracts';
 import { QueryState } from './contract-form';
+
+const reviewAccounts = [
+  {
+    role: 'Gerente',
+    identifier: 'gestores.admin@ajust.invalid',
+    password: 'Aj!LFOUfO0c-ODE500KG7vu',
+  },
+  {
+    role: 'Analista · Anderson Alves',
+    identifier: 'anderson.alves@ajust.invalid',
+    password: 'Aj!4z0KrFoMZfoS1mgvGPBG',
+  },
+  {
+    role: 'Cliente · Meganet',
+    identifier: 'meganet.teste@ajust.invalid',
+    password: 'Aj!OVmPYgYoasNbqTNZZP0t',
+  },
+];
+
 export function AuthPage({ mode }: { mode: string }) {
   const [sent, setSent] = useState(false);
   const [show, setShow] = useState(false);
@@ -28,6 +47,7 @@ export function AuthPage({ mode }: { mode: string }) {
     'credentials' | 'two-factor' | 'bootstrap-request' | 'bootstrap-verify'
   >('credentials');
   const [identifier, setIdentifier] = useState('');
+  const [password, setPassword] = useState('');
   const [bootstrapEmail, setBootstrapEmail] = useState('');
   const router = useRouter();
   const action = useErpPublicAction();
@@ -365,6 +385,10 @@ export function AuthPage({ mode }: { mode: string }) {
                           required
                           minLength={8}
                           autoComplete={isLogin ? 'current-password' : 'new-password'}
+                          value={isLogin ? password : undefined}
+                          onChange={(event) => {
+                            if (isLogin) setPassword(event.target.value);
+                          }}
                         />
                         <button
                           type="button"
@@ -445,6 +469,44 @@ export function AuthPage({ mode }: { mode: string }) {
                   <ArrowRight data-icon="inline-end" />
                 </Button>
               </form>
+              {isLogin && action.connected && (
+                <section
+                  className="mt-8 border-t border-border pt-6"
+                  aria-label="Acessos para demonstração"
+                >
+                  <div className="mb-4">
+                    <h2 className="text-xs font-semibold uppercase tracking-wide">
+                      Acessos de demonstração
+                    </h2>
+                    <p className="mt-1 text-[10px] text-muted-foreground">
+                      Selecione um perfil para preencher o login e a senha.
+                    </p>
+                  </div>
+                  <div className="grid gap-2">
+                    {reviewAccounts.map((account) => (
+                      <button
+                        key={account.role}
+                        type="button"
+                        onClick={() => {
+                          setIdentifier(account.identifier);
+                          setPassword(account.password);
+                          setShow(false);
+                          setError('');
+                        }}
+                        className="rounded-lg border border-border bg-card px-4 py-3 text-left transition-colors hover:border-primary/50 hover:bg-muted/50 focus-visible:outline-2 focus-visible:outline-primary"
+                      >
+                        <span className="block text-xs font-medium">{account.role}</span>
+                        <span className="mt-1 block break-all text-[10px] text-muted-foreground">
+                          {account.identifier}
+                        </span>
+                        <span className="mt-1 block font-mono text-[10px] text-muted-foreground">
+                          {account.password}
+                        </span>
+                      </button>
+                    ))}
+                  </div>
+                </section>
+              )}
               <p className="mt-5 text-[10px] leading-5 text-muted-foreground">
                 {action.connected
                   ? 'Autenticação realizada pelo ERP original via BFF da mesma origem.'

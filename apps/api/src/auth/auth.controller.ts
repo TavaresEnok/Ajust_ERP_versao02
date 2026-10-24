@@ -71,7 +71,10 @@ const Verify2FASchema = z.object({
 @ApiTags('Autenticação')
 @Controller('auth')
 export class AuthController {
-  constructor(@Inject(AuthService) private readonly authService: AuthService) {}
+  constructor(
+    @Inject(AuthService) private readonly authService: AuthService,
+    @Inject(RateLimitGuard) private readonly loginLimit: RateLimitGuard,
+  ) {}
 
   @Post('login')
   @UseGuards(RateLimitGuard)
@@ -85,11 +88,13 @@ export class AuthController {
   @ApiResponse({ status: 429, description: 'Muitas tentativas de login' })
   async login(@Body() body: unknown, @Req() req: RequestWithAuth) {
     const input = LoginSchema.parse(body);
-    return this.authService.login({
+    const result = await this.authService.login({
       ...input,
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });
+    await this.loginLimit.recordSuccess(req);
+    return result;
   }
 
   @Post('refresh')
@@ -216,4 +221,3 @@ export class AuthController {
     );
   }
 }
-

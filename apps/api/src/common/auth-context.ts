@@ -3,4 +3,5 @@ export type AuthContext = {
   sessionId: string;
   tenantId: string | null;
   role: string | null;
+  customerId?: string;
 };

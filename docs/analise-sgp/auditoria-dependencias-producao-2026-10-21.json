@@ -1,0 +1,343 @@
+{
+  "at": "2026-10-21T20:15:20.680Z",
+  "scope": "production-dependencies",
+  "vulnerabilities": {
+    "info": 0,
+    "low": 5,
+    "moderate": 22,
+    "high": 27,
+    "critical": 1
+  },
+  "advisories": [
+    {
+      "module": "multer",
+      "severity": "high",
+      "title": "Multer vulnerable to Denial of Service via deeply nested field names",
+      "url": "https://github.com/advisories/GHSA-72gw-mp4g-v24j"
+    },
+    {
+      "module": "multer",
+      "severity": "moderate",
+      "title": "Multer vulnerable to Denial of Service via incomplete cleanup of aborted uploads",
+      "url": "https://github.com/advisories/GHSA-3p4h-7m6x-2hcm"
+    },
+    {
+      "module": "js-yaml",
+      "severity": "moderate",
+      "title": "JS-YAML: Quadratic-complexity DoS in merge key handling via repeated aliases",
+      "url": "https://github.com/advisories/GHSA-h67p-54hq-rp68"
+    },
+    {
+      "module": "protobufjs",
+      "severity": "moderate",
+      "title": "protobufjs : Schema-derived names can shadow runtime-significant properties",
+      "url": "https://github.com/advisories/GHSA-f38q-mgvj-vph7"
+    },
+    {
+      "module": "@babel/core",
+      "severity": "low",
+      "title": "@babel/core: Arbitrary File Read via sourceMappingURL Comment",
+      "url": "https://github.com/advisories/GHSA-4x5r-pxfx-6jf8"
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via exponential-time expansion of consecutive non-expanding {} groups",
+      "url": "https://github.com/advisories/GHSA-3jxr-9vmj-r5cp"
+    },
+    {
+      "module": "js-yaml",
+      "severity": "high",
+      "title": "js-yaml: YAML merge-key chains can force quadratic CPU consumption",
+      "url": "https://github.com/advisories/GHSA-52cp-r559-cp3m"
+    },
+    {
+      "module": "engine.io",
+      "severity": "high",
+      "title": "Socket.IO: Engine.IO Polling Transport Connection Exhaustion",
+      "url": "https://github.com/advisories/GHSA-r635-g3xr-vw7x"
+    },
+    {
+      "module": "protobufjs",
+      "severity": "moderate",
+      "title": "protobufjs: Denial of Service via infinite loop in .proto option parsing",
+      "url": "https://github.com/advisories/GHSA-j3f2-48v5-ccww"
+    },
+    {
+      "module": "body-parser",
+      "severity": "low",
+      "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+      "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6"
+    },
+    {
+      "module": "body-parser",
+      "severity": "low",
+      "title": "body-parser vulnerable to denial of service when invalid limit value silently disables size enforcement",
+      "url": "https://github.com/advisories/GHSA-v422-hmwv-36x6"
+    },
+    {
+      "module": "@opentelemetry/propagator-jaeger",
+      "severity": "high",
+      "title": "OpenTelemetry JavaScript: Denial of service in `JaegerPropagator` via unhandled exception on a malformed header",
+      "url": "https://github.com/advisories/GHSA-45rx-2jwx-cxfr"
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded expansion length causing an out-of-memory process crash",
+      "url": "https://github.com/advisories/GHSA-mh99-v99m-4gvg"
+    },
+    {
+      "module": "postcss",
+      "severity": "moderate",
+      "title": "PostCSS: incomplete fix of GHSA-6g55-p6wh-862q — attacker-controlled sourceMappingURL reads arbitrary .map files when `from` is unset",
+      "url": "https://github.com/advisories/GHSA-fxqj-rqcc-2cmp"
+    },
+    {
+      "module": "socket.io-parser",
+      "severity": "high",
+      "title": "Socket.IO: Zero-attachment Memory Exhaustion",
+      "url": "https://github.com/advisories/GHSA-2m8v-j782-fhvr"
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via unbounded intermediate arrays, bypassing the CVE-2026-14257 mitigation",
+      "url": "https://github.com/advisories/GHSA-rgw5-rvv9-x895"
+    },
+    {
+      "module": "js-yaml",
+      "severity": "high",
+      "title": "JS-YAML: Quadratic CPU consumption in !!omap resolution (3.x and 4.x) — CVE-2026-59870 fix not backported",
+      "url": "https://github.com/advisories/GHSA-5p4m-2wfm-xmqj"
+    },
+    {
+      "module": "nanoid",
+      "severity": "high",
+      "title": "nanoid: non-secure generators can loop indefinitely with negative size",
+      "url": "https://github.com/advisories/GHSA-28wg-ghj8-5hjv"
+    },
+    {
+      "module": "nanoid",
+      "severity": "high",
+      "title": "nanoid: custom generators can loop indefinitely when size is zero",
+      "url": "https://github.com/advisories/GHSA-2v37-7h3g-55p8"
+    },
+    {
+      "module": "postcss",
+      "severity": "high",
+      "title": "PostCSS: Path Traversal in Previous Source Map Auto-Loading (sourceMappingURL) leads to Arbitrary .map File Disclosure",
+      "url": "https://github.com/advisories/GHSA-r28c-9q8g-f849"
+    },
+    {
+      "module": "deepmerge-ts",
+      "severity": "high",
+      "title": "DeepmergeTS has stack exhaustion when merging recursive object graphs",
+      "url": "https://github.com/advisories/GHSA-ggr8-5vv4-36mx"
+    },
+    {
+      "module": "engine.io",
+      "severity": "high",
+      "title": "Socket.IO: Engine.IO WebTransport SID DoS",
+      "url": "https://github.com/advisories/GHSA-gr94-w7qr-f4j3"
+    },
+    {
+      "module": "@opentelemetry/core",
+      "severity": "moderate",
+      "title": "OpenTelemetry Core: Unbounded memory allocation in W3C Baggage propagation",
+      "url": "https://github.com/advisories/GHSA-8988-4f7v-96qf"
+    },
+    {
+      "module": "nanoid",
+      "severity": "high",
+      "title": "nanoid: Integer Overflow or Wraparound",
+      "url": "https://github.com/advisories/GHSA-xwg4-73v4-xw9w"
+    },
+    {
+      "module": "qs",
+      "severity": "moderate",
+      "title": "qs array-limit bypass via bracket-key comma parsing",
+      "url": "https://github.com/advisories/GHSA-x5fp-wj9c-mxmx"
+    },
+    {
+      "module": "qs",
+      "severity": "moderate",
+      "title": "qs: Denial of Service via Attacker Controlled isBuffer",
+      "url": "https://github.com/advisories/GHSA-4mjr-xmp4-gh2g"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "high",
+      "title": "Nodemailer: Message-level raw option bypasses disableFileAccess/disableUrlAccess, enabling arbitrary file read and full-response SSRF in the delivered message",
+      "url": "https://github.com/advisories/GHSA-p6gq-j5cr-w38f"
+    },
+    {
+      "module": "js-yaml",
+      "severity": "high",
+      "title": "js-yaml: maxTotalMergeKeys does not limit CPU use for empty merge sources",
+      "url": "https://github.com/advisories/GHSA-2883-xcg3-v3hh"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: resolveContent() on a MailMessage bypasses disableFileAccess/disableUrlAccess when called with the legacy signature",
+      "url": "https://github.com/advisories/GHSA-8m3c-c648-2xjj"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: IDN/Punycode domain allow-list bypass leads to email delivery to an attacker-controlled domain",
+      "url": "https://github.com/advisories/GHSA-wmmp-3585-3rmp"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "high",
+      "title": "Nodemailer: Quadratic (O(n²)) time complexity in addressparser allows remote denial of service via a crafted address list",
+      "url": "https://github.com/advisories/GHSA-2x7j-588g-ccc2"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Recipient-domain validation bypass via RFC 5322 comment mis-parsing leads to email delivery to an attacker-controlled domain",
+      "url": "https://github.com/advisories/GHSA-cc9r-2j5m-2m83"
+    },
+    {
+      "module": "multer",
+      "severity": "high",
+      "title": "multer vulnerable to Denial of Service via crafted multipart field names",
+      "url": "https://github.com/advisories/GHSA-wc9g-mqfw-jrwm"
+    },
+    {
+      "module": "multer",
+      "severity": "low",
+      "title": "multer vulnerable to file size limit bypass via async fileFilter race condition",
+      "url": "https://github.com/advisories/GHSA-qvfw-j98x-7q72"
+    },
+    {
+      "module": "multer",
+      "severity": "high",
+      "title": "multer vulnerable to Denial of Service via oversized array index in field names",
+      "url": "https://github.com/advisories/GHSA-535w-7cp7-47q4"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Process-global DNS cache reuses TLS `servername` across transports, enabling cross-tenant SMTP credential disclosure",
+      "url": "https://github.com/advisories/GHSA-6vj9-mwq6-2f5v"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "moderate",
+      "title": "Nodemailer: Nested structured recipient arrays bypass the parser depth limit and cause stack exhaustion DoS",
+      "url": "https://github.com/advisories/GHSA-8vvx-rff5-p5rq"
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "moderate",
+      "title": "brace-expansion: Quadratic-time expansion of the `{a},b}` rewrite causes CPU denial of service",
+      "url": "https://github.com/advisories/GHSA-q2hr-2g5m-vwhr"
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via uncontrolled recursion on nested brace groups causing stack exhaustion",
+      "url": "https://github.com/advisories/GHSA-qhr7-859c-m2p7"
+    },
+    {
+      "module": "brace-expansion",
+      "severity": "high",
+      "title": "brace-expansion: DoS via uncontrolled recursion in parseCommaParts causing stack exhaustion",
+      "url": "https://github.com/advisories/GHSA-6j4f-fj2g-mc7p"
+    },
+    {
+      "module": "engine.io",
+      "severity": "high",
+      "title": "Socket.IO: Engine.IO Protocol Revision Mismatch DoS",
+      "url": "https://github.com/advisories/GHSA-2gc4-cqfq-p2gv"
+    },
+    {
+      "module": "nodemailer",
+      "severity": "high",
+      "title": "Nodemailer: Quadratic backtracking in the addressparser free-text fallback allows remote denial of service",
+      "url": "https://github.com/advisories/GHSA-v53p-9fqp-m79j"
+    },
+    {
+      "module": "@grpc/grpc-js",
+      "severity": "high",
+      "title": "@grpc/grpc-js: In certain configurations, getAuthContext can return unauthorized certificates as though they were authorized",
+      "url": "https://github.com/advisories/GHSA-m9gg-hp2v-232j"
+    },
+    {
+      "module": "@grpc/grpc-js",
+      "severity": "low",
+      "title": "@grpc/grpc-js: The server transmits some error messages thrown by method handlers to the client in status messages",
+      "url": "https://github.com/advisories/GHSA-f596-whhp-79r4"
+    },
+    {
+      "module": "braces",
+      "severity": "high",
+      "title": "braces vulnerable to stack-exhaustion denial of service through deeply nested patterns",
+      "url": "https://github.com/advisories/GHSA-vfj7-8cjw-p6xm"
+    },
+    {
+      "module": "source-map-js",
+      "severity": "high",
+      "title": "source-map-js allows event-loop denial of service through indexed source-map section offsets",
+      "url": "https://github.com/advisories/GHSA-68fv-2mgg-jv7q"
+    },
+    {
+      "module": "proxy-addr",
+      "severity": "critical",
+      "title": "proxy-addr vulnerable to IP spoofing via IPv4-mapped IPv6 trust subnet",
+      "url": "https://github.com/advisories/GHSA-jqcg-44mw-7w3h"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-pg",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-mysql2",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-knex",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-mysql",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-mongoose",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-oracledb",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-tedious",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    },
+    {
+      "module": "@opentelemetry/instrumentation-cassandra-driver",
+      "severity": "moderate",
+      "title": "Multiple @opentelemetry/instrumentation-* packages expose database username via unconditional db.user span attribute",
+      "url": "https://github.com/advisories/GHSA-qqmp-wf37-98f9"
+    }
+  ]
+}

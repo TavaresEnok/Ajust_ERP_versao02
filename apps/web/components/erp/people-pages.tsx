@@ -383,6 +383,13 @@ export function TechniciansPage() {
   const portalBase = useRouteBase();
   const { mutate } = useSWRConfig();
   const [team, setTeam] = useDemoCollection<TechnicianRow>('technicians');
+  const teamSource = useVisualSource('technicians');
+  const analystIds = new Set(
+    teamSource.raw
+      .filter((row) => (row.role as { code?: string })?.code === 'analista')
+      .map((row) => (row.user as { id?: string })?.id || row.id),
+  );
+  const analysts = team.filter((person) => analystIds.has(person.id));
   const [search, setSearch] = useState('');
   return (
     <>
@@ -390,6 +397,12 @@ export function TechniciansPage() {
         title="Equipe técnica"
         description="Pessoas conectadas. Atendimentos que fazem a diferença."
       >
+        <Link className="text-link" href={`${portalBase}/relatorios?tab=team`}>
+          Performance da equipe
+        </Link>
+        <Link className="text-link" href={`${portalBase}/usuarios`}>
+          Usuários e acessos
+        </Link>
         <RecordDialog
           title="Adicionar integrante"
           fields={[
@@ -403,10 +416,17 @@ export function TechniciansPage() {
           ]}
         />
       </PageHeading>
+      <p className="mb-5 rounded-lg border border-border p-4 text-xs leading-6 text-muted-foreground">
+        Contas bloqueadas não conseguem entrar no ERP. O gestor deve conferir os dados de acesso e
+        ativar apenas quem fará parte da equipe operacional.
+      </p>
       <div className="panel">
         <PanelHeading
           title="Pessoas da operação"
-          description={team.length + ' integrantes no workspace'}
+          description={
+            analysts.length +
+            ' analistas · contas administrativas e de clientes ficam em Usuários e acessos'
+          }
         >
           <div className="flex items-center gap-2">
             <Search className="size-3.5 text-muted-foreground" />
@@ -425,15 +445,15 @@ export function TechniciansPage() {
               <tr>
                 <th>Integrante</th>
                 <th>Função</th>
-                <th>Disponibilidade</th>
-                <th>Ordens ativas</th>
-                <th>Concluídas</th>
+                <th>Situação do acesso</th>
+                <th>O.S. ativas</th>
+                <th>O.S. concluídas</th>
                 <th>SLA</th>
                 <th>Ação</th>
               </tr>
             </thead>
             <tbody>
-              {team
+              {analysts
                 .filter((t) => (t.name + t.role).toLowerCase().includes(search.toLowerCase()))
                 .map((t) => (
                   <tr key={t.id}>

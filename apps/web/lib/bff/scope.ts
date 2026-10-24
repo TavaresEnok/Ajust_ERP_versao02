@@ -5,7 +5,7 @@ export const SCOPE_HEADER = 'x-ajust-erp-scope';
 
 export type SessionScope = ErpScope & { name?: string; tenantName?: string };
 
-const ROLES: RoleCode[] = ['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'];
+const ROLES: RoleCode[] = ['super_admin', 'gerente', 'analista', 'cliente'];
 
 export function parseScope(raw: string | null | undefined): SessionScope | null {
   if (!raw) return null;

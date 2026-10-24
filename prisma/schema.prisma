@@ -83,6 +83,7 @@ enum SyncStatus {
 }
 
 enum AuditAction {
+  SHIFT_REPORT_SAVE
   LOGIN
   LOGOUT
   LOGIN_FAILED
@@ -104,6 +105,7 @@ enum AuditAction {
 }
 
 model Tenant {
+  orderOrigins     String[]         @default([])
   providerProfile  ProviderProfile?
   id               String           @id @default(uuid())
   legalName        String
@@ -150,6 +152,8 @@ model Tenant {
   businessCalendarExceptions BusinessCalendarException[]
   slaAuditEvents             SlaAuditEvent[]
   serviceCatalogItems        ServiceCatalogItem[]
+  humanProcessTemplates      ServiceProcessTemplate[]
+  customers                  Customer[]
 
   @@index([status])
 }
@@ -168,19 +172,22 @@ model TenantSector {
 }
 
 model User {
-  id                      String     @id @default(uuid())
+  id                      String       @id @default(uuid())
   name                    String
-  email                   String     @unique
+  email                   String       @unique
   passwordHash            String
-  status                  UserStatus @default(ACTIVE)
-  twoFactorEnabled        Boolean    @default(false)
+  status                  UserStatus   @default(ACTIVE)
+  twoFactorEnabled        Boolean      @default(false)
   twoFactorSecretEnc      String?
   bootstrapTokenHash      String?
   bootstrapTokenExpiresAt DateTime?
   lastLoginAt             DateTime?
-  createdAt               DateTime   @default(now())
-  updatedAt               DateTime   @updatedAt
+  createdAt               DateTime     @default(now())
+  updatedAt               DateTime     @updatedAt
   deletedAt               DateTime?
+  sourceSystem            SourceSystem @default(ERP)
+  externalId              String?
+  sourceMetadata          Json         @default("{}")
 
   tenants                  UserTenant[]
   sessions                 Session[]
@@ -207,6 +214,34 @@ model User {
   createdApiKeys           ApiKey[]
   createdConfigSnapshots   AssetConfigSnapshot[]
   serviceOrderStatusEvents ServiceOrderStatusEvent[]
+
+  @@unique([sourceSystem, externalId])
+}
+
+// A consultancy customer belongs to a workspace; it is not a separate login tenant.
+model Customer {
+  id             String       @id @default(uuid())
+  tenantId       String
+  legalName      String
+  tradeName      String
+  taxId          String
+  personType     String
+  address        Json         @default("{}")
+  contacts       Json         @default("{}")
+  sourceSystem   SourceSystem @default(ERP)
+  externalId     String?
+  sourceMetadata Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+  deletedAt      DateTime?
+
+  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  occurrences Occurrence[]
+  portalUsers UserTenant[]
+
+  @@unique([tenantId, taxId])
+  @@unique([tenantId, sourceSystem, externalId])
+  @@index([tenantId, tradeName])
 }
 
 model Occurrence {
@@ -221,14 +256,22 @@ model Occurrence {
   openedByName       String
   analystResponsible String
   description        String
+  sourceSystem       SourceSystem     @default(ERP)
+  externalId         String?
+  sourceMetadata     Json             @default("{}")
+  closedAt           DateTime?
   createdAt          DateTime         @default(now())
   updatedAt          DateTime         @updatedAt
   deletedAt          DateTime?
+  customerId         String?
 
-  tenant        Tenant                 @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  customer      Customer?                @relation(fields: [customerId], references: [id], onDelete: Restrict)
   serviceOrders ServiceOrder[]
   annotations   OccurrenceAnnotation[]
+  processes     ServiceProcessInstance[]
 
+  @@unique([tenantId, sourceSystem, externalId])
   @@unique([tenantId, number])
   @@index([tenantId, provider, createdAt(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
@@ -246,20 +289,23 @@ model Role {
 }
 
 model UserTenant {
-  id        String   @id @default(uuid())
-  userId    String
-  tenantId  String
-  roleId    String
-  sector    String?
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
+  id         String   @id @default(uuid())
+  userId     String
+  tenantId   String
+  roleId     String
+  sector     String?
+  customerId String?
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
 
-  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
-  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  role   Role   @relation(fields: [roleId], references: [id])
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tenant   Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  role     Role      @relation(fields: [roleId], references: [id])
+  customer Customer? @relation(fields: [customerId], references: [id], onDelete: Restrict)
 
   @@unique([userId, tenantId])
   @@index([tenantId, roleId])
+  @@index([tenantId, customerId])
 }
 
 model Session {
@@ -301,6 +347,12 @@ model ServiceOrder {
   protocol          String
   externalProtocol  String?
   sourceSystem      SourceSystem       @default(ERP)
+  sourceMetadata    Json               @default("{}")
+  processInstanceId String?
+  processNodeId     String?
+  parentOrderId     String?
+  rootOrderId       String?
+  slaEligible       Boolean            @default(true)
   type              ServiceOrderType
   priority          Priority
   status            ServiceOrderStatus @default(ABERTA)
@@ -314,6 +366,14 @@ model ServiceOrder {
   sector            String?
   origin            String?
   deadlineAt        DateTime
+  originalDeadlineAt DateTime?
+  pausedAt          DateTime?
+  pauseReason       String?
+  scheduledAt       DateTime?
+  scheduleStartedAt DateTime?
+  handoffNotes      String?
+  changeRequestId   String?
+  changeRequest     ChangeRequest? @relation(fields: [changeRequestId], references: [id], onDelete: SetNull)
   resolvedAt        DateTime?
   closedAt          DateTime?
   canceledAt        DateTime?
@@ -329,6 +389,13 @@ model ServiceOrder {
   deletedAt         DateTime?
 
   tenant                   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  processInstance          ServiceProcessInstance?   @relation(fields: [processInstanceId], references: [id], onDelete: Restrict)
+  parentOrder              ServiceOrder?             @relation("OrderChildren", fields: [parentOrderId], references: [id], onDelete: Restrict)
+  childOrders              ServiceOrder[]            @relation("OrderChildren")
+  rootOrder                ServiceOrder?             @relation("OrderRoot", fields: [rootOrderId], references: [id], onDelete: Restrict)
+  descendantOrders         ServiceOrder[]            @relation("OrderRoot")
+  processSteps             ServiceProcessStep[]
+  processLinks             ServiceProcessOrderLink[]
   occurrence               Occurrence?               @relation(fields: [occurrenceId], references: [id], onDelete: SetNull)
   owner                    User?                     @relation("OwnerOrders", fields: [ownerUserId], references: [id])
   assignee                 User?                     @relation("AssigneeOrders", fields: [assigneeUserId], references: [id])
@@ -354,10 +421,16 @@ model ServiceOrder {
 }
 
 model ServiceOrderOccurrence {
+  editable Boolean @default(false)
+  version Int @default(1)
+  editedAt DateTime?
+  mirroredAnnotationId String?
   id                String       @id @default(uuid())
   serviceOrderId    String
   actorUserId       String?
   sourceSystem      SourceSystem @default(ERP)
+  externalId        String?
+  sourceAuthorName  String?
   message           String
   isCustomerVisible Boolean      @default(true)
   createdAt         DateTime     @default(now())
@@ -365,7 +438,101 @@ model ServiceOrderOccurrence {
   serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
   actorUser    User?        @relation(fields: [actorUserId], references: [id])
 
+  @@unique([serviceOrderId, sourceSystem, externalId])
   @@index([serviceOrderId, createdAt(sort: Desc)])
+}
+
+/// Human processes keep immutable definitions and durable, versioned execution state.
+model ServiceProcessInstance {
+  id              String    @id @default(uuid())
+  tenantId        String
+  occurrenceId    String
+  templateCode    String
+  templateVersion Int
+  definition      Json
+  state           Json
+  status          String    @default("ACTIVE")
+  version         Int       @default(1)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  completedAt     DateTime?
+  engineVersion   Int       @default(1)
+  rootOrderId     String?
+
+  occurrence Occurrence                @relation(fields: [occurrenceId], references: [id], onDelete: Restrict)
+  orders     ServiceOrder[]
+  steps      ServiceProcessStep[]
+  links      ServiceProcessOrderLink[]
+  events     ServiceProcessEvent[]
+
+  @@unique([tenantId, rootOrderId])
+  @@index([tenantId, occurrenceId])
+  @@index([tenantId, status, createdAt])
+}
+
+model ServiceProcessTemplate {
+  id          String    @id @default(uuid())
+  tenantId    String
+  code        String
+  version     Int
+  definition  Json
+  draft       Json?
+  publishedAt DateTime?
+  updatedAt   DateTime  @updatedAt
+  tenant      Tenant    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, code])
+}
+
+model ServiceProcessStep {
+  id          String    @id @default(uuid())
+  tenantId    String
+  instanceId  String
+  nodeId      String
+  attempt     Int       @default(1)
+  status      String    @default("ACTIVE")
+  orderId     String?
+  outcome     String?
+  evidence    Json      @default("{}")
+  actorId     String?
+  enteredAt   DateTime  @default(now())
+  dueAt       DateTime?
+  completedAt DateTime?
+
+  instance ServiceProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  order    ServiceOrder?          @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([instanceId, nodeId, attempt])
+  @@index([tenantId, instanceId, status])
+}
+
+model ServiceProcessOrderLink {
+  id         String                 @id @default(uuid())
+  instanceId String
+  orderKey   String
+  orderId    String
+  instance   ServiceProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+  order      ServiceOrder           @relation(fields: [orderId], references: [id], onDelete: Restrict)
+
+  @@unique([instanceId, orderKey])
+}
+
+model ServiceProcessEvent {
+  id          String                 @id @default(uuid())
+  instanceId  String
+  tenantId    String
+  eventKey    String                 @unique
+  type        String
+  payload     Json
+  status      String                 @default("PENDING")
+  attempts    Int                    @default(0)
+  error       String?
+  createdAt   DateTime               @default(now())
+  processedAt DateTime?
+  claimedAt   DateTime?
+  instance    ServiceProcessInstance @relation(fields: [instanceId], references: [id], onDelete: Cascade)
+
+  @@index([status, createdAt])
 }
 
 model ServiceOrderStatusEvent {
@@ -580,25 +747,57 @@ model KnowledgeArticleTag {
 }
 
 model KnowledgeCredential {
-  id            String   @id @default(uuid())
-  tenantId      String
-  createdById   String?
-  provider      String
-  equipmentType String   @default("OUTROS")
-  equipmentName String   @default("")
-  environment   String
-  host          String
-  username      String
-  secretEnc     String
-  notes         String?
-  createdAt     DateTime @default(now())
-  updatedAt     DateTime @updatedAt
+  id             String       @id @default(uuid())
+  parentCredentialId String?
+  accessMethod String @default("OUTROS")
+  parentCredential KnowledgeCredential? @relation("CredentialAccesses", fields: [parentCredentialId], references: [id], onDelete: Restrict)
+  accesses KnowledgeCredential[] @relation("CredentialAccesses")
+  tenantId       String
+  createdById    String?
+  provider       String
+  equipmentType  String       @default("OUTROS")
+  equipmentName  String       @default("")
+  environment    String
+  host           String
+  username       String
+  secretEnc      String
+  notes          String?
+  sourceNoteEnc  String?
+  protectedContentEnc String?
+  totpSecretEnc String?
+  sourceSystem   SourceSystem @default(ERP)
+  externalId     String?
+  sourceMetadata Json         @default("{}")
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy User?  @relation("CredentialCreator", fields: [createdById], references: [id], onDelete: SetNull)
 
+  @@unique([tenantId, sourceSystem, externalId])
   @@index([tenantId, provider, createdAt(sort: Desc)])
   @@index([tenantId, provider, equipmentType, environment])
+  @@index([parentCredentialId])
+}
+
+model ShiftReport {
+  id String @id @default(uuid())
+  tenantId String
+  authorUserId String
+  authorName String
+  shift String
+  referenceDate String
+  startAt DateTime?
+  endAt DateTime?
+  content String
+  orderIds Json @default("[]")
+  publishedAt DateTime?
+  version Int @default(1)
+  revisions Json @default("[]")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  @@index([tenantId, referenceDate, shift])
+  @@index([tenantId, authorUserId])
 }
 
 model Note {
@@ -744,7 +943,6 @@ model AssetConfigSnapshot {
   @@index([tenantId, assetId])
 }
 
-
 model AssetServiceOrder {
   id        String   @id @default(uuid())
   assetId   String
@@ -777,6 +975,7 @@ enum ChangeRisk {
 }
 
 model ChangeRequest {
+  serviceOrders   ServiceOrder[]
   id              String       @id @default(uuid())
   tenantId        String
   number          String
@@ -1049,18 +1248,32 @@ model ServiceCatalogItem {
   id               String           @id @default(uuid())
   tenantId         String
   name             String
+  workflowTemplateCode String?
   category         ServiceOrderType @default(AUDITORIA)
   description      String?
-  estimatedMinutes Int              @default(120)
+  estimatedMinutes Int?             @default(120)
   defaultPriority  Priority         @default(NORMAL)
   checklist        Json             @default("[]")
   active           Boolean          @default(true)
   createdAt        DateTime         @default(now())
   updatedAt        DateTime         @updatedAt
 
-  tenant           Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, active])
   @@index([tenantId, category])
 }
 
+/// Import provenance for entities without native source keys; no secrets or raw notes belong here.
+model ExternalImportLink {
+  id          String   @id @default(uuid())
+  tenantId    String
+  kind        String
+  externalKey String
+  localId     String
+  metadata    Json     @default("{}")
+  importedAt  DateTime @default(now())
+
+  @@unique([tenantId, kind, externalKey])
+  @@index([tenantId, kind, localId])
+}

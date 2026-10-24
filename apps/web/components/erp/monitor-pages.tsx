@@ -1,5 +1,5 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import {
   Timer,
@@ -13,7 +13,8 @@ import {
   ChevronRight,
 } from 'lucide-react';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
-import { useVisualSource, useRouteBase } from '@/lib/erp/visual-data';
+import { useRouteBase, visualRecord } from '@/lib/erp/visual-data';
+import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
 import { PageHeading, PanelHeading, Metric, StatusBadge, Priority } from './primitives';
 import { VolumeChart } from './dashboard-charts';
 import { QueryState, ErpEmpty } from './contract-form';
@@ -21,10 +22,23 @@ import { HealthReport } from './reports-workspace';
 import { DataReport } from './data-report';
 export function SlaPage() {
   const base = useRouteBase();
-  const query = useVisualSource('orders');
+  const { scope, transport } = useErp();
+  const source = useOperationalOrders(scope?.role === 'analista' ? 'mine' : 'operation');
+  const query = {
+    ...source,
+    connected: !!transport,
+    raw: source.data || [],
+    rows: (source.data || []).map((row) => visualRecord('orders', row)),
+  };
   const [filter, setFilter] = useState('Todas');
-  const now = Date.now();
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = setInterval(() => setNow(Date.now()), 60000);
+    return () => clearInterval(timer);
+  }, []);
   const active = query.rows
+    .filter((row) => query.raw.find((item) => item.id === row.id)?.slaEligible !== false)
+    .filter((row) => !query.raw.find((item) => item.id === row.id)?.pausedAt)
     .filter((row) => !['Resolvida', 'Fechada', 'Cancelada'].includes(String(row.status)))
     .map((row) => {
       const raw = query.raw.find((item) => item.id === row.id);

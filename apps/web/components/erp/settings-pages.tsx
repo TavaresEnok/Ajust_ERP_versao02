@@ -304,7 +304,7 @@ export function NotificationsConfigPage({ section = 'regras' }: { section?: stri
           title="Preparar envio de ordem"
           description="Confira o destinatário antes de solicitar o envio ao provedor do ERP."
           path="/notifications/whatsapp/dispatch-order"
-          roles={['super_admin', 'gerente', 'analista', 'tecnico']}
+          roles={['super_admin', 'gerente', 'analista']}
           fields={[
             { name: 'orderId', label: 'Ordem', type: 'uuid', required: true },
             { name: 'target', label: 'Destino opcional' },

@@ -46,6 +46,7 @@ import { WorkflowsService } from '../workflows/workflows.service';
 import { SlaEngineService } from '../sla/sla-engine.service';
 import { OsProcessTemplateService } from '../os-process-templates/os-process-templates.service';
 import { NotificationsService } from '../notifications/notifications.service';
+import { OperationalProcessesService } from '../service-processes/operational-processes.service';
 
 export type AttachmentDownloadResult = {
   fileName: string;
@@ -55,6 +56,7 @@ export type AttachmentDownloadResult = {
 };
 
 type CreateOrderInput = {
+  workflowTemplateCode?: string;
   tenantId: string;
   occurrenceId?: string;
   type: ServiceOrderType;
@@ -74,6 +76,7 @@ type CreateOrderInput = {
 };
 
 type CreateOccurrenceInput = {
+  customerId?: string;
   tenantId: string;
   provider: string;
   type: string;
@@ -85,6 +88,10 @@ type CreateOccurrenceInput = {
   description: string;
   createdAt?: string;
   firstOrder: {
+    recordCompleted?: boolean;
+    workflowTemplateCode?: string;
+    ownerUserId?: string;
+    assigneeUserId?: string;
     type: ServiceOrderType;
     status?: ServiceOrderStatus;
     priority?: Priority;
@@ -119,6 +126,9 @@ type ListOccurrencesInput = {
 };
 
 type CreateOccurrenceOrderInput = {
+  workflowTemplateCode?: string;
+  ownerUserId?: string;
+  assigneeUserId?: string;
   type: ServiceOrderType;
   status?: ServiceOrderStatus;
   priority?: Priority;
@@ -134,6 +144,8 @@ type CreateOccurrenceOrderInput = {
 };
 
 type UpdateOrderInput = {
+  ownerUserId?: string;
+  assigneeUserId?: string;
   type?: ServiceOrderType;
   priority?: Priority;
   title?: string;
@@ -156,6 +168,9 @@ type TransitionInput = {
 };
 
 type ListInput = {
+  provider?: string;
+  /** Internal scope resolved from the authenticated user, never a public user-ID filter. */
+  responsibleUserId?: string;
   status?: ServiceOrderStatus;
   priority?: Priority;
   type?: ServiceOrderType;
@@ -191,7 +206,7 @@ type ExportDownloadResult = {
   content: string;
 };
 
-const ROLE_SET = ['super_admin', 'gerente', 'analista', 'tecnico'] as const;
+const ROLE_SET = ['super_admin', 'gerente', 'analista'] as const;
 const ATTACHMENT_LIMIT = 10;
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const EXPORT_MAX_ROWS = 10000;
@@ -255,11 +270,19 @@ export class ServiceOrdersService {
     @Optional()
     @Inject(NotificationsService)
     private readonly notificationsService?: NotificationsService,
+    @Optional()
+    @Inject(OperationalProcessesService)
+    private readonly operationalProcesses?: OperationalProcessesService,
   ) {}
 
   async create(authUserId: string | null, role: string, input: CreateOrderInput) {
     if (!ROLE_SET.includes(role as (typeof ROLE_SET)[number])) {
       throw new ForbiddenException('Role is not allowed to create service orders.');
+    }
+    if (!input.occurrenceId) {
+      throw new BadRequestException(
+        'Use Novo atendimento para criar a ocorrência junto com a primeira O.S., ou selecione uma ocorrência existente.',
+      );
     }
 
     if (input.occurrenceId) {
@@ -288,6 +311,17 @@ export class ServiceOrdersService {
       }
     }
 
+    if (assignedUserIds.length) {
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: assignedUserIds } },
+        select: { id: true, name: true },
+      });
+      if (input.ownerUserId)
+        input.ownerName = users.find((u) => u.id === input.ownerUserId)?.name || input.ownerName;
+      if (input.assigneeUserId)
+        input.analystName =
+          users.find((u) => u.id === input.assigneeUserId)?.name || input.analystName;
+    }
     const now = new Date();
 
     // Utilize SLA Engine to dynamically compute deadlines rather than raw timestamp addition
@@ -306,48 +340,67 @@ export class ServiceOrdersService {
 
     const created = await this.withCreateRetry(async () => {
       const protocol = await this.buildProtocol(input.tenantId);
-      return this.prisma.serviceOrder.create({
-        data: {
-          tenantId: input.tenantId,
-          occurrenceId: input.occurrenceId,
-          protocol,
-          sourceSystem: 'ERP',
-          type: input.type,
-          priority: input.priority,
-          status: 'ABERTA',
-          title: input.title,
-          description: input.description,
-          ownerUserId: input.ownerUserId,
-          ownerName: input.ownerName,
-          assigneeUserId: input.assigneeUserId,
-          analystName: input.analystName,
-          requester: input.requester,
-          sector: input.sector,
-          origin: input.origin,
-          deadlineAt,
-          tags: input.tags || [],
-          internalNotes: input.internalNotes,
-          occurrences: {
-            create: {
-              ...(authUserId ? { actorUserId: authUserId } : {}),
+      return this.prisma.$transaction(
+        async (tx) => {
+          const created = await tx.serviceOrder.create({
+            data: {
+              tenantId: input.tenantId,
+              occurrenceId: input.occurrenceId,
+              protocol,
               sourceSystem: 'ERP',
-              message: 'OS criada manualmente no ERP.',
-            },
-          },
-        },
-        include: {
-          occurrences: {
-            orderBy: { createdAt: 'desc' },
-            include: {
-              actorUser: {
-                select: { id: true, name: true, email: true },
+              type: input.type,
+              sourceMetadata: { slaPolicyConfirmed: 'id' in slaPolicy, slaHours: slaPolicy.hours },
+              priority: input.priority,
+              status: 'ABERTA',
+              title: input.title,
+              description: input.description,
+              ownerUserId: input.ownerUserId,
+              ownerName: input.ownerName,
+              assigneeUserId: input.assigneeUserId,
+              analystName: input.analystName,
+              requester: input.requester,
+              sector: input.sector,
+              origin: input.origin,
+              deadlineAt,
+              tags: input.tags || [],
+              internalNotes: input.internalNotes,
+              occurrences: {
+                create: {
+                  ...(authUserId ? { actorUserId: authUserId } : {}),
+                  sourceSystem: 'ERP',
+                  message: 'OS criada manualmente no ERP.',
+                },
               },
             },
-          },
+            include: {
+              occurrences: {
+                orderBy: { createdAt: 'desc' },
+                include: {
+                  actorUser: {
+                    select: { id: true, name: true, email: true },
+                  },
+                },
+              },
+            },
+          });
+          if (authUserId && created.occurrenceId && this.operationalProcesses)
+            await this.operationalProcesses.start(
+              input.tenantId,
+              authUserId,
+              created.id,
+              input.workflowTemplateCode || 'AJUST_SIMPLES',
+              tx,
+            );
+          if (created.occurrenceId)
+            await tx.occurrence.update({
+              where: { id: created.occurrenceId },
+              data: { status: 'EM_EXECUCAO', closedAt: null },
+            });
+          return created;
         },
-      });
+        { timeout: 30000 },
+      );
     });
-
     await this.logAudit(input.tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
       protocol: created.protocol,
       type: input.type,
@@ -460,18 +513,24 @@ export class ServiceOrdersService {
         where: this.andWhere(where, {
           status: { in: activeStatuses },
           deadlineAt: { lt: now },
+          slaEligible: true,
+          pausedAt: null,
         }),
       }),
       this.prisma.serviceOrder.count({
         where: this.andWhere(where, {
           status: { in: activeStatuses },
           deadlineAt: { gte: now, lte: twoHours },
+          slaEligible: true,
+          pausedAt: null,
         }),
       }),
       this.prisma.serviceOrder.count({
         where: this.andWhere(where, {
           status: { in: activeStatuses },
           priority: 'CRITICA',
+          slaEligible: true,
+          pausedAt: null,
           deadlineAt: { lt: now },
         }),
       }),
@@ -572,7 +631,7 @@ export class ServiceOrdersService {
     role: string,
     input: ListInput = {},
   ): Promise<CsvExportResult> {
-    if (!['super_admin', 'gerente', 'analista', 'leitura'].includes(role)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to export service orders.');
     }
 
@@ -687,7 +746,7 @@ export class ServiceOrdersService {
     limit = 20,
     offset = 0,
   ): Promise<ExportHistoryItem[]> {
-    if (!['super_admin', 'gerente', 'analista', 'leitura'].includes(role)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to read export history.');
     }
 
@@ -732,7 +791,7 @@ export class ServiceOrdersService {
     authUserId: string,
     role: string,
   ): Promise<ExportDownloadResult> {
-    if (!['super_admin', 'gerente', 'analista', 'leitura'].includes(role)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to download exports.');
     }
 
@@ -938,6 +997,37 @@ export class ServiceOrdersService {
       throw new ForbiddenException('Role is not allowed to create occurrence.');
     }
 
+    if (input.customerId) {
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: input.customerId, tenantId: input.tenantId, deletedAt: null },
+        select: { tradeName: true, legalName: true },
+      });
+      if (!customer) throw new BadRequestException('Provedor não encontrado na Ajust.');
+      input.provider = customer.tradeName || customer.legalName;
+      input.firstOrder.requester = input.provider;
+    }
+    const assignedIds = [input.firstOrder.ownerUserId, input.firstOrder.assigneeUserId].filter(
+      (id): id is string => !!id,
+    );
+    const members = assignedIds.length
+      ? await this.prisma.userTenant.findMany({
+          where: {
+            tenantId: input.tenantId,
+            userId: { in: assignedIds },
+            role: { code: { in: [...ROLE_SET] } },
+          },
+          select: { userId: true, user: { select: { name: true } } },
+        })
+      : [];
+    if (assignedIds.some((id) => !members.some((m) => m.userId === id)))
+      throw new BadRequestException('Selecione responsáveis da equipe da Ajust.');
+    const ownerName =
+      members.find((m) => m.userId === input.firstOrder.ownerUserId)?.user.name ||
+      input.openedByName;
+    const analystName =
+      members.find((m) => m.userId === input.firstOrder.assigneeUserId)?.user.name ||
+      input.firstOrder.analystName ||
+      input.analystResponsible;
     const now = new Date();
     const occurrenceCreatedAt = input.createdAt ? new Date(input.createdAt) : now;
     const firstOrderPriority = input.firstOrder.priority || 'NORMAL';
@@ -949,7 +1039,17 @@ export class ServiceOrdersService {
     const firstOrderDeadline = input.firstOrder.deadlineAt
       ? new Date(input.firstOrder.deadlineAt)
       : await this.slaEngine.calculateTargetDate(now, firstOrderPolicy.hours, input.tenantId);
-    const firstOrderStatus = input.firstOrder.status || 'ABERTA';
+    if (
+      input.firstOrder.recordCompleted &&
+      input.firstOrder.workflowTemplateCode &&
+      input.firstOrder.workflowTemplateCode !== 'AJUST_SIMPLES'
+    )
+      throw new BadRequestException(
+        'Para trabalhos com desdobramentos, abra o atendimento e registre a conclusão na O.S.',
+      );
+    const firstOrderStatus = input.firstOrder.recordCompleted
+      ? 'FECHADA'
+      : input.firstOrder.status || 'ABERTA';
 
     const created = await this.withCreateRetry(() =>
       this.prisma.$transaction(async (tx) => {
@@ -961,12 +1061,13 @@ export class ServiceOrdersService {
             tenantId: input.tenantId,
             number: occurrenceNumber,
             provider: input.provider,
+            customerId: input.customerId,
             type: input.type,
             status: input.status || 'ABERTA',
             sector: input.sector,
             origin: input.origin,
-            openedByName: input.openedByName,
-            analystResponsible: input.analystResponsible,
+            openedByName: ownerName,
+            analystResponsible: analystName,
             description: input.description,
             createdAt: occurrenceCreatedAt,
           },
@@ -979,15 +1080,23 @@ export class ServiceOrdersService {
             protocol,
             sourceSystem: 'ERP',
             type: input.firstOrder.type,
+            sourceMetadata: {
+              slaPolicyConfirmed: 'id' in firstOrderPolicy,
+              slaHours: firstOrderPolicy.hours,
+            },
             priority: firstOrderPriority,
             status: firstOrderStatus,
+            closedAt: input.firstOrder.recordCompleted ? now : null,
+            resolvedAt: input.firstOrder.recordCompleted ? now : null,
             title: input.firstOrder.title || `O.S ${input.firstOrder.type} - ${input.provider}`,
             description: input.firstOrder.description,
             requester: input.firstOrder.requester,
             sector: input.firstOrder.sector || input.sector,
             origin: input.firstOrder.origin || input.origin,
-            ownerName: input.firstOrder.analystName || input.analystResponsible,
-            analystName: input.firstOrder.analystName || input.analystResponsible,
+            ownerUserId: input.firstOrder.ownerUserId,
+            ownerName,
+            assigneeUserId: input.firstOrder.assigneeUserId,
+            analystName,
             deadlineAt: firstOrderDeadline,
             tags: input.firstOrder.tags || [],
             internalNotes: input.firstOrder.internalNotes,
@@ -995,12 +1104,45 @@ export class ServiceOrdersService {
               create: {
                 actorUserId: authUserId,
                 sourceSystem: 'ERP',
-                message: `O.S criada na ocorrencia ${occurrence.number}.`,
+                message: input.firstOrder.recordCompleted
+                  ? `Atendimento concluído: ${input.firstOrder.description}`
+                  : `O.S criada na ocorrencia ${occurrence.number}.`,
               },
             },
           },
         });
 
+        if (input.firstOrder.recordCompleted) {
+          await tx.occurrence.update({
+            where: { id: occurrence.id },
+            data: { status: 'ENCERRADA', closedAt: now },
+          });
+          await tx.serviceOrderStatusEvent.create({
+            data: {
+              tenantId: input.tenantId,
+              serviceOrderId: order.id,
+              fromStatus: 'ABERTA',
+              toStatus: 'FECHADA',
+              actorUserId: authUserId,
+              reason: input.firstOrder.description,
+            },
+          });
+          if (this.operationalProcesses)
+            await this.operationalProcesses.recordCompleted(
+              input.tenantId,
+              authUserId,
+              order.id,
+              tx,
+            );
+        } else if (this.operationalProcesses) {
+          await this.operationalProcesses.start(
+            input.tenantId,
+            authUserId,
+            order.id,
+            input.firstOrder.workflowTemplateCode || 'AJUST_SIMPLES',
+            tx,
+          );
+        }
         return { occurrence, order };
       }),
     );
@@ -1050,30 +1192,68 @@ export class ServiceOrdersService {
       throw new ForbiddenException('Role is not allowed to update occurrence.');
     }
 
-    const occurrence = await this.prisma.occurrence.findFirst({
-      where: { id: occurrenceId, tenantId, deletedAt: null },
-      select: { id: true, number: true },
-    });
-    if (!occurrence) {
-      throw new NotFoundException('Occurrence not found.');
-    }
+    const updated = await this.prisma
+      .$transaction(
+        async (tx) => {
+          const occurrence = await tx.occurrence.findFirst({
+            where: { id: occurrenceId, tenantId, deletedAt: null },
+            select: { id: true, number: true, processes: { select: { id: true }, take: 1 } },
+          });
+          if (!occurrence) throw new NotFoundException('Occurrence not found.');
+          if (patch.status !== undefined && occurrence.processes?.length) {
+            throw new ForbiddenException('Altere o estado da ocorrência pela tela de processos.');
+          }
+          if (patch.status === 'ENCERRADA') {
+            const where = {
+              tenantId,
+              occurrenceId,
+              deletedAt: null,
+              status: { notIn: [ServiceOrderStatus.FECHADA, ServiceOrderStatus.CANCELADA] },
+            };
+            const pending = await tx.serviceOrder.findMany({
+              where,
+              select: { id: true, protocol: true, status: true },
+              orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+              take: 20,
+            });
+            if (pending.length) {
+              const count = await tx.serviceOrder.count({ where });
+              throw new ConflictException({
+                message: `Não é possível encerrar a ocorrência: ${count} O.S. ainda pendente(s). Feche ou cancele: ${pending.map((o) => o.protocol).join(', ')}${count > pending.length ? ' (consulte as demais na lista de ordens)' : ''}. Nenhuma O.S. foi alterada.`,
+                pendingOrders: pending,
+                pendingCount: count,
+              });
+            }
+          }
+          return tx.occurrence.update({
+            where: { id: occurrence.id },
+            data: {
+              ...(patch.type !== undefined ? { type: patch.type } : {}),
+              ...(patch.status !== undefined ? { status: patch.status } : {}),
+              ...(patch.status !== undefined
+                ? { closedAt: patch.status === 'ENCERRADA' ? new Date() : null }
+                : {}),
+              ...(patch.sector !== undefined ? { sector: patch.sector } : {}),
+              ...(patch.origin !== undefined ? { origin: patch.origin } : {}),
+              ...(patch.analystResponsible !== undefined
+                ? { analystResponsible: patch.analystResponsible }
+                : {}),
+              ...(patch.description !== undefined ? { description: patch.description } : {}),
+            },
+          });
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
+      )
+      .catch((error: unknown) => {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+          throw new ConflictException(
+            'O atendimento foi alterado durante a operação. Atualize a ocorrência e tente novamente.',
+          );
+        throw error;
+      });
 
-    const updated = await this.prisma.occurrence.update({
-      where: { id: occurrence.id },
-      data: {
-        ...(patch.type !== undefined ? { type: patch.type } : {}),
-        ...(patch.status !== undefined ? { status: patch.status } : {}),
-        ...(patch.sector !== undefined ? { sector: patch.sector } : {}),
-        ...(patch.origin !== undefined ? { origin: patch.origin } : {}),
-        ...(patch.analystResponsible !== undefined
-          ? { analystResponsible: patch.analystResponsible }
-          : {}),
-        ...(patch.description !== undefined ? { description: patch.description } : {}),
-      },
-    });
-
-    await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'occurrence', occurrence.id, {
-      occurrenceNumber: occurrence.number,
+    await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'occurrence', updated.id, {
+      occurrenceNumber: updated.number,
       patch,
     });
 
@@ -1161,6 +1341,7 @@ export class ServiceOrdersService {
     }
 
     const noteMessage = trimmedMessage;
+    const annotationId = randomUUID();
 
     const result = await this.prisma.$transaction(async (tx) => {
       const updatedOrder = await tx.serviceOrder.update({
@@ -1168,6 +1349,8 @@ export class ServiceOrdersService {
         data: {
           occurrences: {
             create: {
+              id: annotationId,
+              editable: true,
               actorUserId: authUserId,
               sourceSystem: 'ERP',
               message: noteMessage,
@@ -1199,6 +1382,11 @@ export class ServiceOrdersService {
           })
         : null;
 
+      if (mirroredOccurrenceAnnotation)
+        await tx.serviceOrderOccurrence.update({
+          where: { id: annotationId },
+          data: { mirroredAnnotationId: mirroredOccurrenceAnnotation.id },
+        });
       return { updatedOrder, mirroredOccurrenceAnnotation };
     });
 
@@ -1252,6 +1440,17 @@ export class ServiceOrdersService {
     }
 
     const priority = input.priority || 'NORMAL';
+    if (this.operationalProcesses)
+      return this.create(authUserId, role, {
+        ...input,
+        tenantId,
+        occurrenceId,
+        priority,
+        title: input.title || `O.S ${input.type} - ${occurrence.provider}`,
+        requester: input.requester || occurrence.provider,
+        sector: input.sector || occurrence.sector,
+        origin: input.origin || occurrence.origin,
+      });
     const slaPolicy = await this.slaEngine.findApplicablePolicy(tenantId, priority, input.type);
     const deadlineAt = input.deadlineAt
       ? new Date(input.deadlineAt)
@@ -1330,7 +1529,7 @@ export class ServiceOrdersService {
     role: string,
     patch: UpdateOrderInput,
   ) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(role)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to update service order.');
     }
 
@@ -1348,7 +1547,24 @@ export class ServiceOrdersService {
       );
     }
 
+    const selectedUsers = [patch.ownerUserId, patch.assigneeUserId].filter(
+      (id): id is string => !!id,
+    );
+    if (selectedUsers.length) {
+      const members = await this.prisma.userTenant.findMany({
+        where: { tenantId, userId: { in: selectedUsers } },
+        select: { userId: true, user: { select: { name: true } } },
+      });
+      if (selectedUsers.some((id) => !members.some((m) => m.userId === id)))
+        throw new BadRequestException('Selecione pessoas da equipe da Ajust.');
+      if (patch.ownerUserId)
+        patch.ownerName = members.find((m) => m.userId === patch.ownerUserId)!.user.name;
+      if (patch.assigneeUserId)
+        patch.analystName = members.find((m) => m.userId === patch.assigneeUserId)!.user.name;
+    }
     const data: Prisma.ServiceOrderUpdateInput = {
+      ...(patch.ownerUserId ? { owner: { connect: { id: patch.ownerUserId } } } : {}),
+      ...(patch.assigneeUserId ? { assignee: { connect: { id: patch.assigneeUserId } } } : {}),
       ...(patch.type !== undefined ? { type: patch.type } : {}),
       ...(patch.priority !== undefined ? { priority: patch.priority } : {}),
       ...(patch.title !== undefined ? { title: patch.title } : {}),
@@ -1418,6 +1634,66 @@ export class ServiceOrdersService {
     return updated;
   }
 
+  async editOrderAnnotation(
+    tenantId: string,
+    orderId: string,
+    annotationId: string,
+    actorId: string,
+    role: string,
+    message: string,
+    expectedVersion: number,
+  ) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role))
+      throw new ForbiddenException('Sem autorização.');
+    return this.prisma.$transaction(async (tx) => {
+      const note = await tx.serviceOrderOccurrence.findFirst({
+        where: {
+          id: annotationId,
+          serviceOrderId: orderId,
+          actorUserId: actorId,
+          editable: true,
+          serviceOrder: { tenantId, deletedAt: null },
+        },
+      });
+      if (!note)
+        throw new NotFoundException(
+          'Somente o autor pode editar uma anotação manual deste atendimento.',
+        );
+      const result = await tx.serviceOrderOccurrence.updateMany({
+        where: { id: note.id, version: expectedVersion },
+        data: { message, editedAt: new Date(), version: { increment: 1 } },
+      });
+      if (!result.count) throw new ConflictException('A anotação mudou. Atualize antes de editar.');
+      if (note.mirroredAnnotationId) {
+        const order = await tx.serviceOrder.findFirstOrThrow({
+          where: { id: orderId, tenantId },
+          select: { protocol: true },
+        });
+        await tx.occurrenceAnnotation.updateMany({
+          where: { id: note.mirroredAnnotationId, tenantId, actorUserId: actorId },
+          data: { message: `[O.S ${order.protocol}] ${message}` },
+        });
+      }
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: actorId,
+          action: 'OS_UPDATE',
+          resourceType: 'service_order_annotation',
+          resourceId: note.id,
+          metadata: {
+            operation: 'edit',
+            orderId,
+            previousMessage: note.message,
+            message,
+            previousVersion: note.version,
+          },
+        },
+      });
+      return { id: note.id, message, version: expectedVersion + 1 };
+    });
+  }
+
   async transition(
     tenantId: string,
     id: string,
@@ -1434,6 +1710,22 @@ export class ServiceOrdersService {
     }
 
     const from = order.status;
+    if (order.processInstanceId) {
+      const archived = await this.prisma.serviceProcessInstance.findFirst({
+        where: {
+          id: order.processInstanceId,
+          tenantId,
+          status: 'HISTORICAL',
+          engineVersion: 2,
+          steps: { none: { status: { in: ['ACTIVE', 'WAITING'] } } },
+        },
+        select: { id: true },
+      });
+      if (!archived)
+        throw new ForbiddenException(
+          'Esta O.S. pertence a um processo. Conclua a etapa na tela de processos.',
+        );
+    }
     const to = input.toStatus;
 
     if (from === to) {
@@ -1442,7 +1734,7 @@ export class ServiceOrdersService {
 
     this.assertTransitionAllowed(from, to, role as Role);
 
-    if (to === 'FECHADA' && from === 'RESOLVIDA') {
+    if (to === 'FECHADA' && from === 'RESOLVIDA' && order.requiresApproval) {
       const needsApproval = this.requiresDelayedApproval(order.priority, order.deadlineAt);
       if (needsApproval) {
         const approved = await this.prisma.serviceOrderApproval.findFirst({
@@ -1485,7 +1777,9 @@ export class ServiceOrdersService {
           closedAt: to === 'FECHADA' ? now : order.closedAt,
           canceledAt: to === 'CANCELADA' ? now : order.canceledAt,
           reopenedCount:
-            from === 'FECHADA' && to === 'EM_ANALISE' ? order.reopenedCount + 1 : order.reopenedCount,
+            from === 'FECHADA' && to === 'EM_ANALISE'
+              ? order.reopenedCount + 1
+              : order.reopenedCount,
           occurrences: {
             create: {
               actorUserId: authUserId,
@@ -1671,7 +1965,7 @@ export class ServiceOrdersService {
     role: string,
     files: Array<Express.Multer.File>,
   ) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(role)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to upload attachments.');
     }
     if (!files?.length) {
@@ -1790,7 +2084,7 @@ export class ServiceOrdersService {
     authUserId: string,
     role: string,
   ): Promise<AttachmentDownloadResult> {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'leitura', 'cliente'].includes(role)) {
+    if (!['super_admin', 'gerente', 'analista', 'cliente'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to download attachments.');
     }
 
@@ -1845,12 +2139,8 @@ export class ServiceOrdersService {
   }
 
   private assertTransitionAllowed(from: ServiceOrderStatus, to: ServiceOrderStatus, role: Role) {
-    if (role === 'cliente' || role === 'leitura') {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role cannot transition service order status.');
-    }
-
-    if (role === 'tecnico' && to !== 'RESOLVIDA') {
-      throw new ForbiddenException('Tecnico can only move orders to RESOLVIDA.');
     }
 
     const table: Record<ServiceOrderStatus, ServiceOrderStatus[]> = {
@@ -1927,6 +2217,17 @@ export class ServiceOrdersService {
     if (input.priority) where.priority = input.priority;
     if (input.type) where.type = input.type;
 
+    if (input.responsibleUserId) {
+      where.AND = [
+        {
+          OR: [
+            { ownerUserId: input.responsibleUserId },
+            { assigneeUserId: input.responsibleUserId },
+          ],
+        },
+      ];
+    }
+
     if (input.from || input.to) {
       where.createdAt = {
         ...(input.from ? { gte: new Date(input.from) } : {}),
@@ -1934,12 +2235,26 @@ export class ServiceOrdersService {
       };
     }
 
+    if (input.provider) {
+      const restrictions = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+      where.AND = [
+        ...restrictions,
+        {
+          OR: [
+            { requester: { equals: input.provider, mode: 'insensitive' } },
+            { occurrence: { provider: { equals: input.provider, mode: 'insensitive' } } },
+          ],
+        },
+      ];
+    }
     if (input.search) {
       where.OR = [
         { protocol: { contains: input.search, mode: 'insensitive' } },
         { title: { contains: input.search, mode: 'insensitive' } },
         { description: { contains: input.search, mode: 'insensitive' } },
         { externalProtocol: { contains: input.search, mode: 'insensitive' } },
+        { requester: { contains: input.search, mode: 'insensitive' } },
+        { occurrence: { provider: { contains: input.search, mode: 'insensitive' } } },
       ];
     }
 

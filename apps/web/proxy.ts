@@ -5,6 +5,7 @@ import {
   resolveSession,
   roleHome,
   type RefreshApiResponse,
+  type ResolvedSession,
 } from '@/lib/bff/server';
 import { SCOPE_HEADER } from '@/lib/bff/scope';
 
@@ -45,8 +46,24 @@ export async function proxy(request: NextRequest) {
 
   const isPublic = PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/csat/');
   const hasSessionCookie =
-    request.cookies.has('erp_access_token') || request.cookies.has('erp_refresh_token');
-  const session = hasSessionCookie ? await resolveSession(request.cookies) : null;
+    request.cookies.has('ajust_live_access_token') ||
+    request.cookies.has('ajust_live_refresh_token');
+  let session: ResolvedSession | null = null;
+  try {
+    session = hasSessionCookie ? await resolveSession(request.cookies) : null;
+  } catch {
+    return new NextResponse(
+      'ERP temporariamente indisponível. Sua sessão foi preservada; atualize esta página em instantes.',
+      {
+        status: 503,
+        headers: {
+          'content-type': 'text/plain; charset=utf-8',
+          'retry-after': '3',
+          'cache-control': 'no-store',
+        },
+      },
+    );
+  }
   const role = session?.me.tenant.role || null;
   const home = roleHome(role);
 
@@ -96,6 +113,7 @@ export async function proxy(request: NextRequest) {
       sessionKey: session.sessionId || session.me.id,
       name: session.me.name,
       tenantName: session.me.tenant.tradeName,
+      customerId: session.me.customerId,
     }),
   );
 

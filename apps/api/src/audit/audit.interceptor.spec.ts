@@ -34,6 +34,11 @@ describe('AuditInterceptor', () => {
           body: {
             toStatus: 'FECHADA',
             password: 'secret',
+            totpSecret: 'private-seed',
+            protectedContent: 'private-content',
+            accessEntries: [
+              { host: 'private-host', secret: 'private-password', notes: 'private-notes' },
+            ],
             nested: { apiKey: 'key', safe: 'visible' },
             items: [{ token: 'token', name: 'item' }],
           },
@@ -58,6 +63,9 @@ describe('AuditInterceptor', () => {
           body: {
             toStatus: 'FECHADA',
             password: '[REDACTED]',
+            totpSecret: '[REDACTED]',
+            protectedContent: '[REDACTED]',
+            accessEntries: '[REDACTED]',
             nested: { apiKey: '[REDACTED]', safe: 'visible' },
             items: [{ token: '[REDACTED]', name: 'item' }],
           },

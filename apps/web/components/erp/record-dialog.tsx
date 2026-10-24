@@ -17,7 +17,7 @@ import { modules, createPayload } from '@/lib/erp/modules';
 import { routeModules, listRecords, refreshVisualData } from '@/lib/erp/visual-data';
 import type { FieldSpec } from '@/lib/erp/fields';
 import type { ErpRecord } from '@/lib/erp/contracts';
-import { ContractForm, QueryState } from './contract-form';
+import { ContractFields, ContractForm, QueryState } from './contract-form';
 export type FormField = {
   name: string;
   label: string;
@@ -42,6 +42,7 @@ export function RecordDialog({
   onCreated,
   record,
   footer,
+  readOnly = false,
 }: {
   title: string;
   description?: string;
@@ -58,6 +59,7 @@ export function RecordDialog({
   onCreated?: (record: ErpRecord) => void;
   record?: ErpRecord;
   footer?: ReactNode;
+  readOnly?: boolean;
 }) {
   const [local, setLocal] = useState(false);
   const open = controlled ?? local;
@@ -115,7 +117,7 @@ export function RecordDialog({
   const editable = allowed && (!recordId || !!config?.update || !!endpoint);
   const safeSpecs = specs.map((field) =>
     scope?.role === 'cliente' && field.name === 'roleCode'
-      ? { ...field, options: { cliente: 'Cliente', leitura: 'Somente leitura' } }
+      ? { ...field, options: { cliente: 'Cliente' } }
       : field,
   );
   return (
@@ -150,31 +152,43 @@ export function RecordDialog({
               Seu perfil não pode realizar esta operação.
             </p>
           )}
-          <ContractForm
-            key={`${recordId || 'new'}-${String(row?.updatedAt || '')}`}
-            fields={safeSpecs}
-            values={row || (scope ? { tenantId: scope.tenantId } : {})}
-            connected={
-              action.connected && editable && !!(endpoint || config) && (!recordId || !!row)
-            }
-            pending={action.pending}
-            label="Salvar alterações"
-            onSubmit={async (values) => {
-              if (!editable || (!endpoint && !config))
-                throw new Error('Esta operação não possui contrato disponível.');
-              const created = await action.execute<ErpRecord | undefined>({
-                path:
-                  endpoint ||
-                  `${config.endpoint}${recordId ? `/${encodeURIComponent(recordId)}` : ''}`,
-                method: recordId ? config?.updateMethod || 'PATCH' : 'POST',
-                body: createPayload(moduleKey, values),
-              });
-              if (!recordId && created) onCreated?.(created);
-              await refreshVisualData(mutate);
-              setOpen(false);
-              toast.success('Alteração confirmada pelo ERP');
-            }}
-          />
+          {readOnly ? (
+            <div className="space-y-4">
+              <p className="text-sm text-muted-foreground">
+                Compromisso compartilhado para consulta. Somente quem criou este compromisso ou a
+                gestão pode alterá-lo; eventos globais são administrados pela gestão.
+              </p>
+              <fieldset disabled>
+                <ContractFields fields={safeSpecs} values={row || {}} />
+              </fieldset>
+            </div>
+          ) : (
+            <ContractForm
+              key={`${recordId || 'new'}-${String(row?.updatedAt || '')}`}
+              fields={safeSpecs}
+              values={row || (scope ? { tenantId: scope.tenantId } : {})}
+              connected={
+                action.connected && editable && !!(endpoint || config) && (!recordId || !!row)
+              }
+              pending={action.pending}
+              label="Salvar alterações"
+              onSubmit={async (values) => {
+                if (!editable || (!endpoint && !config))
+                  throw new Error('Esta operação não possui contrato disponível.');
+                const created = await action.execute<ErpRecord | undefined>({
+                  path:
+                    endpoint ||
+                    `${config.endpoint}${recordId ? `/${encodeURIComponent(recordId)}` : ''}`,
+                  method: recordId ? config?.updateMethod || 'PATCH' : 'POST',
+                  body: createPayload(moduleKey, values),
+                });
+                if (!recordId && created) onCreated?.(created);
+                await refreshVisualData(mutate);
+                setOpen(false);
+                toast.success('Alteração confirmada pelo ERP');
+              }}
+            />
+          )}
           <Button type="button" variant="outline" onClick={() => setOpen(false)}>
             Cancelar
           </Button>

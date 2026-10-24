@@ -1,6 +1,19 @@
-import { ForbiddenException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
+import { parseTotp, totp } from '../common/totp';
+import { packVaultContent, unpackVaultContent, type VaultAccess } from '../common/vault-content';
 import { Prisma } from '@prisma/client';
-import { decryptSecret, encryptSecret } from '../common/secrets.crypto';
+import {
+  decryptVaultSecret as decryptSecret,
+  encryptVaultSecret as encryptSecret,
+  vaultSourceNoteText,
+} from '../common/vault.crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
 
@@ -27,6 +40,11 @@ type UpdateArticleInput = {
 };
 
 type CreateCredentialInput = {
+  accessEntries?: VaultAccess[];
+  totpSecret?: string;
+  protectedContent?: string;
+  parentCredentialId?: string;
+  accessMethod?: string;
   tenantId: string;
   provider: string;
   equipmentType?: string;
@@ -39,6 +57,12 @@ type CreateCredentialInput = {
 };
 
 type UpdateCredentialInput = {
+  expectedUpdatedAt?: string;
+  accessEntries?: VaultAccess[];
+  totpSecret?: string;
+  removeTotp?: boolean;
+  protectedContent?: string;
+  accessMethod?: string;
   provider?: string;
   equipmentType?: string;
   equipmentName?: string;
@@ -106,7 +130,7 @@ export class KnowledgeService {
   ) {}
 
   async listArticles(authRole: string, authUserId: string, input: ListArticleInput) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico', 'leitura'].includes(authRole)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to read knowledge base.');
     }
 
@@ -309,7 +333,7 @@ export class KnowledgeService {
   }
 
   async listCredentials(authRole: string, authUserId: string, input: ListCredentialInput) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(authRole)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to read credentials.');
     }
 
@@ -338,10 +362,15 @@ export class KnowledgeService {
           provider: true,
           equipmentType: true,
           equipmentName: true,
+          parentCredentialId: true,
+          accessMethod: true,
           environment: true,
           host: true,
           username: true,
           notes: true,
+          sourceSystem: true,
+          sourceMetadata: true,
+          totpSecretEnc: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -361,7 +390,15 @@ export class KnowledgeService {
       },
     );
 
-    return { items: credentials, total, limit, offset };
+    return {
+      items: credentials.map(({ totpSecretEnc, ...item }) => ({
+        ...item,
+        hasTotp: !!totpSecretEnc,
+      })),
+      total,
+      limit,
+      offset,
+    };
   }
 
   async listCredentialProviders(
@@ -369,7 +406,7 @@ export class KnowledgeService {
     authUserId: string,
     input: ListCredentialProvidersInput,
   ) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(authRole)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to read credentials.');
     }
 
@@ -441,12 +478,40 @@ export class KnowledgeService {
   }
 
   async createCredential(authRole: string, authUserId: string, input: CreateCredentialInput) {
-    if (!['super_admin', 'gerente'].includes(authRole)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to create credentials.');
     }
 
+    if (input.parentCredentialId) {
+      const parent = await this.prisma.knowledgeCredential.findFirst({
+        where: { id: input.parentCredentialId, tenantId: input.tenantId, parentCredentialId: null },
+      });
+      if (!parent) throw new NotFoundException('Equipamento não encontrado nesta empresa.');
+      input.provider = parent.provider;
+      input.equipmentName = parent.equipmentName;
+      input.equipmentType = parent.equipmentType;
+      input.environment = parent.environment;
+    }
+    if (input.totpSecret) {
+      try {
+        parseTotp(input.totpSecret);
+      } catch {
+        throw new BadRequestException(
+          'Chave TOTP inválida. Use a chave Base32 ou URL otpauth://totp.',
+        );
+      }
+    }
+    if (input.accessEntries) {
+      const primary = input.accessEntries[0];
+      input.host = primary?.host || '';
+      input.username = primary?.username || '';
+      input.secret = primary?.secret || '';
+      input.accessMethod = primary?.method || 'SEM_ACESSO';
+    }
     const created = await this.prisma.knowledgeCredential.create({
       data: {
+        parentCredentialId: input.parentCredentialId,
+        accessMethod: input.accessMethod || 'OUTROS',
         tenantId: input.tenantId,
         createdById: authUserId,
         provider: input.provider.trim(),
@@ -456,6 +521,12 @@ export class KnowledgeService {
         host: input.host.trim(),
         username: input.username.trim(),
         secretEnc: encryptSecret(input.secret),
+        protectedContentEnc: input.accessEntries
+          ? encryptSecret(packVaultContent(input.protectedContent || '', input.accessEntries))
+          : input.protectedContent
+            ? encryptSecret(input.protectedContent)
+            : null,
+        totpSecretEnc: input.totpSecret ? encryptSecret(input.totpSecret) : null,
         notes: input.notes?.trim() || null,
       },
       select: {
@@ -494,7 +565,7 @@ export class KnowledgeService {
     tenantId: string,
     credentialId: string,
   ) {
-    if (!['super_admin', 'gerente', 'analista', 'tecnico'].includes(authRole)) {
+    if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to reveal credential secret.');
     }
 
@@ -510,6 +581,9 @@ export class KnowledgeService {
         username: true,
         notes: true,
         secretEnc: true,
+        sourceNoteEnc: true,
+        protectedContentEnc: true,
+        updatedAt: true,
       },
     });
 
@@ -530,6 +604,9 @@ export class KnowledgeService {
       },
     );
 
+    const content = unpackVaultContent(
+      credential.protectedContentEnc ? decryptSecret(credential.protectedContentEnc) : null,
+    );
     return {
       id: credential.id,
       provider: credential.provider,
@@ -540,6 +617,76 @@ export class KnowledgeService {
       username: credential.username,
       notes: credential.notes,
       secret: decryptSecret(credential.secretEnc),
+      protectedContent: content.text,
+      accessEntries: content.accessEntries,
+      updatedAt: credential.updatedAt,
+      sourceNote: credential.sourceNoteEnc ? vaultSourceNoteText(credential.sourceNoteEnc) : null,
+    };
+  }
+
+  async credentialHistory(role: string, tenantId: string, id: string) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
+    const record = await this.prisma.knowledgeCredential.findFirst({
+      where: { id, tenantId },
+      select: { id: true },
+    });
+    if (!record) throw new NotFoundException('Credential not found.');
+    const events = await this.prisma.auditLog.findMany({
+      where: { tenantId, resourceType: 'knowledge_credential', resourceId: id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 100,
+      select: { id: true, createdAt: true, metadata: true, actorUser: { select: { name: true } } },
+    });
+    return events.map((event) => ({
+      id: event.id,
+      createdAt: event.createdAt,
+      actor: event.actorUser?.name || 'Sistema',
+      operation: String((event.metadata as Record<string, unknown> | null)?.op || 'update'),
+    }));
+  }
+
+  async credentialTotp(role: string, userId: string, tenantId: string, id: string) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
+    const row = await this.prisma.knowledgeCredential.findFirst({
+      where: { id, tenantId },
+      select: { id: true, totpSecretEnc: true },
+    });
+    if (!row) throw new NotFoundException();
+    if (!row.totpSecretEnc)
+      throw new BadRequestException('Cadastre a chave 2FA em Editar para gerar os códigos.');
+    await this.logAudit(tenantId, userId, 'CREDENTIAL_ACCESS', 'knowledge_credential', id, {
+      op: 'totp',
+    });
+    return totp(decryptSecret(row.totpSecretEnc));
+  }
+
+  async credentialSummary(role: string, tenantId: string) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
+    const [total, last] = await Promise.all([
+      this.prisma.knowledgeCredential.count({ where: { tenantId } }),
+      this.prisma.auditLog.findFirst({
+        where: {
+          tenantId,
+          resourceType: 'knowledge_credential',
+          resourceId: { not: null },
+          action: { in: ['OS_CREATE', 'OS_UPDATE'] },
+        },
+        orderBy: { createdAt: 'desc' },
+        select: { createdAt: true, actorUser: { select: { name: true } }, metadata: true },
+      }),
+    ]);
+    return {
+      total,
+      lastChange: last
+        ? {
+            at: last.createdAt,
+            by: last.actorUser?.name || 'Sistema',
+            operation: String((last.metadata as Record<string, unknown>)?.op || 'update'),
+            label: String(
+              (last.metadata as Record<string, unknown>)?.changeLabel || 'Cadastro alterado',
+            ),
+          }
+        : null,
     };
   }
 
@@ -562,6 +709,62 @@ export class KnowledgeService {
     }
 
     const data: Prisma.KnowledgeCredentialUpdateInput = {};
+    if (
+      patch.expectedUpdatedAt &&
+      new Date(patch.expectedUpdatedAt).getTime() !== credential.updatedAt.getTime()
+    )
+      throw new ConflictException(
+        'Este cadastro foi atualizado por outra pessoa. Reabra a edição para consultar a versão atual.',
+      );
+    const nextSecret = patch.accessEntries
+      ? patch.accessEntries[0]?.secret || ''
+      : patch.secret?.trim()
+        ? patch.secret
+        : undefined;
+    const passwordChanged =
+      nextSecret !== undefined && nextSecret !== decryptSecret(credential.secretEnc);
+    if (patch.totpSecret?.trim()) {
+      try {
+        parseTotp(patch.totpSecret);
+      } catch {
+        throw new BadRequestException('Chave TOTP inválida.');
+      }
+      data.totpSecretEnc = encryptSecret(patch.totpSecret);
+    } else if (patch.removeTotp) data.totpSecretEnc = null;
+    if (patch.protectedContent !== undefined || patch.accessEntries !== undefined) {
+      const old = unpackVaultContent(
+        credential.protectedContentEnc ? decryptSecret(credential.protectedContentEnc) : null,
+      );
+      data.protectedContentEnc = encryptSecret(
+        packVaultContent(
+          patch.protectedContent ?? old.text,
+          patch.accessEntries ?? old.accessEntries,
+        ),
+      );
+    }
+    if (
+      ['provider', 'equipmentName', 'equipmentType', 'environment'].some(
+        (key) =>
+          (patch as Record<string, unknown>)[key] !== undefined &&
+          (patch as Record<string, unknown>)[key] !== (credential as Record<string, unknown>)[key],
+      ) &&
+      (await this.prisma.knowledgeCredential.count({
+        where: { tenantId, parentCredentialId: credential.id },
+      }))
+    )
+      throw new ForbiddenException(
+        'Este equipamento tem acessos vinculados. Preserve seus dados de identificação ao editar o acesso.',
+      );
+    if (patch.accessMethod !== undefined) data.accessMethod = patch.accessMethod;
+    if (
+      credential.parentCredentialId &&
+      ['provider', 'equipmentName', 'equipmentType', 'environment'].some(
+        (key) =>
+          (patch as Record<string, unknown>)[key] !== undefined &&
+          (patch as Record<string, unknown>)[key] !== (credential as Record<string, unknown>)[key],
+      )
+    )
+      throw new ForbiddenException('Altere os dados do equipamento pelo acesso principal.');
     if (patch.provider !== undefined) data.provider = patch.provider.trim();
     if (patch.equipmentType !== undefined)
       data.equipmentType = patch.equipmentType.trim() || 'OUTROS';
@@ -572,28 +775,51 @@ export class KnowledgeService {
     if (patch.secret !== undefined && patch.secret.trim() !== '')
       data.secretEnc = encryptSecret(patch.secret);
     if (patch.notes !== undefined) data.notes = patch.notes ? patch.notes.trim() : null;
+    if (patch.accessEntries) {
+      const primary = patch.accessEntries[0];
+      data.host = primary?.host || '';
+      data.username = primary?.username || '';
+      data.accessMethod = primary?.method || 'SEM_ACESSO';
+      data.secretEnc = encryptSecret(primary?.secret || '');
+    }
 
-    const updated = await this.prisma.knowledgeCredential.update({
-      where: { id: credential.id },
-      data,
-      select: {
-        id: true,
-        provider: true,
-        equipmentType: true,
-        equipmentName: true,
-        environment: true,
-        host: true,
-        username: true,
-        notes: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-    });
+    const updated = await this.prisma.knowledgeCredential
+      .update({
+        where: {
+          id: credential.id,
+          ...(patch.expectedUpdatedAt ? { updatedAt: credential.updatedAt } : {}),
+        },
+        data,
+        select: {
+          id: true,
+          provider: true,
+          equipmentType: true,
+          equipmentName: true,
+          environment: true,
+          host: true,
+          username: true,
+          notes: true,
+          createdAt: true,
+          updatedAt: true,
+        },
+      })
+      .catch((error) => {
+        if (error?.code === 'P2025' && patch.expectedUpdatedAt)
+          throw new ConflictException(
+            'Este cadastro mudou durante a edição. Reabra a edição para consultar a versão atual.',
+          );
+        throw error;
+      });
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'knowledge_credential', updated.id, {
       op: 'update',
       provider: updated.provider,
       environment: updated.environment,
+      changeLabel: passwordChanged
+        ? 'Senha atualizada'
+        : data.totpSecretEnc !== undefined
+          ? 'Configuração 2FA atualizada'
+          : 'Cadastro editado',
     });
 
     return updated;
@@ -616,6 +842,12 @@ export class KnowledgeService {
       throw new NotFoundException('Credential not found.');
     }
 
+    if (
+      await this.prisma.knowledgeCredential.count({
+        where: { tenantId, parentCredentialId: credential.id },
+      })
+    )
+      throw new ForbiddenException('Remova os acessos adicionais antes de remover o principal.');
     await this.prisma.knowledgeCredential.delete({
       where: { id: credential.id },
     });
@@ -630,9 +862,7 @@ export class KnowledgeService {
   }
 
   async listNotes(authRole: string, authUserId: string, input: ListNotesInput) {
-    if (
-      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
-    ) {
+    if (!['super_admin', 'gerente', 'analista', 'cliente'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to read notes.');
     }
 
@@ -669,9 +899,7 @@ export class KnowledgeService {
   }
 
   async createNote(authRole: string, authUserId: string, input: CreateNoteInput) {
-    if (
-      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
-    ) {
+    if (!['super_admin', 'gerente', 'analista', 'cliente'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to create notes.');
     }
 
@@ -707,9 +935,7 @@ export class KnowledgeService {
     noteId: string,
     patch: UpdateNoteInput,
   ) {
-    if (
-      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
-    ) {
+    if (!['super_admin', 'gerente', 'analista', 'cliente'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to update notes.');
     }
 
@@ -754,9 +980,7 @@ export class KnowledgeService {
   }
 
   async deleteNote(authRole: string, authUserId: string, tenantId: string, noteId: string) {
-    if (
-      !['super_admin', 'gerente', 'analista', 'tecnico', 'cliente', 'leitura'].includes(authRole)
-    ) {
+    if (!['super_admin', 'gerente', 'analista', 'cliente'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to delete notes.');
     }
 

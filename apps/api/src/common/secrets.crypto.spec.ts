@@ -22,4 +22,8 @@ describe('secrets.crypto', () => {
   it('requires encryption key', () => {
     expect(() => encryptSecret('value')).toThrow('SECRETS_ENCRYPTION_KEY');
   });
+  it('supports an authenticated empty secret when the source did not provide a password', () => {
+    process.env.SECRETS_ENCRYPTION_KEY = 'strong-secret-key-for-tests';
+    expect(decryptSecret(encryptSecret(''))).toBe('');
+  });
 });

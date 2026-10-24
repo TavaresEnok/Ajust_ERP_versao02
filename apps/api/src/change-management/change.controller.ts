@@ -47,7 +47,7 @@ export class ChangeController {
   @Get()
   list(@Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'leitura']);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
     return this.changeService.list(req.auth.tenantId);
   }
 

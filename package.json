@@ -50,6 +50,8 @@
     "db:generate": "corepack pnpm exec prisma generate --schema prisma/schema.prisma",
     "db:migrate": "corepack pnpm exec prisma migrate dev --schema prisma/schema.prisma",
     "db:import:hub:pilot": "corepack pnpm exec node scripts/import-hub-real-pilot.cjs",
+    "db:import:sgp:pilot": "node --env-file=.env apps/api/node_modules/tsx/dist/cli.mjs scripts/import-sgp-meganet-pilot.ts",
+    "db:import:sgp:registry": "node --env-file=.env apps/api/node_modules/tsx/dist/cli.mjs scripts/import-sgp-registry.ts",
     "db:seed:roles": "corepack pnpm --filter @ajust/shared db:seed:roles",
     "db:seed:dev-admin": "corepack pnpm --filter @ajust/shared db:seed:dev-admin",
     "db:seed:demo-users": "corepack pnpm --filter @ajust/shared db:seed:demo-users",

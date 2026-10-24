@@ -27,7 +27,7 @@ export function CommunicationsWorkspace({ kind }: { kind: 'notifications' | 'int
             title="Preparar envio de ordem"
             description="Confira o destinatário e o conteúdo antes de solicitar o envio real."
             path="/notifications/whatsapp/dispatch-order"
-            roles={[...managers, 'analista', 'tecnico']}
+            roles={[...managers, 'analista']}
             fields={[
               { name: 'orderId', label: 'UUID da ordem', type: 'uuid', required: true },
               { name: 'target', label: 'Destino opcional' },

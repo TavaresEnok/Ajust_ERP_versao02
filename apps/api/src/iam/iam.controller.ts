@@ -22,7 +22,7 @@ import { FileInterceptor } from '@nestjs/platform-express';
 import { Priority, ServiceOrderType, UserStatus } from '@prisma/client';
 import { z } from 'zod';
 import type { Express, Response } from 'express';
-import { assertAnyRole, assertManagerRole } from '../common/role-utils';
+import { ACTIVE_ROLES, assertAnyRole, assertManagerRole } from '../common/role-utils';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
@@ -66,7 +66,7 @@ const CreateUserSchema = z.object({
   email: z.string().email(),
   password: z.string().min(8),
   tenantId: z.string().uuid(),
-  roleCode: z.string().min(2),
+  roleCode: z.enum(ACTIVE_ROLES),
   sector: UserSectorSchema.optional(),
 });
 
@@ -94,7 +94,7 @@ const UpdateUserSchema = z
     email: z.string().email().optional(),
     password: z.string().min(8).optional(),
     status: z.nativeEnum(UserStatus).optional(),
-    roleCode: z.string().min(2).optional(),
+    roleCode: z.enum(ACTIVE_ROLES).optional(),
     sector: UserSectorSchema.optional(),
   })
   .refine(
@@ -110,8 +110,8 @@ const UpdateUserSchema = z
     },
   );
 
-const MANAGER_ASSIGNABLE_ROLES = new Set(['gerente', 'analista', 'tecnico', 'cliente', 'leitura']);
-const CLIENT_ASSIGNABLE_ROLES = new Set(['cliente', 'leitura']);
+const MANAGER_ASSIGNABLE_ROLES = new Set(['gerente', 'analista', 'cliente']);
+const CLIENT_ASSIGNABLE_ROLES = new Set(['cliente']);
 
 const SlaPolicySchema = z
   .object({
@@ -300,14 +300,7 @@ export class IamController {
     @Req() req: RequestWithAuth,
     @Res() res: Response,
   ) {
-    assertAnyRole(req.auth, [
-      'super_admin',
-      'gerente',
-      'analista',
-      'tecnico',
-      'cliente',
-      'leitura',
-    ]);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'cliente']);
     this.assertTenantScope(req, tenantId);
     const logo = await this.iamService.readTenantLogo(tenantId);
     if (!logo) {
@@ -333,16 +326,30 @@ export class IamController {
     return this.iamService.saveTenantLogo(req.auth!.userId, tenantId, file);
   }
 
+  @Get('tenants/:tenantId/order-origins')
+  async listOrderOrigins(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
+    this.assertTenantScope(req, tenantId);
+    return this.iamService.listOrderOrigins(tenantId);
+  }
+
+  @Patch('tenants/:tenantId/order-origins')
+  async saveOrderOrigins(
+    @Param('tenantId') tenantId: string,
+    @Req() req: RequestWithAuth,
+    @Body() body: unknown,
+  ) {
+    assertAnyRole(req.auth, ['super_admin', 'gerente']);
+    this.assertTenantScope(req, tenantId);
+    const input = z
+      .object({ names: z.array(z.string().trim().min(2).max(64)).max(200) })
+      .parse(body);
+    return this.iamService.saveOrderOrigins(tenantId, input.names);
+  }
+
   @Get('tenants/:tenantId/sectors')
   async listTenantSectors(@Param('tenantId') tenantId: string, @Req() req: RequestWithAuth) {
-    assertAnyRole(req.auth, [
-      'super_admin',
-      'gerente',
-      'analista',
-      'tecnico',
-      'cliente',
-      'leitura',
-    ]);
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista', 'cliente']);
     this.assertTenantScope(req, tenantId);
     return this.iamService.listTenantSectors(tenantId);
   }

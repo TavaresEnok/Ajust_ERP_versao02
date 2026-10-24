@@ -39,6 +39,9 @@ export function TenantAdministration({
   const tenant = tenants.data?.find((item) => item.id === tenantId);
   const roles = useErpQuery<ErpRecord[]>('/iam/roles');
   const sectors = useErpQuery<ErpRecord[]>(tenantId ? `/iam/tenants/${tenantId}/sectors` : null);
+  const origins = useErpQuery<ErpRecord[]>(
+    tenantId ? `/iam/tenants/${tenantId}/order-origins` : null,
+  );
   const action = useErpAction();
   const [sector, setSector] = useState<ErpRecord | null>(null);
   const [sectorOpen, setSectorOpen] = useState(false);
@@ -63,13 +66,53 @@ export function TenantAdministration({
       <Tabs defaultValue={initialTab} className="gap-5">
         <div className={embedded ? 'hidden' : 'overflow-x-auto'}>
           <TabsList variant="line">
-            {['Empresa', 'Identidade visual', 'Setores', 'Funções e permissões'].map((tab) => (
+            {[
+              'Empresa',
+              'Identidade visual',
+              'Setores',
+              'Origens de O.S.',
+              'Funções e permissões',
+            ].map((tab) => (
               <TabsTrigger key={tab} value={tab}>
                 {tab}
               </TabsTrigger>
             ))}
           </TabsList>
         </div>
+        <TabsContent value="Origens de O.S.">
+          <section className="panel p-6">
+            <h2 className="section-title mb-5">Origens de O.S.</h2>
+            <QueryState
+              loading={origins.isLoading}
+              error={origins.error}
+              onRetry={() => void origins.mutate()}
+            />
+            <ContractForm
+              key={JSON.stringify(origins.data)}
+              fields={[
+                {
+                  name: 'names',
+                  label: 'Origens disponíveis',
+                  type: 'list',
+                  hint: 'Separe os nomes por vírgula. Somente a gestão pode alterar este cadastro.',
+                },
+              ]}
+              values={{ names: origins.data?.map((o) => o.name) || [] }}
+              connected={action.connected && manager && !!origins.data}
+              pending={action.pending}
+              label="Salvar origens"
+              onSubmit={async (values) => {
+                await action.execute({
+                  path: `/iam/tenants/${tenantId}/order-origins`,
+                  method: 'PATCH',
+                  body: { names: values.names || [] },
+                });
+                await origins.mutate();
+                toast.success('Origens atualizadas');
+              }}
+            />
+          </section>
+        </TabsContent>
         <TabsContent value="Empresa">
           <section className="panel p-6">
             <h2 className="section-title mb-5">Cadastro e contato técnico</h2>

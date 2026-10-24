@@ -3,7 +3,7 @@ import type { FieldSpec } from './fields';
 import { orderTypes, priorities, type RoleCode } from './contracts';
 const managers: RoleCode[] = ['super_admin', 'gerente'];
 const operators: RoleCode[] = [...managers, 'analista'];
-const staff: RoleCode[] = [...operators, 'tecnico'];
+const staff: RoleCode[] = [...operators];
 const articleFields: FieldSpec[] = [
   { name: 'title', label: 'Título', required: true, min: 3 },
   {
@@ -18,21 +18,49 @@ const articleFields: FieldSpec[] = [
   { name: 'isPublished', label: 'Publicar artigo', type: 'checkbox' },
 ];
 const credentialFields: FieldSpec[] = [
+  {
+    name: 'accessMethod',
+    label: 'Forma de acesso',
+    options: {
+      WEB: 'Web',
+      SSH: 'SSH',
+      WINBOX: 'Winbox',
+      RDP: 'Área de trabalho remota',
+      TELNET: 'Telnet',
+      ANYDESK: 'AnyDesk',
+      BANCO: 'Banco de dados',
+      SEM_ACESSO: 'Informação técnica (sem login)',
+      OUTROS: 'Outro / não informado',
+    },
+    defaultValue: 'OUTROS',
+  },
   { name: 'provider', label: 'Provedor', min: 2, required: true },
-  { name: 'equipmentType', label: 'Tipo de equipamento', min: 2 },
-  { name: 'equipmentName', label: 'Nome do equipamento', min: 1 },
+  { name: 'equipmentType', label: 'Categoria (equipamento, sistema ou rede)', min: 2 },
+  { name: 'equipmentName', label: 'Nome do equipamento / informação', min: 1 },
   { name: 'environment', label: 'Ambiente', min: 2, required: true },
-  { name: 'host', label: 'Host / endereço', min: 2, required: true },
-  { name: 'username', label: 'Usuário', min: 2, required: true },
+  { name: 'host', label: 'Host / endereço' },
+  { name: 'username', label: 'Usuário' },
   {
     name: 'secret',
     label: 'Segredo',
     type: 'password',
-    required: true,
-    min: 1,
-    hint: 'Nunca incluído em listagens ou no cache. Em prévia, use apenas valores de exemplo.',
+    hint: 'Opcional para informações de rede. Não aparece nas listagens.',
   },
-  { name: 'notes', label: 'Observações', type: 'textarea' },
+  {
+    name: 'notes',
+    label: 'Orientações, tutorial e particularidades',
+    type: 'textarea',
+    max: 50000,
+    hint: 'Descreva passos, comandos, VPN e cuidados. Senhas devem ficar no campo protegido.',
+  },
+  {
+    name: 'totpSecret',
+    label: 'Chave 2FA / TOTP',
+    type: 'password',
+    max: 2048,
+    hint: 'Chave secreta Base32 ou URL otpauth://totp. Deixe vazio para manter a chave atual. Não informe o código de 6 dígitos.',
+  },
+  { name: 'removeTotp', label: 'Remover configuração 2FA deste cadastro', type: 'checkbox' },
 ];
 export const additionalModules: Record<string, ResourceDefinition> = {
   slaPolicies: {
@@ -96,7 +124,7 @@ export const additionalModules: Record<string, ResourceDefinition> = {
     createLabel: 'Novo artigo',
     update: true,
     remove: true,
-    roles: [...staff, 'leitura'],
+    roles: [...staff],
     createRoles: operators,
     search: true,
     filters: [
@@ -126,7 +154,7 @@ export const additionalModules: Record<string, ResourceDefinition> = {
     update: true,
     remove: true,
     roles: staff,
-    createRoles: managers,
+    createRoles: operators,
     updateRoles: operators,
     removeRoles: operators,
     search: true,
@@ -335,9 +363,9 @@ export const additionalModules: Record<string, ResourceDefinition> = {
   },
   catalog: {
     title: 'Catálogo de serviços',
-    description: 'Serviços, prioridade padrão, estimativa e checklist de atendimento.',
+    description: 'Serviços, fluxo aplicado, prioridade padrão e checklist de atendimento.',
     endpoint: '/service-catalog',
-    roles: [...operators, 'cliente', 'leitura'],
+    roles: [...operators, 'cliente'],
     createRoles: managers,
     createLabel: 'Novo serviço',
     update: true,
@@ -346,6 +374,16 @@ export const additionalModules: Record<string, ResourceDefinition> = {
     fields: [
       { name: 'name', label: 'Nome', min: 3, max: 120, required: true },
       { name: 'category', label: 'Categoria', options: orderTypes },
+      {
+        name: 'workflowTemplateCode',
+        label: 'Fluxo de atendimento',
+        options: {
+          AJUST_SIMPLES: 'Atendimento simples',
+          AJUST_EQUIPAMENTO: 'Equipamento + monitoramento, backup e diagrama',
+          AJUST_TOPOLOGIA: 'Topologia + monitoramento e diagrama',
+          AJUST_MUDANCA: 'Preparação e execução agendada',
+        },
+      },
       { name: 'description', label: 'Descrição', type: 'textarea', max: 500 },
       {
         name: 'estimatedMinutes',

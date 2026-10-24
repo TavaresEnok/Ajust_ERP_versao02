@@ -10,6 +10,9 @@ import { toast } from 'sonner';
 import { PageHeading } from './primitives';
 import { OperationControl } from './operation-controls';
 const ResourcePage = dynamic(() => import('./resource-page').then((m) => m.ResourcePage));
+const CustomerDirectory = dynamic(() =>
+  import('./customer-directory').then((m) => m.CustomerDirectory),
+);
 const RecordWorkspace = dynamic(() => import('./record-workspace').then((m) => m.RecordWorkspace));
 const KnowledgeWorkspace = dynamic(() =>
   import('./knowledge-workspace').then((m) => m.KnowledgeWorkspace),
@@ -82,7 +85,7 @@ function OrderEntry({ base }: { base: string }) {
           fields={modules.orders.fields}
           connected={
             action.connected &&
-            (!scope || ['super_admin', 'gerente', 'analista', 'tecnico'].includes(scope.role))
+            (!scope || ['super_admin', 'gerente', 'analista'].includes(scope.role))
           }
           pending={action.pending}
           label="Criar ordem no ERP"
@@ -161,7 +164,8 @@ export function OperationalRouter({
         }
       />
     );
-  if (section === 'empresas' || section === 'provedores')
+  if (section === 'provedores') return <CustomerDirectory id={id} />;
+  if (section === 'empresas')
     return (
       <>
         <ResourcePage moduleKey="tenants" />

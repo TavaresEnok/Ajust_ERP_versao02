@@ -52,7 +52,9 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         this.logger.warn(`Redis connection warning in SlaMonitoringService: ${err.message}`);
       });
     } catch (err) {
-      this.logger.warn(`Failed to initialize Redis client for SLA monitoring: ${(err as Error).message}`);
+      this.logger.warn(
+        `Failed to initialize Redis client for SLA monitoring: ${(err as Error).message}`,
+      );
       this.redisClient = null;
     }
   }
@@ -86,6 +88,8 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
 
     const openOrders = await this.prisma.serviceOrder.findMany({
       where: {
+        slaEligible: true,
+        pausedAt: null,
         deletedAt: null,
         status: { in: ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS'] },
       },
@@ -135,13 +139,22 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
           continue;
         }
 
-        const shouldAlert = await this.checkAndSetIdempotency(order.tenantId, order.id, primaryThreshold);
+        const shouldAlert = await this.checkAndSetIdempotency(
+          order.tenantId,
+          order.id,
+          primaryThreshold,
+        );
         if (!shouldAlert) {
           continue;
         }
 
         // Mark any lower threshold as bypassed so it never triggers backwards
-        await this.markBypassedThresholds(order.tenantId, order.id, primaryThreshold, order.deadlineAt);
+        await this.markBypassedThresholds(
+          order.tenantId,
+          order.id,
+          primaryThreshold,
+          order.deadlineAt,
+        );
 
         // Record persistent SLA audit event
         await this.prisma.slaAuditEvent.create({
@@ -168,7 +181,10 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         }
 
         // Dispatch notifications via configured channels
-        const delayMinutes = Math.max(0, Math.round((now.getTime() - order.deadlineAt.getTime()) / 60000));
+        const delayMinutes = Math.max(
+          0,
+          Math.round((now.getTime() - order.deadlineAt.getTime()) / 60000),
+        );
         await this.dispatchNotifications(order, primaryThreshold, percentElapsed, delayMinutes);
 
         result.alertsSent++;
@@ -190,7 +206,11 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
    * 2. Postgres SlaAuditEvent check
    * Returns true if the alert should be sent, false if already alerted.
    */
-  async checkAndSetIdempotency(tenantId: string, orderId: string, threshold: SlaThreshold): Promise<boolean> {
+  async checkAndSetIdempotency(
+    tenantId: string,
+    orderId: string,
+    threshold: SlaThreshold,
+  ): Promise<boolean> {
     const redisKey = `sla:alert:${orderId}:${threshold}`;
 
     // 1. Check Redis if available
@@ -276,7 +296,10 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
     }
   }
 
-  private async recordSlaBreachEvent(order: { id: string; tenantId: string; deadlineAt: Date; status: any }, now: Date) {
+  private async recordSlaBreachEvent(
+    order: { id: string; tenantId: string; deadlineAt: Date; status: any },
+    now: Date,
+  ) {
     const existing = await this.prisma.slaEvent.findFirst({
       where: {
         serviceOrderId: order.id,
@@ -285,7 +308,10 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
     });
 
     if (!existing) {
-      const delayMinutes = Math.max(0, Math.round((now.getTime() - order.deadlineAt.getTime()) / 60000));
+      const delayMinutes = Math.max(
+        0,
+        Math.round((now.getTime() - order.deadlineAt.getTime()) / 60000),
+      );
       await this.prisma.slaEvent.create({
         data: {
           tenantId: order.tenantId,
@@ -373,7 +399,9 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
               `*Título:* ${order.title}\n` +
               `*Prioridade:* ${order.priority}\n` +
               `*Prazo Limite:* ${order.deadlineAt.toLocaleString('pt-BR')}\n` +
-              (threshold === 'BREACHED' ? `*Atraso:* ${delayMinutes} minutos\n` : `*Decorrido:* ${Math.round(percentElapsed)}%\n`);
+              (threshold === 'BREACHED'
+                ? `*Atraso:* ${delayMinutes} minutos\n`
+                : `*Decorrido:* ${Math.round(percentElapsed)}%\n`);
 
             const waBody = JSON.stringify({
               number: cfg.target,
@@ -412,7 +440,9 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         }
       }
     } catch (err) {
-      this.logger.error(`Error in dispatchNotifications for order ${order.id}: ${(err as Error).message}`);
+      this.logger.error(
+        `Error in dispatchNotifications for order ${order.id}: ${(err as Error).message}`,
+      );
     }
   }
 }

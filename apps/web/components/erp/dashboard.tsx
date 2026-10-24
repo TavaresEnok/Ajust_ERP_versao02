@@ -24,17 +24,41 @@ import {
   CirclePlus,
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import { OperationalAlerts } from './operational-alerts';
 import { useOrders, exportCsv } from '@/lib/demo-store';
 import { PageHeading, Metric, PanelHeading, ViewLink, Avatar } from './primitives';
-import { Sparkline, VolumeChart, StatusChart, useStatusData } from './dashboard-charts';
+import { VolumeChart, StatusChart, useStatusData } from './dashboard-charts';
 import { OrdersTable } from './orders';
+import { ProviderOperationsPanel } from './provider-operations-panel';
 import { OrderForm } from './order-form';
 import { cn } from '@/lib/utils';
+import { WorkFocus } from './work-focus';
+import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
+import { visualRecord } from '@/lib/erp/visual-data';
+import type { Order } from '@/lib/demo-data';
 export function Dashboard({ analyst = false }: { analyst?: boolean }) {
+  return (
+    <>
+      <DashboardHistory analyst={analyst} />
+      <details className="panel mt-6 p-5">
+        <summary className="cursor-pointer text-sm font-semibold">
+          Fila operacional · pausadas, agendadas e prioridades
+        </summary>
+        <div className="mt-5">
+          <WorkFocus analyst={analyst} />
+        </div>
+      </details>
+    </>
+  );
+}
+function DashboardHistory({ analyst = false }: { analyst?: boolean }) {
   const portalBase = useRouteBase();
   const [period, setPeriod] = useState('month');
   const [tab, setTab] = useState('recent');
-  const { orders } = useOrders();
+  const allOrders = useOperationalOrders('operation');
+  const orders = (allOrders.data || []).map((row) =>
+    visualRecord('orders', row),
+  ) as unknown as Order[];
   const [orderOpen, setOrderOpen] = useState(false);
   const { scope } = useErp();
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
@@ -45,17 +69,11 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
   const me = useErpQuery<{ user?: { name?: string }; name?: string }>('/auth/me');
   const agenda = useErpQuery<unknown>(manager ? '/dashboards/agenda-overview' : '/calendar/events');
   const activity = useErpQuery<unknown>(manager ? '/audit/logs?page=1&limit=3' : null);
-  const providerSource = useVisualSource('providers');
-  const providers = providerSource.rows.map((row) => ({
-    id: row.id,
-    name: String(row.name),
-    initials: String(row.initials),
-    sla: row.sla === '—' ? null : Number(row.sla),
-  }));
-  const orderSource = useVisualSource('orders');
+  const orderSource = { raw: allOrders.data || [] };
   const statusData = useStatusData();
   const overview = kpi.data?.overview;
   const activities = listRecords(activity.data).map((row) => ({
+    id: row.id,
     subject: String(row.resourceId || row.id),
     name: String(row.actorUserId || 'ERP'),
     action: String(row.action || ''),
@@ -66,6 +84,7 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
         : `${portalBase}/auditoria`,
   }));
   const events = listRecords(agenda.data).map((row) => ({
+    id: `${row.source || 'calendar'}:${row.id}`,
     hour: new Date(String(row.startAt || row.start)).toLocaleTimeString('pt-BR', {
       hour: '2-digit',
       minute: '2-digit',
@@ -113,9 +132,15 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
         </select>
         <Button onClick={() => setOrderOpen(true)}>
           <Plus data-icon="inline-start" />
-          Nova ordem de serviço
+          Novo atendimento
         </Button>
       </PageHeading>
+      {manager && <OperationalAlerts />}
+      <QueryState
+        loading={allOrders.isLoading}
+        error={allOrders.error}
+        onRetry={() => void allOrders.mutate()}
+      />
       <div className="mb-6 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/10 bg-secondary/60 px-4 py-3">
         <div className="flex items-center gap-2.5">
           <span className="flex size-7 items-center justify-center rounded-full bg-primary/10 text-primary">
@@ -139,37 +164,29 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
           value={String(overview?.totalOpen ?? '—')}
           icon={ClipboardList}
           change="ERP"
-          foot="no período consultado"
-        >
-          <Sparkline />
-        </Metric>
+          foot="entre as criadas no período"
+        ></Metric>
         <Metric
-          label="Concluídas no período"
+          label="Concluídas do recorte"
           value={String(overview?.totalClosed ?? '—')}
           icon={CheckCircle2}
           change="ERP"
-          foot="no período consultado"
-        >
-          <Sparkline variant={1} />
-        </Metric>
+          foot="entre as criadas no período"
+        ></Metric>
         <Metric
           label="Tempo médio de resolução"
-          value={overview?.tmrHours !== undefined ? `${overview.tmrHours} h` : '—'}
+          value={overview?.tmrHours != null ? `${overview.tmrHours} h` : 'Sem base'}
           icon={Clock3}
           change="ERP"
-          foot="média retornada pelo servidor"
-        >
-          <Sparkline variant={2} />
-        </Metric>
+          foot={`${overview?.measuredClosed ?? 0} conclusões com datas válidas`}
+        ></Metric>
         <Metric
           label="Cumprimento de SLA"
-          value={overview?.slaPercentage !== undefined ? `${overview.slaPercentage}%` : '—'}
+          value={overview?.slaPercentage != null ? `${overview.slaPercentage}%` : 'Sem base'}
           icon={Timer}
           change="ERP"
-          foot="indicador retornado pelo servidor"
-        >
-          <Sparkline variant={3} />
-        </Metric>
+          foot={`${overview?.slaEvaluated ?? 0} conclusões elegíveis com prazo`}
+        ></Metric>
       </div>
       <div className="dashboard-mid mb-6 grid grid-cols-[minmax(0,1.9fr)_minmax(260px,1fr)] gap-5">
         <section className="panel">
@@ -297,7 +314,7 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
               <ErpEmpty connected={agenda.connected} />
             )}
             {events.slice(0, 5).map((e, i) => (
-              <Link key={e.name} href={portalBase + '/agenda'} className="flex gap-3">
+              <Link key={e.id} href={portalBase + '/agenda'} className="flex gap-3">
                 <div className="w-9 shrink-0 text-[10px]">
                   <p className="font-medium">{e.hour}</p>
                   <p className="mt-1 text-[9px] text-muted-foreground">{e.end}</p>
@@ -331,7 +348,7 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
             {activities.slice(0, 3).map((a, i) => {
               const Icon = i === 0 ? CheckCircle2 : i === 1 ? UserRound : CirclePlus;
               return (
-                <div key={a.subject} className="flex items-center gap-3">
+                <div key={a.id} className="flex items-center gap-3">
                   <span className="activity-dot">
                     <Icon />
                   </span>
@@ -350,31 +367,7 @@ export function Dashboard({ analyst = false }: { analyst?: boolean }) {
             })}
           </div>
         </section>
-        <section className="panel">
-          <PanelHeading title="Performance dos provedores">
-            <ViewLink href={portalBase + '/provedores'}>Ver provedores</ViewLink>
-          </PanelHeading>
-          <div className="flex flex-col gap-4 px-5 pb-5">
-            {providers.slice(0, 3).map((p) => (
-              <Link
-                href={portalBase + '/provedores/' + p.id}
-                key={p.id}
-                className="flex items-center gap-3"
-              >
-                <span className="flex size-7 shrink-0 items-center justify-center rounded-lg bg-secondary text-[9px] font-medium text-primary">
-                  {p.initials}
-                </span>
-                <span className="w-28 text-[10px]">{p.name}</span>
-                <div className="progress-track flex-1">
-                  <span style={{ width: `${p.sla ?? 0}%` }} />
-                </div>
-                <span className="w-9 text-right text-[10px] font-medium">
-                  {p.sla === null ? '—' : `${p.sla.toLocaleString('pt-BR')}%`}
-                </span>
-              </Link>
-            ))}
-          </div>
-        </section>
+        {manager && <ProviderOperationsPanel daysBack={daysBack} compact />}
       </div>
       <OrderForm open={orderOpen} onOpenChange={setOrderOpen} />
     </>

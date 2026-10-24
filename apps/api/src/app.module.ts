@@ -1,4 +1,5 @@
 import { AuditInterceptor } from './audit/audit.interceptor';
+import { ShiftReportsModule } from './shift-reports/shift-reports.controller';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
@@ -30,10 +31,14 @@ import { ServiceCatalogModule } from './service-catalog/service-catalog.module';
 import { SecretsValidationService } from './config/secrets-validation.service';
 import { ObservabilityInterceptor } from './monitoring/observability.interceptor';
 import { WebhookController } from './integrations/webhook.controller';
+import { ServiceProcessesModule } from './service-processes/service-processes.module';
+import { CustomersModule } from './customers/customers.controller';
+import { CustomerPortalModule } from './customers/customer-portal.controller';
 
 @Module({
   imports: [
     PrismaModule,
+    ShiftReportsModule,
     CommonModule,
     RealtimeModule,
     AuthModule,
@@ -58,6 +63,9 @@ import { WebhookController } from './integrations/webhook.controller';
     AuditModule,
     OsProcessTemplatesModule,
     ServiceCatalogModule,
+    ServiceProcessesModule,
+    CustomersModule,
+    CustomerPortalModule,
   ],
   controllers: [AppController, WebhookController],
   providers: [

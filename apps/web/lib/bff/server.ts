@@ -43,6 +43,7 @@ export type ApiMeResponse = {
   name: string;
   email: string;
   twoFactorEnabled?: boolean;
+  customerId?: string | null;
   tenant: { id: string; tradeName: string; role: string } | null;
 };
 
@@ -52,11 +53,12 @@ export type CookieWriter = {
   set(name: string, value: string, options: Record<string, unknown>): unknown;
 };
 
-export const ACCESS_COOKIE = 'erp_access_token';
-export const REFRESH_COOKIE = 'erp_refresh_token';
-export const SESSION_COOKIE = 'erp_session_id';
-export const ROLE_COOKIE = 'erp_role';
-export const TENANT_COOKIE = 'erp_tenant_id';
+// Cookies are shared across ports. The historical ERP on 8071 must not replace live sessions.
+export const ACCESS_COOKIE = 'ajust_live_access_token';
+export const REFRESH_COOKIE = 'ajust_live_refresh_token';
+export const SESSION_COOKIE = 'ajust_live_session_id';
+export const ROLE_COOKIE = 'ajust_live_role';
+export const TENANT_COOKIE = 'ajust_live_tenant_id';
 const AUTH_COOKIES = [ACCESS_COOKIE, REFRESH_COOKIE, SESSION_COOKIE, ROLE_COOKIE, TENANT_COOKIE];
 
 const ACCESS_MAX_AGE = 15 * 60;
@@ -66,8 +68,6 @@ export const ROLE_HOME: Record<string, '/gerencia' | '/analista' | '/cliente'> =
   super_admin: '/gerencia',
   gerente: '/gerencia',
   analista: '/analista',
-  tecnico: '/analista',
-  leitura: '/cliente',
   cliente: '/cliente',
 };
 
@@ -124,16 +124,22 @@ export function jwtIsLikelyValid(token: string | undefined): token is string {
   }
 }
 
+export class BackendUnavailableError extends Error {
+  constructor() {
+    super('O ERP está temporariamente indisponível. Sua sessão foi preservada.');
+  }
+}
 export async function fetchMe(accessToken: string): Promise<ApiMeResponse | null> {
   try {
     const response = await fetch(`${apiBaseUrl()}/auth/me`, {
       headers: { authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     });
+    if (response.status >= 500) throw new BackendUnavailableError();
     if (!response.ok) return null;
     return (await response.json()) as ApiMeResponse;
   } catch {
-    return null;
+    throw new BackendUnavailableError();
   }
 }
 
@@ -154,10 +160,11 @@ export function refreshSession(refreshToken: string): Promise<RefreshApiResponse
         body: JSON.stringify({ refreshToken }),
         cache: 'no-store',
       });
+      if (response.status >= 500) throw new BackendUnavailableError();
       if (!response.ok) return null;
       return (await response.json()) as RefreshApiResponse;
     } catch {
-      return null;
+      throw new BackendUnavailableError();
     }
   })();
   inflightRefresh.set(refreshToken, promise);

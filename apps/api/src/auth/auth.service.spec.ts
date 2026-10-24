@@ -187,6 +187,27 @@ describe('AuthService', () => {
 
       await expect(service.login(loginInput)).rejects.toThrow(UnauthorizedException);
     });
+    it('allows explicitly admin-provisioned customer onboarding only with a valid password', async () => {
+      const customer = makeUser({
+        lastLoginAt: null,
+        sourceMetadata: { accessProvisioning: { method: 'ADMIN_PROVISIONED' } },
+        tenants: [
+          {
+            tenantId: 'tenant-1',
+            customerId: 'meganet',
+            role: { code: 'cliente' },
+            tenant: { id: 'tenant-1', status: 'ACTIVE', deletedAt: null },
+          },
+        ],
+      });
+      mockPrisma.user.findUnique.mockResolvedValue(customer);
+      mockCompare.mockResolvedValue(false);
+      await expect(service.login(loginInput)).rejects.toThrow('Invalid credentials.');
+      expect(mockPrisma.session.create).not.toHaveBeenCalled();
+      mockCompare.mockResolvedValue(true);
+      mockSign.mockReturnValue('token');
+      expect((await service.login(loginInput)).user.role).toBe('cliente');
+    });
 
     it('Login with non-existent user throws UnauthorizedException', async () => {
       mockPrisma.user.findUnique.mockResolvedValue(null);
@@ -595,4 +616,3 @@ describe('AuthService', () => {
     });
   });
 });
-

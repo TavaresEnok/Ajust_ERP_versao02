@@ -1,10 +1,15 @@
-import { ForbiddenException, NotFoundException } from '@nestjs/common';
+import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { KnowledgeService } from './knowledge.service';
-import { decryptSecret, encryptSecret } from '../common/secrets.crypto';
+import { packVaultContent, unpackVaultContent } from '../common/vault-content';
+import {
+  decryptVaultSecret as decryptSecret,
+  encryptVaultSecret as encryptSecret,
+} from '../common/vault.crypto';
 
-jest.mock('../common/secrets.crypto', () => ({
-  encryptSecret: jest.fn((value: string) => `encrypted:${value}`),
-  decryptSecret: jest.fn((value: string) => value.replace('encrypted:', '')),
+jest.mock('../common/vault.crypto', () => ({
+  encryptVaultSecret: jest.fn((value: string) => `encrypted:${value}`),
+  decryptVaultSecret: jest.fn((value: string) => value.replace('encrypted:', '')),
+  vaultSourceNoteText: jest.fn((value: string) => value.replace('encrypted:', '')),
 }));
 
 const now = new Date('2026-06-05T12:00:00.000Z');
@@ -92,6 +97,114 @@ describe('KnowledgeService', () => {
     audit = { log: jest.fn().mockResolvedValue(undefined) };
     service = new KnowledgeService(prisma, audit);
     jest.clearAllMocks();
+  });
+
+  it('rejects a stale vault editor without overwriting another edit', async () => {
+    await expect(
+      service.updateCredential('analista', 'user-1', 'tenant-1', 'credential-1', {
+        notes: 'draft',
+        expectedUpdatedAt: '2020-01-01T00:00:00.000Z',
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+    expect(prisma.knowledgeCredential.update).not.toHaveBeenCalled();
+    prisma.knowledgeCredential.update.mockRejectedValueOnce({ code: 'P2025' });
+    await expect(
+      service.updateCredential('analista', 'user-1', 'tenant-1', 'credential-1', {
+        notes: 'draft',
+        expectedUpdatedAt: now.toISOString(),
+      }),
+    ).rejects.toBeInstanceOf(ConflictException);
+  });
+
+  it('preserves reference text when editing structured accounts and synchronizes the principal access', async () => {
+    const entry = {
+      label: 'Administração',
+      method: 'SSH' as const,
+      host: '192.0.2.1',
+      port: 2222,
+      context: 'VPN',
+      username: 'admin',
+      secret: 'example',
+      notes: '',
+    };
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(
+      credential({
+        protectedContentEnc: 'encrypted:' + packVaultContent('original preservado', []),
+      }),
+    );
+    await service.updateCredential('analista', 'user-1', 'tenant-1', 'credential-1', {
+      accessEntries: [entry],
+    });
+    const data = prisma.knowledgeCredential.update.mock.calls[0][0].data;
+    expect(data.host).toBe('192.0.2.1');
+    expect(data.username).toBe('admin');
+    expect(data.secretEnc).toBe('encrypted:example');
+    expect(unpackVaultContent(data.protectedContentEnc.replace('encrypted:', ''))).toEqual({
+      text: 'original preservado',
+      accessEntries: [entry],
+    });
+  });
+
+  it('returns only safe, tenant-scoped credential history to internal staff', async () => {
+    prisma.auditLog = {
+      findMany: jest
+        .fn()
+        .mockResolvedValue([
+          {
+            id: 'event-1',
+            createdAt: now,
+            actorUser: { name: 'Anderson' },
+            metadata: { op: 'update', secret: 'must-not-return' },
+          },
+        ]),
+    };
+    const result = await service.credentialHistory('analista', 'tenant-1', 'credential-1');
+    expect(result).toEqual([
+      { id: 'event-1', createdAt: now, actor: 'Anderson', operation: 'update' },
+    ]);
+    expect(prisma.auditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: {
+          tenantId: 'tenant-1',
+          resourceType: 'knowledge_credential',
+          resourceId: 'credential-1',
+        },
+        take: 100,
+      }),
+    );
+    await expect(
+      service.credentialHistory('cliente', 'tenant-1', 'credential-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    prisma.knowledgeCredential.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.credentialHistory('analista', 'other-tenant', 'credential-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('generates TOTP only for an authorized tenant-owned record and audits it', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(
+      credential({ totpSecretEnc: 'encrypted:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' }),
+    );
+    const result = await service.credentialTotp('analista', 'user-1', 'tenant-1', 'credential-1');
+    expect(result.code).toMatch(/^\d{6}$/);
+    expect(result).not.toHaveProperty('secret');
+    expect(audit.log).toHaveBeenCalled();
+    await expect(
+      service.credentialTotp('cliente', 'user-1', 'tenant-1', 'credential-1'),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+    prisma.knowledgeCredential.findFirst.mockResolvedValueOnce(null);
+    await expect(
+      service.credentialTotp('analista', 'user-1', 'other-tenant', 'credential-1'),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('never returns the encrypted TOTP seed in credential lists', async () => {
+    prisma.knowledgeCredential.findMany.mockResolvedValue([
+      credential({ totpSecretEnc: 'encrypted:private-seed' }),
+    ]);
+    const result = await service.listCredentials('analista', 'user-1', { tenantId: 'tenant-1' });
+    expect(result.items[0]).toHaveProperty('hasTotp', true);
+    expect(result.items[0]).not.toHaveProperty('totpSecretEnc');
   });
 
   it('lists only published articles for non-manager roles with tenant/search/tag filters', async () => {
@@ -194,7 +307,7 @@ describe('KnowledgeService', () => {
   });
 
   it('lists credentials without secret and audits access', async () => {
-    const result = await service.listCredentials('tecnico', 'user-1', {
+    const result = await service.listCredentials('analista', 'user-1', {
       tenantId: 'tenant-1',
       search: 'IXC',
       provider: 'IXC',
@@ -266,7 +379,7 @@ describe('KnowledgeService', () => {
   });
 
   it('reveals and audits tenant-owned credential secrets', async () => {
-    const result = await service.revealCredential('tecnico', 'user-1', 'tenant-1', 'credential-1');
+    const result = await service.revealCredential('analista', 'user-1', 'tenant-1', 'credential-1');
 
     expect(decryptSecret).toHaveBeenCalledWith('encrypted:strong-secret');
     expect(result.secret).toBe('strong-secret');
@@ -276,10 +389,10 @@ describe('KnowledgeService', () => {
   it('rejects missing credentials and unauthorized credential mutations', async () => {
     prisma.knowledgeCredential.findFirst.mockResolvedValue(null);
     await expect(
-      service.revealCredential('tecnico', 'user-1', 'tenant-1', 'missing'),
+      service.revealCredential('analista', 'user-1', 'tenant-1', 'missing'),
     ).rejects.toBeInstanceOf(NotFoundException);
     await expect(
-      service.createCredential('analista', 'user-1', {
+      service.createCredential('cliente', 'user-1', {
         tenantId: 'tenant-1',
         provider: 'x',
         environment: 'x',
@@ -291,6 +404,7 @@ describe('KnowledgeService', () => {
   });
 
   it('updates credential fields and ignores blank replacement secret', async () => {
+    prisma.knowledgeCredential.count.mockResolvedValue(0);
     await service.updateCredential('analista', 'user-1', 'tenant-1', 'credential-1', {
       provider: ' Novo ',
       equipmentType: ' ',
@@ -311,6 +425,68 @@ describe('KnowledgeService', () => {
       username: 'user',
       notes: null,
     });
+  });
+  it('allows analyst creation and records the actor and create operation', async () => {
+    await service.createCredential('analista', 'user-1', {
+      tenantId: 'tenant-1',
+      provider: 'Provedor',
+      environment: 'Produção',
+      host: 'https://example.invalid',
+      username: 'teste',
+      secret: 'only-test',
+    });
+    expect(prisma.knowledgeCredential.create).toHaveBeenCalledWith(
+      expect.objectContaining({ data: expect.objectContaining({ createdById: 'user-1' }) }),
+    );
+  });
+
+  it('links another access only to a root in the same tenant', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(
+      credential({ parentCredentialId: null }),
+    );
+    await service.createCredential('gerente', 'user-1', {
+      tenantId: 'tenant-1',
+      parentCredentialId: 'credential-1',
+      provider: 'ignored',
+      environment: 'ignored',
+      host: 'ssh.example:22',
+      username: 'operator',
+      secret: 'test',
+      accessMethod: 'SSH',
+    });
+    expect(prisma.knowledgeCredential.findFirst).toHaveBeenCalledWith({
+      where: { id: 'credential-1', tenantId: 'tenant-1', parentCredentialId: null },
+    });
+    expect(prisma.knowledgeCredential.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          parentCredentialId: 'credential-1',
+          provider: 'IXC',
+          equipmentName: 'OLT Principal',
+          accessMethod: 'SSH',
+        }),
+      }),
+    );
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(null);
+    await expect(
+      service.createCredential('gerente', 'user-1', {
+        tenantId: 'tenant-1',
+        parentCredentialId: 'other-tenant',
+        provider: 'x',
+        environment: 'x',
+        host: 'x',
+        username: 'x',
+        secret: 'x',
+      }),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
+  it('does not delete a principal access with children', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(credential());
+    prisma.knowledgeCredential.count.mockResolvedValue(1);
+    await expect(
+      service.deleteCredential('gerente', 'user-1', 'tenant-1', 'credential-1'),
+    ).rejects.toThrow('acessos adicionais');
   });
 
   it('scopes notes to tenant and author and allows author mutations', async () => {

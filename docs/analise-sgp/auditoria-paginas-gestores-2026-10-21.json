@@ -1,0 +1,767 @@
+{
+  "at": "2026-10-21T20:09:53.670Z",
+  "role": "super_admin",
+  "mode": "read-only-existing-session",
+  "pages": [
+    {
+      "route": "/gerencia",
+      "finalPath": "/gerencia",
+      "heading": [
+        "Seu dia começa por aqui, Ajust."
+      ],
+      "rows": 9,
+      "panels": 10,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ordens",
+      "finalPath": "/gerencia/ordens",
+      "heading": [
+        "Ordens de serviço"
+      ],
+      "rows": 8,
+      "panels": 5,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/trilha-os",
+      "finalPath": "/gerencia/trilha-os",
+      "heading": [
+        "Trilha de ordens"
+      ],
+      "rows": 7,
+      "panels": 2,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/agenda",
+      "finalPath": "/gerencia/agenda",
+      "heading": [
+        "Agenda"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ocorrencias",
+      "finalPath": "/gerencia/ocorrencias",
+      "heading": [
+        "Ocorrências"
+      ],
+      "rows": 132,
+      "panels": 4,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/provedores",
+      "finalPath": "/gerencia/provedores",
+      "heading": [
+        "Clientes da Ajust"
+      ],
+      "rows": 6,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/tecnicos",
+      "finalPath": "/gerencia/tecnicos",
+      "heading": [
+        "Equipe técnica"
+      ],
+      "rows": 43,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/sla",
+      "finalPath": "/gerencia/sla",
+      "heading": [
+        "Monitor de SLA"
+      ],
+      "rows": 62,
+      "panels": 6,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/saude",
+      "finalPath": "/gerencia/saude",
+      "heading": [
+        "Saúde operacional"
+      ],
+      "rows": 1,
+      "panels": 7,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/plantao",
+      "finalPath": "/gerencia/plantao",
+      "heading": [
+        "Plantão NOC"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ativos",
+      "finalPath": "/gerencia/ativos",
+      "heading": [
+        "Ativos e configurações"
+      ],
+      "rows": 0,
+      "panels": 4,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/mudancas",
+      "finalPath": "/gerencia/mudancas",
+      "heading": [
+        "Gestão de mudanças"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/apontamentos",
+      "finalPath": "/gerencia/apontamentos",
+      "heading": [
+        "Registro de trabalho"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/processos",
+      "finalPath": "/gerencia/processos",
+      "heading": [
+        "Processos de atendimento"
+      ],
+      "rows": 122,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ajustpedia",
+      "finalPath": "/gerencia/ajustpedia",
+      "heading": [
+        "Ajustpedia"
+      ],
+      "rows": 0,
+      "panels": 0,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/credenciais",
+      "finalPath": "/gerencia/credenciais",
+      "heading": [
+        "Cofre de credenciais"
+      ],
+      "rows": 0,
+      "panels": 8,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/notas",
+      "finalPath": "/gerencia/notas",
+      "heading": [
+        "Minhas notas"
+      ],
+      "rows": 0,
+      "panels": 0,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/relatorios",
+      "finalPath": "/gerencia/relatorios",
+      "heading": [
+        "Relatórios"
+      ],
+      "rows": 2,
+      "panels": 7,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/empresas",
+      "finalPath": "/gerencia/empresas",
+      "heading": [
+        "Empresas e tenants"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/servicos",
+      "finalPath": "/gerencia/servicos",
+      "heading": [
+        "Análise de tipos de serviço"
+      ],
+      "rows": 55,
+      "panels": 7,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/politicas-sla",
+      "finalPath": "/gerencia/politicas-sla",
+      "heading": [
+        "Políticas de SLA"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/workflows",
+      "finalPath": "/gerencia/workflows",
+      "heading": [
+        "Workflows de atendimento"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/seguranca",
+      "finalPath": "/gerencia/seguranca",
+      "heading": [
+        "Sessões e segurança"
+      ],
+      "rows": 11,
+      "panels": 2,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/notificacoes",
+      "finalPath": "/gerencia/notificacoes",
+      "heading": [
+        "Notificações e alertas"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/integracoes",
+      "finalPath": "/gerencia/integracoes",
+      "heading": [
+        "Integrações e API"
+      ],
+      "rows": 0,
+      "panels": 4,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/eventos-tempo-real",
+      "finalPath": "/gerencia/eventos-tempo-real",
+      "heading": [
+        "Monitor de eventos em tempo real"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/configuracoes",
+      "finalPath": "/gerencia/configuracoes",
+      "heading": [
+        "Configurações"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/analista",
+      "finalPath": "/gerencia",
+      "heading": [
+        "Seu dia começa por aqui, Ajust."
+      ],
+      "rows": 9,
+      "panels": 10,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/cliente",
+      "finalPath": "/gerencia",
+      "heading": [
+        "Seu dia começa por aqui, Ajust."
+      ],
+      "rows": 9,
+      "panels": 10,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/usuarios",
+      "finalPath": "/gerencia/tecnicos",
+      "heading": [
+        "Equipe técnica"
+      ],
+      "rows": 43,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/auditoria",
+      "finalPath": "/gerencia/auditoria",
+      "heading": [
+        "Auditoria operacional"
+      ],
+      "rows": 20,
+      "panels": 2,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/empresa",
+      "finalPath": "/gerencia/empresa",
+      "heading": [
+        "Empresa, setores e funções"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ixc",
+      "finalPath": "/gerencia/ixc",
+      "heading": [
+        "Integração IXC e reconciliação"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/calendario-sla",
+      "finalPath": "/gerencia/calendario-sla",
+      "heading": [
+        "Calendário e regras de SLA"
+      ],
+      "rows": 27,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/configuracoes-ativos",
+      "finalPath": "/gerencia/configuracoes-ativos",
+      "heading": [
+        "Configurações e snapshots do ERP",
+        "Inventário do ERP"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/configuracoes/empresa",
+      "finalPath": "/gerencia/configuracoes/empresa",
+      "heading": [
+        "Empresa, setores e funções"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/configuracoes/meu-perfil",
+      "finalPath": "/gerencia/configuracoes/perfil",
+      "heading": [
+        "Configurações"
+      ],
+      "rows": 0,
+      "panels": 1,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ordens/209f9d65-9cdc-42f0-b44b-fd57425a1b56",
+      "finalPath": "/gerencia/ordens/209f9d65-9cdc-42f0-b44b-fd57425a1b56",
+      "heading": [
+        "INFOTEL · CONFIGURAÇÃO DE EQUIPAMENTO"
+      ],
+      "rows": 0,
+      "panels": 4,
+      "emptyStates": 1,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/ocorrencias/286ad67a-5a13-4a17-b573-ce5af07768e9",
+      "finalPath": "/gerencia/ocorrencias/286ad67a-5a13-4a17-b573-ce5af07768e9",
+      "heading": [
+        "CONFIGURAÇÃO DE EQUIPAMENTO"
+      ],
+      "rows": 0,
+      "panels": 2,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/provedores/ff563804-29af-4acc-a205-283680805be7",
+      "finalPath": "/gerencia/provedores/ff563804-29af-4acc-a205-283680805be7",
+      "heading": [
+        "ECOTELECOM"
+      ],
+      "rows": 20,
+      "panels": 3,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    },
+    {
+      "route": "/gerencia/tecnicos/979e1818-3d0a-4cb9-801e-32dc11a10c1c",
+      "finalPath": "/gerencia/tecnicos/979e1818-3d0a-4cb9-801e-32dc11a10c1c",
+      "heading": [
+        "Wilson Junior"
+      ],
+      "rows": 1,
+      "panels": 4,
+      "emptyStates": 0,
+      "errors": [],
+      "failedRequests": [],
+      "http": 200,
+      "errorPanels": 0,
+      "unavailable": 0
+    }
+  ],
+  "endpoints": {
+    "/api/erp/reports/service-types?daysBack=30": {
+      "orders": 43,
+      "types": 26,
+      "withoutSla": 35
+    },
+    "/api/erp/dashboards/agenda-overview": {
+      "count": 8,
+      "total": 8
+    },
+    "/api/erp/audit/logs?page=1&limit=3": {
+      "count": 3,
+      "total": 634
+    },
+    "/api/erp/service-orders": {
+      "count": 168,
+      "total": 168
+    },
+    "/api/erp/service-orders?offset=0&limit=8": {
+      "count": 8,
+      "total": 8
+    },
+    "/api/erp/iam/tenants/7c340999-3797-46f7-bbe0-35222bf7dfe6/sectors": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/calendar/events/all?from=2026-10-01T00%3A00%3A00.000Z&to=2026-11-01T00%3A00%3A00.000Z": {
+      "count": 25,
+      "total": 25
+    },
+    "/api/erp/calendar/events": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/service-orders/occurrences": {
+      "count": 132,
+      "total": 132
+    },
+    "/api/erp/customers": {
+      "count": 6,
+      "total": 6
+    },
+    "/api/erp/iam/users": {
+      "count": 43,
+      "total": 43
+    },
+    "/api/erp/sla/breaches": {
+      "count": 27,
+      "total": 27
+    },
+    "/api/erp/reports/operational-health": {
+      "count": 1,
+      "total": 1
+    },
+    "/api/erp/on-call": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/cmdb/assets": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/change-management": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/service-orders?limit=50&offset=0": {
+      "count": 50,
+      "total": 50
+    },
+    "/api/erp/time-entries": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/service-processes/operational": {
+      "count": 122,
+      "total": 122
+    },
+    "/api/erp/knowledge/articles?includeDrafts=true": {
+      "count": 9,
+      "total": 9
+    },
+    "/api/erp/knowledge/credentials?limit=200&offset=0": {
+      "count": 200,
+      "total": 425
+    },
+    "/api/erp/knowledge/credentials": {
+      "count": 100,
+      "total": 425
+    },
+    "/api/erp/knowledge/credentials/providers?limit=200": {
+      "count": 6,
+      "total": 6
+    },
+    "/api/erp/knowledge/notes": {
+      "count": 1,
+      "total": 1
+    },
+    "/api/erp/iam/tenants": {
+      "count": 1,
+      "total": 1
+    },
+    "/api/erp/service-catalog?activeOnly=false": {
+      "count": 52,
+      "total": 52
+    },
+    "/api/erp/reports/service-types": {
+      "orders": 166,
+      "types": 55,
+      "withoutSla": 123
+    },
+    "/api/erp/sla-policies": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/service-processes/operational/templates": {
+      "count": 68,
+      "total": 68
+    },
+    "/api/erp/service-processes/operational/assignees": {
+      "count": 42,
+      "total": 42
+    },
+    "/api/erp/calendar/users": {
+      "count": 5,
+      "total": 5
+    },
+    "/api/erp/auth/sessions": {
+      "count": 11,
+      "total": 11
+    },
+    "/api/erp/notifications/config": {
+      "count": 0,
+      "total": 0
+    },
+    "/api/erp/iam/roles": {
+      "count": 6,
+      "total": 6
+    },
+    "/api/erp/audit/logs?limit=20&offset=0": {
+      "count": 20,
+      "total": 634
+    }
+  }
+}

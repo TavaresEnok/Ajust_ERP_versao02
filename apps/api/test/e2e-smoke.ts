@@ -12,9 +12,7 @@ async function ensureSeedData(prisma: PrismaClient) {
     { code: 'super_admin', name: 'Super Admin', isGlobal: true },
     { code: 'gerente', name: 'Gerente', isGlobal: false },
     { code: 'analista', name: 'Analista', isGlobal: false },
-    { code: 'tecnico', name: 'Tecnico', isGlobal: false },
     { code: 'cliente', name: 'Cliente', isGlobal: false },
-    { code: 'leitura', name: 'Leitura', isGlobal: false },
   ];
 
   for (const role of roles) {
