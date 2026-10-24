@@ -165,7 +165,7 @@ export class AuditInterceptor implements NestInterceptor {
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        /(password|token|secret|api.?key|authorization|credential|protectedContent|sourceNote|accessEntries)/i.test(
+        /(password|token|secret|api.?key|authorization|credential|protectedContent|sourceNote|accessEntries|diagramXml)/i.test(
           key,
         )
           ? '[REDACTED]'

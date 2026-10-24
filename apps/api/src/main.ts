@@ -8,7 +8,7 @@ import { ArgumentsHost, Catch, ExceptionFilter, HttpException, HttpStatus } from
 import { ZodError } from 'zod';
 import cookieParser from 'cookie-parser';
 import helmet from 'helmet';
-import { NextFunction, Request, Response } from 'express';
+import { NextFunction, Request, Response, json as expressJson } from 'express';
 import { CsrfMiddleware } from './common/csrf.middleware';
 import { randomUUID } from 'crypto';
 import { RequestContext } from './common/request-context';
@@ -132,6 +132,12 @@ async function bootstrap() {
         },
       },
     }),
+  );
+  // Keep a wrapper: Nest detects middleware named jsonParser and would otherwise
+  // skip installing its regular JSON parser for unrelated routes such as login.
+  const topologyJsonParser = expressJson({ limit: '12mb' });
+  app.use('/network-topologies', (req: Request, res: Response, next: NextFunction) =>
+    topologyJsonParser(req, res, next),
   );
   app.use(cookieParser()); // Parse cookies para CSRF validation
   const csrfMiddleware = new CsrfMiddleware();

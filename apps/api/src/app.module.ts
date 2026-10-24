@@ -1,5 +1,6 @@
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { ShiftReportsModule } from './shift-reports/shift-reports.controller';
+import { NetworkTopologiesModule } from './network-topologies/network-topologies.controller';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
@@ -39,6 +40,7 @@ import { CustomerPortalModule } from './customers/customer-portal.controller';
   imports: [
     PrismaModule,
     ShiftReportsModule,
+    NetworkTopologiesModule,
     CommonModule,
     RealtimeModule,
     AuthModule,

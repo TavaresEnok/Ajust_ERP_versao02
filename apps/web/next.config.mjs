@@ -16,7 +16,7 @@ const securityHeaders = [
     value:
       "default-src 'self'; script-src 'self' 'unsafe-inline'" +
       (isDev ? " 'unsafe-eval'" : '') +
-      "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-ancestors 'none';",
+      "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self'; frame-ancestors 'none';",
   },
 ];
 
@@ -32,11 +32,30 @@ const nextConfig = {
   outputFileTracingRoot: monorepoRoot,
   turbopack: { root: monorepoRoot },
   images: { unoptimized: true },
+  async rewrites() {
+    return [
+      {
+        source: '/drawio/:path*',
+        destination: `${process.env.DRAWIO_INTERNAL_URL || 'http://drawio:8080'}/drawio/:path*`,
+      },
+    ];
+  },
   async headers() {
     return [
       {
         source: '/:path*',
         headers: securityHeaders,
+      },
+      {
+        source: '/drawio/:path*',
+        headers: [
+          { key: 'X-Frame-Options', value: 'SAMEORIGIN' },
+          {
+            key: 'Content-Security-Policy',
+            value:
+              "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self'; worker-src 'self' blob:; frame-ancestors 'self';",
+          },
+        ],
       },
     ];
   },

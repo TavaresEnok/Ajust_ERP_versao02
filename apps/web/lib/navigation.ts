@@ -112,10 +112,10 @@ export const navigation: NavGroup[] = [
         description: 'Escalas e cobertura para uma operação sempre disponível.',
       },
       {
-        title: 'Ativos e configurações',
+        title: 'Topologia de rede',
         path: '/gerencia/ativos',
-        icon: Server,
-        description: 'Inventário de ativos, configurações e histórico de snapshots.',
+        icon: Network,
+        description: 'Diagramas de rede dos provedores, com edição no draw.io e histórico.',
       },
     ],
   },
@@ -307,12 +307,12 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
     const groups = [
       {
         label: 'Meu trabalho',
-        sections: ['', 'ordens', 'provedores', 'agenda', 'sla', 'relatorios-turno'],
+        sections: ['', 'ordens', 'provedores', 'agenda', 'plantao', 'sla', 'relatorios-turno'],
       },
       { label: 'Conhecimento', sections: ['ajustpedia', 'credenciais', 'notas'] },
       {
         label: 'Ferramentas técnicas',
-        sections: ['ativos', 'plantao'],
+        sections: ['ativos'],
         collapsible: true,
       },
       { label: 'Minha conta', sections: ['seguranca', 'configuracoes'], collapsible: true },
@@ -335,7 +335,7 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
                   : section === 'ordens'
                     ? 'Minhas ordens'
                     : section === 'ativos'
-                      ? 'Equipamentos e configurações'
+                      ? 'Topologia de rede'
                       : section === 'plantao'
                         ? 'Escala de plantão'
                         : section === 'processos'
