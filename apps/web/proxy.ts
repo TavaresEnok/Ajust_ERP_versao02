@@ -125,6 +125,6 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api/|_next/|favicon.ico|icon|apple-icon|placeholder|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt)$).*)',
+    '/((?!api/|drawio/|_next/|favicon.ico|icon|apple-icon|placeholder|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt)$).*)',
   ],
 };

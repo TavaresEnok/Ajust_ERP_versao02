@@ -81,6 +81,7 @@ const SERVER_ONLY_KEYS = new Set([
   'keyHash',
   'twoFactorSecretEnc',
   'secretEnc',
+  'xmlEnc',
   'sourceNoteEnc',
   'webhookSecretEnc',
   'apiTokenEnc',
@@ -113,7 +114,8 @@ async function buildBody(
   const length = Number(request.headers.get('content-length') || 0);
   const type = request.headers.get('content-type') || '';
   const multipart = type.includes('multipart/form-data');
-  if (length > (multipart ? MAX_MULTIPART_BYTES : MAX_JSON_BYTES))
+  const jsonLimit = pattern === '/network-topologies/:id' ? 12 * 1024 * 1024 : MAX_JSON_BYTES;
+  if (length > (multipart ? MAX_MULTIPART_BYTES : jsonLimit))
     return json(413, 'Arquivo ou conteúdo acima do limite permitido.');
   if (multipart) {
     const buffer = await request.arrayBuffer();
@@ -123,7 +125,8 @@ async function buildBody(
   }
   const text = await request.text();
   if (!text) return undefined;
-  if (text.length > MAX_JSON_BYTES) return json(413, 'Conteúdo acima do limite permitido.');
+  if (Buffer.byteLength(text, 'utf8') > jsonLimit)
+    return json(413, 'Conteúdo acima do limite permitido.');
   try {
     // O NestJS rejeita tenantId vindo do cliente: o tenant efetivo é o do JWT.
     const parsed = JSON.parse(text) as unknown;

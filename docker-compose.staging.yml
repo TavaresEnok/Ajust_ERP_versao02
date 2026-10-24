@@ -1,4 +1,17 @@
 services:
+  drawio:
+    image: jgraph/drawio:32.6.1@sha256:3d0a5a5ffb4f76abcecd9d17ae1373e3eefd0db07b657c545637dc9c6a7412e1
+    environment:
+      DRAWIO_SERVER_URL: /drawio/
+      JAVA_OPTS: -Xms64m -Xmx384m
+    expose: ["8080"]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/drawio/index.html"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
   web:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/web:${IMAGE_TAG:-latest}
     ports:
@@ -11,6 +24,8 @@ services:
       - API_BASE_URL=${API_BASE_URL}
       - WS_PUBLIC_URL=${API_BASE_URL}
     depends_on:
+      drawio:
+        condition: service_healthy
       api:
         condition: service_healthy
     healthcheck:

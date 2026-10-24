@@ -52,6 +52,10 @@ const ROUTES: Record<string, Method[]> = {
 
   '/customers': ['GET'],
   '/customers/:id': ['GET'],
+  '/network-topologies': ['GET'],
+  '/network-topologies/:id': ['GET', 'PUT'],
+  '/network-topologies/:id/history': ['GET'],
+  '/network-topologies/:id/history/:id': ['GET'],
   '/customer-portal': ['GET'],
   '/customer-portal/agenda': ['GET'],
   '/customer-portal/orders/:id': ['GET'],

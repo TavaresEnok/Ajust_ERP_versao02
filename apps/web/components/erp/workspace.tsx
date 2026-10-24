@@ -16,7 +16,6 @@ import { ReportsPage } from './reports-page';
 import { OnCallPage, OrderTrailPage } from './operational-pages';
 import { CatalogPage } from './catalog-pages';
 import { ServiceTypesAnalyticsPage } from './service-types-analytics';
-import { AssetsPage } from './assets-page';
 import { TenantsPage } from './tenants-page';
 import { SettingsPage, NotificationsConfigPage } from './settings-pages';
 import { SecurityPage, IntegrationsPage } from './security-pages';
@@ -36,6 +35,9 @@ const AuditWorkspace = dynamic(() =>
 );
 const CustomerDirectory = dynamic(() =>
   import('./customer-directory').then((m) => m.CustomerDirectory),
+);
+const NetworkTopologiesPage = dynamic(() =>
+  import('./network-topologies').then((m) => m.NetworkTopologiesPage),
 );
 const ResourcePage = dynamic(() => import('./resource-page').then((module) => module.ResourcePage));
 const RecordWorkspace = dynamic(() =>
@@ -168,8 +170,7 @@ export function Workspace({ path = '/' }: { path?: string }) {
     if (section === 'sla') return <SlaPage />;
     if (section === 'saude') return <HealthPage />;
     if (section === 'plantao') return <OnCallPage />;
-    if (section === 'ativos')
-      return <AssetsPage key={path} id={id} initialTab={detailTabLabels[detailSection]} />;
+    if (section === 'ativos') return <NetworkTopologiesPage key={path} customerId={id} />;
     if (section === 'ajustpedia')
       return <KnowledgePage key={path} id={id} editing={detailSection === 'editar'} />;
     if (section === 'credenciais') return <CredentialsPage />;
@@ -222,7 +223,8 @@ export function Workspace({ path = '/' }: { path?: string }) {
         ? '/analista'
         : '/gerencia';
   const allowed = !scope || canAccessSection(scope.role, section, id);
-  const hasOperational = !section || operationalSections.has(section);
+  // Topologies resolve provider IDs themselves, rather than legacy equipment IDs.
+  const hasOperational = section !== 'ativos' && (!section || operationalSections.has(section));
   return (
     <AppShell>
       <Suspense fallback={<p className="p-8 text-muted-foreground">Preparando seu workspace...</p>}>
