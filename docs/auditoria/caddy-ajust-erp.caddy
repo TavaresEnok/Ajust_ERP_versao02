@@ -1,0 +1,10 @@
+# Ajust ERP — HTTPS (auditoria C-075). Certificado Let's Encrypt automático pelo Caddy.
+erp.ajustconsulting.com.br {
+	import seguranca
+
+	# Tempo real (Socket.IO) vai direto ao NestJS; o restante passa pelo Next (BFF).
+	@socket path /socket.io/*
+	reverse_proxy @socket 127.0.0.1:8092
+
+	reverse_proxy 127.0.0.1:8070
+}

@@ -27,8 +27,8 @@ services:
       NEXT_TELEMETRY_DISABLED: "1"
       API_INTERNAL_URL: ${API_INTERNAL_URL:-http://api:3001}
       WORKER_INTERNAL_URL: ${WORKER_INTERNAL_URL:-http://worker:3002}
-      API_BASE_URL: http://localhost:${API_PORT:-8071}
-      NEXT_PUBLIC_WS_URL: http://localhost:${API_PORT:-8071}
+      API_BASE_URL: ${PUBLIC_APP_URL:-http://localhost:${API_PORT:-8071}}
+      NEXT_PUBLIC_WS_URL: ${PUBLIC_APP_URL:-http://localhost:${API_PORT:-8071}}
     volumes:
       - ./:/workspace
     ports:

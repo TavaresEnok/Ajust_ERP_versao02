@@ -57,10 +57,10 @@
 | C-043 | Alta | 1.11 | Integração de chat (`/webhooks/chat/incoming`) sempre falha | Corrigido (sem commit; já em execução) |
 | C-044 | Alta | 1.11 | Alerta do Zabbix abre um chamado novo a cada disparo, sem deduplicar nem fechar na recuperação | Corrigido (em execução) |
 | C-045 | Alta | 1.11 | Webhook do IXC muda o status por fora da máquina de estados e cria O.S. sem ocorrência | Corrigido (sem commit; já em execução) |
-| C-046 | Crítica | 2.3 | Banco, Redis, pgAdmin, API e worker publicados em todas as interfaces do servidor público | Corrigido em parte (aplicado; web ainda pública até o HTTPS) |
+| C-046 | Crítica | 2.3 | Banco, Redis, pgAdmin, API e worker publicados em todas as interfaces do servidor público | Corrigido (aplicado) |
 | C-047 | Crítica | 2.6 | Instância pública usando segredos de desenvolvimento e sem os segredos obrigatórios | Corrigido (aplicado) |
 | C-048 | Alta | 2.1 | Troca de e-mail da própria conta sem confirmar a senha atual | Corrigido (sem commit; já em execução) |
-| C-049 | Média | 2.1 | Rate limit de login usa o IP do proxy e permite bloquear a conta de outra pessoa | Corrigido em parte (proxy/implantação pendentes) |
+| C-049 | Média | 2.1 | Rate limit de login usa o IP do proxy e permite bloquear a conta de outra pessoa | Corrigido (aplicado) |
 | C-050 | Média | 2.1 | Login por nome ou prefixo do e-mail é ambíguo; login por CNPJ procura no tenant | Corrigido no código (implantação pendente) |
 | C-051 | Média | 2.1 | 2FA não é obrigatório para super_admin e o código TOTP pode ser reutilizado | Corrigido no código (migration e implantação pendentes) |
 | C-052 | Baixa | 2.1 | Reuso do refresh token não é detectado | Corrigido no código (não implantado) |
@@ -86,10 +86,10 @@
 | C-072 | Média | 5 | Três migrations e a mudança do schema estão fora do git | Corrigido (na branch, sem push) |
 | C-073 | Baixa | 5 | Sessões expiradas nunca são removidas | Corrigido no código (não implantado) |
 | C-074 | Baixa | 5 | Algumas exclusões em cascata apagam histórico que deveria ficar | Corrigido no código (migration pendente) |
-| C-075 | Alta | 6 | O ERP é acessado por HTTP puro, sem TLS | Em correção (preparado; falta o domínio) |
+| C-075 | Alta | 6 | O ERP é acessado por HTTP puro, sem TLS | Corrigido (aplicado) |
 | C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (falta só o destino externo) |
 | C-077 | Média | 6 | Redis de produção descarta chaves das filas e do rate limit quando enche | Corrigido nos arquivos de compose (produção pendente) |
-| C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Em correção (parcial) |
+| C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Em correção (HTTPS pronto; falta a troca para imagens de produção) |
 | C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido (em execução) |
 | C-080 | Média | 7 | Mensagens de erro da API em inglês chegam à tela | Corrigido (sem commit; já em execução) |
 | C-081 | Média | 7 | Os testes de integração com banco nunca rodam no CI | Corrigido no código (CI remoto pendente) |
@@ -723,7 +723,8 @@
 - **Como validar:** de fora do servidor, `nc -zv 168.194.13.18 8072 8073 8076 8077` recusado; `redis-cli` sem senha → `NOAUTH`.
 - **Andamento (04/11):** `docker-compose.yml`: Postgres, Redis, API, worker e Loki só em `127.0.0.1`; web em `${WEB_BIND:-127.0.0.1}` (fica `0.0.0.0` até o HTTPS existir); pgAdmin removido; Redis com `requirepass`. Aplicação por `scripts/lote0-aplicar.sh`. O firewall do provedor e o projeto vizinho `ajust_erp-pre-redesign` (portas 8071 e 8091 públicas) ficam fora deste lote.
 - **Aplicado (04/11, 16:26):** `scripts/lote0-aplicar.sh` rodou: Postgres, Redis, API, worker e Loki escutam só em `127.0.0.1`; pgAdmin removido; Redis responde `NOAUTH` sem senha. A porta 8070 (web) continua pública até C-075. Pendente: firewall do provedor e o projeto `ajust_erp-pre-redesign` (8071/8091).
-- **Status:** Corrigido em parte (aplicado; web ainda pública até o HTTPS)
+- **HTTPS (05/11):** a porta 8070 (web) também passou a escutar só em `127.0.0.1`; teste pelo IP público: 8070, 8072, 8073, 8076, 8092 e 3100 fechadas. O acesso é só por `https://erp.ajustconsulting.com.br`.
+- **Status:** Corrigido (aplicado)
 
 ### C-047 · Instância pública usando segredos de desenvolvimento e sem os segredos obrigatórios
 - **Severidade:** Crítica
@@ -756,7 +757,8 @@
 - **Correção proposta:** o BFF define o `x-forwarded-for` a partir do IP real da conexão (não repassa o do cliente); a API confia só no BFF (`trust proxy` com o IP dele); limite por IP real **e** por conta resolvida (`userId`), com atraso progressivo em vez de bloqueio total da conta.
 - **Como validar:** teste: 6 falhas de um IP não impedem o dono de entrar de outro IP.
 - **Lote 1 (04/11):** API com `trust proxy` só para redes internas (`request.ip` agora é o IP do usuário, conferido na auditoria); teto de 20 tentativas por conta de qualquer IP, sem bloqueio total da conta. **Enquanto a porta 8070 ficar exposta direto, o IP pode ser forjado pelo cabeçalho `X-Forwarded-For`**; isso some com o acesso pelo Caddy (C-075), que descarta o cabeçalho vindo de fora.
-- **Status:** Corrigido em parte (proxy/implantação pendentes)
+- **HTTPS (05/11):** com o acesso pelo Caddy, um `X-Forwarded-For: 6.6.6.6` forjado foi descartado e a auditoria registrou o IP real da conexão.
+- **Status:** Corrigido (aplicado)
 - **Continuação do lote 7 (04/11):** Incremento e expiração do limitador agora são atômicos no Redis, inclusive para chaves novas/sem TTL. Fallback local respeita janela fixa e só é permitido fora de produção; produção falha fechada sem Redis. Demais limites do achado e implantação permanecem separados.
 - **Fechamento de pendências (04/11):** Removido bloqueio global por conta: acima do limiar há atraso progressivo limitado a 1,5 s, mantendo bloqueio por IP+conta. Teste confirma que tentativas distribuídas não impedem outro IP de autenticar. Redis continua atômico e falha fechado. Pendente: configuração confiável do proxy/IP na implantação.
 
@@ -1067,7 +1069,8 @@
 - **Correção proposta:** publicar o ERP atrás do Caddy que já termina o HTTPS do host (novo arquivo em `sites/`), com `web` em `127.0.0.1:8070`; redirecionar HTTP → HTTPS; `NODE_ENV=production` e cookies `Secure`; `PUBLIC_APP_URL`/`WEB_BASE_URL` com o domínio HTTPS.
 - **Como validar:** `curl -I http://<domínio>` → 301 para HTTPS; a porta 8070 não responde de fora.
 - **Andamento (04/11):** a borda HTTPS do servidor é o **Caddy** (`edge_caddy`, `/home/app/infra/caddy`), não o nginx (desativado em 26/10). Site pronto em `/home/app/infra/caddy/sites/ajust-erp.caddy.exemplo`, com roteamento de `/socket.io` para a API; falta um domínio com DNS apontando para o servidor.
-- **Status:** Em correção (preparado; falta o domínio)
+- **HTTPS (05/11):** domínio `erp.ajustconsulting.com.br` no Caddy do servidor (`/home/app/infra/caddy/sites/ajust-erp.caddy`), certificado Let's Encrypt automático (válido até 03/02/2027), `/socket.io` direto para a API. URLs públicas do ERP (`WEB_BASE_URL`, `PUBLIC_APP_URL`, `WS_PUBLIC_URL`) apontam para o HTTPS; login e tempo real testados pelo domínio.
+- **Status:** Corrigido (aplicado)
 
 ### C-076 · Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco
 - **Severidade:** Alta
@@ -1105,7 +1108,8 @@
 - **Correção proposta:** rodar o servidor com o compose de produção (imagens construídas, sem montar o repositório); se o de desenvolvimento continuar sendo usado aqui, trocar `env_file` para `.env` e remover os padrões inseguros (falhar se a variável faltar: `${VAR:?obrigatória}`); `USER node` no Dockerfile; incluir `backups/`, `uploads/` e `*.dump` no `.dockerignore`; API sem porta pública em produção; tags de imagem fixas.
 - **Como validar:** `docker compose config` não mostra nenhum valor padrão inseguro; dentro do contêiner, `id -u` ≠ 0.
 - **Andamento (04/11):** `env_file` passa a ser `.env.example` e depois `.env` (o `.env` vence); padrões inseguros removidos; `.dockerignore` exclui `backups/`, `uploads/`, `*.dump` e `.env.*`. Pendente: rodar o compose de produção, `USER node`, tags fixas.
-- **Status:** Em correção (parcial)
+- **Situação (05/11):** o HTTPS, que era o pré-requisito, está no ar. Falta trocar o servidor do compose de desenvolvimento (`pnpm dev`, código montado) para imagens construídas; o `docker-compose.prod.yml` ainda publica a web na porta 80, que é do Caddy, e precisa ser adaptado (web em `127.0.0.1:8070`) antes da troca.
+- **Status:** Em correção (HTTPS pronto; falta a troca para imagens de produção)
 
 ### C-079 · Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente
 - **Severidade:** Média
