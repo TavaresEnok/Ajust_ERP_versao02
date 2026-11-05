@@ -2,15 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE_AUDIT_ARCHIVING } from '../queue.constants';
-
-const redisConnection = {
-  host: (process.env.REDIS_URL || 'redis://redis:6379').replace(/^redis:\/\//, '').split(':')[0],
-  port: parseInt(
-    (process.env.REDIS_URL || 'redis://redis:6379').replace(/^redis:\/\//, '').split(':')[1] ||
-      '6379',
-    10,
-  ),
-};
+import { redisConnection } from '../../common/redis-connection';
 
 const ARCHIVE_AFTER_DAYS = Number(process.env.AUDIT_ARCHIVE_AFTER_DAYS || 90);
 const BATCH_SIZE = 500;
@@ -53,8 +45,9 @@ export class AuditArchivingProcessor {
 
       const ids = records.map((r) => r.id);
 
-      // Insert into archive table (raw query — ArchivedAuditLog has no FK constraints)
-      await this.prisma.$executeRaw`
+      await this.prisma.$transaction(async (tx) => {
+        // Insert into archive table (raw query — ArchivedAuditLog has no FK constraints)
+        await tx.$executeRaw`
         INSERT INTO "ArchivedAuditLog" (
           "id", "tenantId", "actorUserId", "action", "resourceType",
           "resourceId", "metadata", "ip", "userAgent", "createdAt", "archivedAt"
@@ -67,8 +60,9 @@ export class AuditArchivingProcessor {
         ON CONFLICT ("id") DO NOTHING
       `;
 
-      // Delete from active table
-      await this.prisma.auditLog.deleteMany({ where: { id: { in: ids } } });
+        // Delete from active table
+        await tx.auditLog.deleteMany({ where: { id: { in: ids } } });
+      });
 
       totalArchived += records.length;
       this.logger.log(`Archived batch of ${records.length} audit logs (total: ${totalArchived})`);

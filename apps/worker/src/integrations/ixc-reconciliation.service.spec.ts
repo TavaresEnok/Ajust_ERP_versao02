@@ -16,8 +16,7 @@ function makePrisma(): any {
     businessCalendar: { findMany: jest.fn().mockResolvedValue([]) },
     businessCalendarException: { findUnique: jest.fn().mockResolvedValue(null) },
     tenant: { findUnique: jest.fn().mockResolvedValue({ timezone: 'UTC' }) },
-    $executeRawUnsafe: jest.fn().mockResolvedValue(undefined),
-    $queryRawUnsafe: jest.fn().mockResolvedValue([{ nextval: 7n }]),
+    $queryRaw: jest.fn().mockResolvedValue([{ max: 100007 }]),
   };
 }
 
@@ -73,117 +72,37 @@ describe('IxcReconciliationService', () => {
     );
   });
 
-  it('maps external values and ignores deltas without protocol', async () => {
-    const service = new IxcReconciliationService(makePrisma()) as any;
-    expect(service.mapStatus('closed')).toBe('FECHADA');
-    expect(service.mapStatus('unknown')).toBeNull();
-    expect(service.mapType('bgp')).toBe('BGP');
-    expect(service.mapType('unknown')).toBe('AUDITORIA');
-    expect(service.mapPriority('critica')).toBe('CRITICA');
-    expect(service.mapPriority('unknown')).toBe('NORMAL');
-    await expect(service.applyDelta('tenant-1', {})).resolves.toBe(false);
-  });
-
-  it('does not apply stale delta to an existing order', async () => {
-    const prisma = makePrisma();
-    prisma.serviceOrder.findFirst.mockResolvedValue({
-      id: 'order-1',
-      updatedAt: new Date('2026-06-05T12:00:00.000Z'),
-    });
-    const service = new IxcReconciliationService(prisma) as any;
-
-    await expect(
-      service.applyDelta('tenant-1', {
-        externalProtocol: 'EXT-1',
-        updatedAt: '2026-06-05T11:00:00.000Z',
-      }),
-    ).resolves.toBe(false);
-    expect(prisma.serviceOrder.update).not.toHaveBeenCalled();
-  });
-
-  it('updates an existing order from a recent delta', async () => {
-    const prisma = makePrisma();
-    prisma.serviceOrder.findFirst.mockResolvedValue({
-      id: 'order-1',
-      updatedAt: new Date('2026-06-05T11:00:00.000Z'),
-    });
-    const service = new IxcReconciliationService(prisma) as any;
-
-    await expect(
-      service.applyDelta('tenant-1', {
-        externalProtocol: 'EXT-1',
-        updatedAt: '2026-06-05T12:00:00.000Z',
-        status: 'resolved',
-        title: ' Atualizada ',
-        description: ' Nova ',
-      }),
-    ).resolves.toBe(true);
-    expect(prisma.serviceOrder.update).toHaveBeenCalledWith({
-      where: { id: 'order-1' },
-      data: expect.objectContaining({
-        sourceSystem: 'SGP',
-        status: 'RESOLVIDA',
-        title: 'Atualizada',
-        description: 'Nova',
-      }),
-    });
-  });
-
-  it('creates a new order using protocol and SLA policy', async () => {
-    const prisma = makePrisma();
-    prisma.slaPolicy.findMany.mockResolvedValue([
-      {
-        isOverride: true,
-        serviceOrderType: 'ROMPIMENTO',
-        priority: 'NORMAL',
-        hours: 2,
-      },
-    ]);
-    const service = new IxcReconciliationService(prisma) as any;
-    jest
-      .spyOn(service, 'calculateTargetDate')
-      .mockResolvedValue(new Date('2026-06-05T14:00:00.000Z'));
-
-    await expect(
-      service.applyDelta('tenant-1', {
-        externalProtocol: 'EXT-2',
-        type: 'ROMPIMENTO',
-        priority: 'CRITICA',
-      }),
-    ).resolves.toBe(true);
-
-    expect(prisma.serviceOrder.create).toHaveBeenCalledWith({
-      data: expect.objectContaining({
-        protocol: '2026000007',
-        externalProtocol: 'EXT-2',
-        type: 'ROMPIMENTO',
-        priority: 'CRITICA',
-        deadlineAt: new Date('2026-06-05T14:00:00.000Z'),
-      }),
-    });
-  });
-
-  it('selects override, priority and fallback SLA hours', async () => {
-    const prisma = makePrisma();
-    const service = new IxcReconciliationService(prisma) as any;
-    prisma.slaPolicy.findMany.mockResolvedValue([
-      { isOverride: true, serviceOrderType: 'BGP', priority: 'BAIXA', hours: 3 },
-      { isOverride: false, serviceOrderType: null, priority: 'ALTA', hours: 6 },
-    ]);
-
-    await expect(service.findApplicableSlaHours('tenant-1', 'CRITICA', 'BGP')).resolves.toBe(3);
-    await expect(service.findApplicableSlaHours('tenant-1', 'ALTA', 'AUDITORIA')).resolves.toBe(6);
-    await expect(service.findApplicableSlaHours('tenant-1', 'BAIXA', 'AUDITORIA')).resolves.toBe(
-      48,
-    );
-  });
-
-  it('calculates deadlines on default business calendar and tenant timezone', async () => {
-    const prisma = makePrisma();
-    const service = new IxcReconciliationService(prisma) as any;
-
-    await expect(
-      service.calculateTargetDate(new Date('2026-06-05T17:00:00.000Z'), 2, 'tenant-1'),
-    ).resolves.toEqual(new Date('2026-06-08T09:00:00.000Z'));
+  it('delegates mutations to the internal API and refuses errors without local writes', async () => {
+    const previous = process.env.WORKER_API_TOKEN;
+    process.env.WORKER_API_TOKEN = 'test-only-worker-token';
+    const originalFetch = global.fetch;
+    try {
+      const prisma = makePrisma();
+      const service = new IxcReconciliationService(prisma) as any;
+      global.fetch = jest
+        .fn()
+        .mockResolvedValue({ ok: true, json: async () => ({ applied: true }) });
+      const delta = { externalProtocol: 'EXT', type: 'DNS', status: 'closed' };
+      await expect(service.applyDelta('tenant-1', delta)).resolves.toBe(true);
+      expect(fetch).toHaveBeenCalledWith(
+        expect.stringContaining('/integrations/ixc/internal/delta'),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ tenantId: 'tenant-1', delta }),
+          headers: expect.objectContaining({ Authorization: 'Bearer test-only-worker-token' }),
+        }),
+      );
+      expect(prisma.serviceOrder.create).not.toHaveBeenCalled();
+      expect(prisma.serviceOrder.update).not.toHaveBeenCalled();
+      (global.fetch as jest.Mock).mockResolvedValue({ ok: false, status: 503 });
+      await expect(service.applyDelta('tenant-1', delta)).rejects.toThrow('503');
+      await expect(service.applyDelta('tenant-1', {})).resolves.toBe(false);
+      delete process.env.WORKER_API_TOKEN;
+      await expect(service.applyDelta('tenant-1', delta)).rejects.toThrow('WORKER_API_TOKEN');
+    } finally {
+      global.fetch = originalFetch;
+      if (previous === undefined) delete process.env.WORKER_API_TOKEN;
+      else process.env.WORKER_API_TOKEN = previous;
+    }
   });
 });
