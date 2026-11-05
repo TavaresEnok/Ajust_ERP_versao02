@@ -2,7 +2,7 @@
 import { Fragment, useEffect, useState, type ReactNode } from 'react';
 import { PasswordGenerator } from './password-generator';
 import Link from 'next/link';
-import { usePathname } from 'next/navigation';
+import { usePathname, useRouter } from 'next/navigation';
 import {
   Bell,
   Search,
@@ -38,6 +38,7 @@ import { useErp } from '@/lib/erp/gateway';
 import { TenantLogo, useTenantIdentity } from './tenant-identity';
 export function AppShell({ children }: { children: ReactNode }) {
   const { dark, ready, toggle } = useAppTheme();
+  const router = useRouter();
   const path = usePathname();
   const originalPage = getPage(path);
   const { scope, transport } = useErp();
@@ -283,7 +284,8 @@ export function AppShell({ children }: { children: ReactNode }) {
                   method: 'POST',
                   credentials: 'same-origin',
                 }).catch(() => undefined);
-                window.location.assign('/login');
+                router.replace('/login');
+                router.refresh();
               }}
             >
               <LogOut />

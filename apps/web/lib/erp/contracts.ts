@@ -47,6 +47,24 @@ export const changeStatuses = {
 } as const;
 export type OrderType = keyof typeof orderTypes;
 export type OrderStatus = keyof typeof orderStatuses;
+
+/** Mesma tabela da API (service-order-rules.ts): destinos válidos a partir de cada etapa. */
+export const orderTransitions: Record<OrderStatus, OrderStatus[]> = {
+  ABERTA: ['EM_ANALISE', 'CANCELADA'],
+  EM_ANALISE: ['AG_CAMPO', 'AG_TERCEIROS', 'RESOLVIDA', 'CANCELADA'],
+  AG_CAMPO: ['EM_ANALISE', 'RESOLVIDA'],
+  AG_TERCEIROS: ['RESOLVIDA', 'EM_ANALISE'],
+  RESOLVIDA: ['FECHADA', 'EM_ANALISE'],
+  FECHADA: ['EM_ANALISE'],
+  CANCELADA: [],
+};
+
+/** Opções do seletor "Próxima etapa" para a etapa atual da O.S. */
+export function nextStatusOptions(current: unknown): Record<string, string> {
+  const targets = orderTransitions[current as OrderStatus];
+  if (!targets) return orderStatuses;
+  return Object.fromEntries(targets.map((code) => [code, orderStatuses[code]]));
+}
 export type PriorityCode = keyof typeof priorities;
 export type RoleCode = 'super_admin' | 'gerente' | 'analista' | 'cliente';
 export interface ErpScope {

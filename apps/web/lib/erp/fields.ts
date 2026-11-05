@@ -27,6 +27,8 @@ export type FieldSpec = {
       | 'sectors'
       | 'origins';
     value?: 'id' | 'name';
+    /** Oculta registros encerrados (ex.: ocorrências que não aceitam nova O.S.). */
+    hideClosed?: boolean;
   };
   options?: Readonly<Record<string, string>>;
   required?: boolean;

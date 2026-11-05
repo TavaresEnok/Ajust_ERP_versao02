@@ -1,4 +1,5 @@
 'use client';
+import { useRouter } from 'next/navigation';
 import { useMemo, type ReactNode } from 'react';
 import { createSameOriginTransport, ErpProvider } from './gateway';
 import type { SessionScope } from '@/lib/bff/scope';
@@ -14,17 +15,19 @@ export function ErpSessionProvider({
   scope: SessionScope | null;
   children: ReactNode;
 }) {
+  const router = useRouter();
   const transports = useMemo(() => {
     const onUnauthorized = () => {
       if (typeof window === 'undefined' || window.location.pathname === '/login') return;
       const next = window.location.pathname + window.location.search;
-      window.location.assign(`/login?next=${encodeURIComponent(next)}`);
+      router.replace(`/login?next=${encodeURIComponent(next)}`);
+      router.refresh();
     };
     return {
       transport: scope ? createSameOriginTransport('/api/erp', { onUnauthorized }) : null,
       publicTransport: createSameOriginTransport('/api/public'),
     };
-  }, [scope]);
+  }, [scope, router]);
   const erpScope = useMemo(
     () =>
       scope

@@ -1091,7 +1091,8 @@ export function OperationalExecution({
                     </p>
                     <p className="mt-2 font-medium">{node?.name || 'Etapa em andamento'}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      {order?.protocol || 'Sem O.S. vinculada'} · {node?.sector || 'Setor não definido'}
+                      {order?.protocol || 'Sem O.S. vinculada'} ·{' '}
+                      {node?.sector || 'Setor não definido'}
                     </p>
                   </div>
                 );
@@ -1099,9 +1100,14 @@ export function OperationalExecution({
             </div>
           ) : waitingStages.length ? (
             <p className="mt-2 text-sm">
-              Aguardando: {waitingStages.map((step) =>
-                instance.definition.nodes.find((item) => item.id === step.nodeId)?.name || step.nodeId,
-              ).join(', ')}
+              Aguardando:{' '}
+              {waitingStages
+                .map(
+                  (step) =>
+                    instance.definition.nodes.find((item) => item.id === step.nodeId)?.name ||
+                    step.nodeId,
+                )
+                .join(', ')}
             </p>
           ) : (
             <p className="mt-2 text-sm">

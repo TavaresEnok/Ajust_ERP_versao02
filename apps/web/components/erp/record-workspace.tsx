@@ -1,15 +1,15 @@
 'use client';
-import { useState } from 'react';
+import { useRef, useState, type ReactNode } from 'react';
 import Link from 'next/link';
-import { ArrowLeft, Download } from 'lucide-react';
+import { ArrowLeft, Download, Paperclip } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 import { useErp, useErpQuery, useErpAction } from '@/lib/erp/gateway';
 import {
   type ErpRecord,
+  nextStatusOptions,
   orderStatuses,
   occurrenceStatuses,
   changeStatuses,
@@ -25,18 +25,32 @@ import { DataReport } from './data-report';
 import { OperationControl } from './operation-controls';
 import { OperationalOrderPanel } from './operational-workflows';
 import { OrderAnnotations } from './order-annotations';
+const attachmentSize = (bytes: unknown) =>
+  typeof bytes !== 'number'
+    ? ''
+    : bytes >= 1024 * 1024
+      ? `${(bytes / 1024 / 1024).toFixed(1)} MB`
+      : `${Math.max(1, Math.ceil(bytes / 1024))} KB`;
 export function RecordWorkspace({
   kind,
   id,
   base = '/gerencia',
   embedded = false,
   initialTab = 'Resumo',
+  activeTab,
+  onTabChange,
+  showTabs = false,
+  workControls,
 }: {
   kind: 'orders' | 'occurrences' | 'changes';
   id: string;
   base?: string;
   embedded?: boolean;
   initialTab?: string;
+  activeTab?: string;
+  onTabChange?: (tab: string) => void;
+  showTabs?: boolean;
+  workControls?: ReactNode;
 }) {
   const config = modules[kind];
   const { scope, transport } = useErp();
@@ -45,9 +59,18 @@ export function RecordWorkspace({
   const query = useErpQuery<ErpRecord | ErpRecord[]>(
     realId ? (kind === 'changes' ? config.endpoint : endpoint) : null,
   );
+  const hours = useErpQuery<{ totalMinutes: number }>(
+    realId && kind === 'orders' && scope?.role !== 'cliente'
+      ? `/time-entries/order-total?orderId=${encodeURIComponent(id)}`
+      : null,
+  );
   const action = useErpAction();
   const [uploadError, setUploadError] = useState('');
+  const [uploading, setUploading] = useState(false);
+  const uploadInFlight = useRef(false);
   const [uploadKey, setUploadKey] = useState(0);
+  const uploadInput = useRef<HTMLInputElement>(null);
+  const [selectedFiles, setSelectedFiles] = useState<File[]>([]);
   const record = Array.isArray(query.data) ? query.data.find((row) => row.id === id) : query.data;
   const customer = scope?.role === 'cliente' || (!scope && base === '/cliente');
   const canOperate = scope
@@ -87,7 +110,7 @@ export function RecordWorkspace({
         }
       : note;
   });
-  const tabs =
+  const allTabs =
     kind === 'orders'
       ? [
           'Encerramento',
@@ -102,10 +125,29 @@ export function RecordWorkspace({
       : kind === 'occurrences'
         ? ['Resumo', 'Editar', 'Ordens vinculadas', 'Anotações', 'Histórico']
         : ['Resumo', 'Aprovação e execução'];
+  const tabs =
+    kind === 'orders' && scope?.role === 'analista'
+      ? ['Encerramento', 'Anotações', 'Editar', 'Anexos', 'Histórico']
+      : kind === 'occurrences' && embedded && showTabs
+        ? ['Anotações', 'Editar', 'Histórico']
+        : allTabs;
+  const contentClass = embedded && showTabs ? 'p-5 sm:p-6' : undefined;
+  const closureNotes = historyAnnotations.filter((note) =>
+    /^(Status alterado de \S+ para (RESOLVIDA|FECHADA)\. Motivo:|Atendimento concluído:|DEMONSTRAÇÃO · Resultado registrado)/.test(
+      String(note.message),
+    ),
+  );
+  const completedOrder = ['RESOLVIDA', 'FECHADA', 'CANCELADA'].includes(status);
   async function submit(suffix: string, method: 'POST' | 'PATCH', values: Record<string, unknown>) {
     await action.execute({ path: endpoint + suffix, method, body: values });
-    await query.mutate();
-    toast.success('Operação confirmada pelo ERP');
+    toast.success('Alteração salva.');
+    try {
+      await query.mutate();
+    } catch {
+      toast.info(
+        'A alteração foi salva, mas a tela não pôde ser atualizada. Recarregue a página para consultar os dados atuais.',
+      );
+    }
   }
   async function download(path: string, name: string) {
     try {
@@ -124,12 +166,17 @@ export function RecordWorkspace({
   const version = typeof record?.version === 'number' ? record.version : undefined;
   const editOccurrence: FieldSpec[] = [
     { name: 'type', label: 'Tipo', min: 2, required: true },
-    { name: 'status', label: 'Status', options: occurrenceStatuses },
+    ...(scope?.role === 'analista'
+      ? []
+      : [{ name: 'status', label: 'Status', options: occurrenceStatuses }]),
     ...['sector', 'origin', 'analystResponsible'].map((name, index) => ({
       name,
       label: ['Setor', 'Origem', 'Analista responsável'][index],
       min: 2,
       required: true,
+      ...(name === 'origin'
+        ? { reference: { resource: 'origins' as const, value: 'name' as const } }
+        : {}),
     })),
     { name: 'description', label: 'Descrição', type: 'textarea', min: 3, required: true },
   ];
@@ -203,12 +250,23 @@ export function RecordWorkspace({
       {query.connected && realId && !record && !query.isLoading && !query.error && (
         <ErpEmpty connected />
       )}
-      <Tabs defaultValue={initialTab} className="min-w-0 gap-5">
-        <div className={embedded ? 'hidden' : 'overflow-x-auto'}>
+      <Tabs
+        {...(activeTab === undefined
+          ? { defaultValue: initialTab }
+          : { value: activeTab, onValueChange: (value) => onTabChange?.(String(value)) })}
+        className="min-w-0 gap-0"
+      >
+        <div
+          className={
+            embedded && !showTabs ? 'hidden' : 'overflow-x-auto border-b border-border px-5 py-2'
+          }
+        >
           <TabsList variant="line">
             {tabs.map((tab) => (
               <TabsTrigger value={tab} key={tab}>
-                {tab}
+                {kind === 'orders' && scope?.role === 'analista' && tab === 'Encerramento'
+                  ? 'Atendimento'
+                  : tab}
               </TabsTrigger>
             ))}
           </TabsList>
@@ -244,26 +302,36 @@ export function RecordWorkspace({
             )}
           </section>
         </TabsContent>
-        <TabsContent value="Editar">
-          <section className="panel p-6">
+        <TabsContent value="Editar" keepMounted={embedded && canOperate} className={contentClass}>
+          <section className={embedded ? 'space-y-5' : 'panel p-6'}>
             <h2 className="section-title mb-5">Editar dados do atendimento</h2>
             <ContractForm
-              key={(record?.updatedAt as string) || id}
+              key={`${id}-${String(record?.version || '')}`}
               label="Salvar alterações"
               fields={
                 kind === 'orders'
-                  ? orderFields.map((field) =>
-                      [
-                        'requester',
-                        'sector',
-                        'origin',
-                        'ownerName',
-                        'analystName',
-                        'internalNotes',
-                      ].includes(field.name)
-                        ? { ...field, nullable: true }
-                        : field,
-                    )
+                  ? [
+                      ...orderFields.map((field) =>
+                        [
+                          'requester',
+                          'sector',
+                          'origin',
+                          'ownerName',
+                          'analystName',
+                          'internalNotes',
+                        ].includes(field.name)
+                          ? { ...field, nullable: true }
+                          : field.name === 'deadlineAt'
+                            ? { ...field, label: 'Prazo' }
+                            : field,
+                      ),
+                      {
+                        name: 'deadlineReason',
+                        label: 'Motivo da mudança de prazo',
+                        hint: 'Obrigatório só se você mudar o prazo. Mudança de prazo é feita pela gestão.',
+                        max: 2000,
+                      },
+                    ]
                   : editOccurrence
               }
               values={record}
@@ -290,7 +358,7 @@ export function RecordWorkspace({
                 {
                   name: 'toStatus',
                   label: 'Próximo status',
-                  options: orderStatuses,
+                  options: nextStatusOptions(status),
                   required: true,
                 },
                 {
@@ -338,52 +406,63 @@ export function RecordWorkspace({
             ))}
           </section>
         </TabsContent>
-        <TabsContent value="Encerramento">
-          <section className="panel p-6 space-y-4">
-            <h2 className="section-title">Solução e encerramento</h2>
-            {annotations.filter((n) =>
-              /^(Status alterado de \S+ para (RESOLVIDA|FECHADA)\. Motivo:|Atendimento concluído:|DEMONSTRAÇÃO · Resultado registrado)/.test(
-                String(n.message),
-              ),
-            ).length === 0 && (
+        <TabsContent
+          value="Encerramento"
+          keepMounted={embedded && canOperate}
+          className={contentClass}
+        >
+          <section className={embedded ? 'space-y-5' : 'panel p-6 space-y-4'}>
+            {!completedOrder && workControls}
+            {(!workControls || completedOrder || closureNotes.length > 0) && (
+              <h2 className="section-title">
+                {completedOrder ? 'Resultado do atendimento' : 'Soluções registradas'}
+              </h2>
+            )}
+            {(!workControls || completedOrder) && !closureNotes.length && (
               <p className="text-sm text-muted-foreground">
-                Não há registro de solução ou encerramento identificado nesta O.S. Os registros
-                originais permanecem no Histórico.
+                Nenhuma descrição de solução registrada. Consulte o histórico para acompanhar as
+                alterações desta O.S.
               </p>
             )}
-            {historyAnnotations
-              .filter((n) =>
-                /^(Status alterado de \S+ para (RESOLVIDA|FECHADA)\. Motivo:|Atendimento concluído:|DEMONSTRAÇÃO · Resultado registrado)/.test(
-                  String(n.message),
-                ),
-              )
-              .map((n) => (
-                <article key={String(n.id)} className="rounded-lg border border-border p-4">
-                  <p className="mb-3 text-xs font-medium">
-                    {String(n.message).includes('para FECHADA.')
-                      ? 'Encerramento'
-                      : 'Solução registrada'}
-                  </p>
-                  <p className="whitespace-pre-wrap break-words text-sm leading-6">
-                    {String(n.message).replace(/^Status alterado de \S+ para \S+\. Motivo:\s*/, '')}
-                  </p>
-                  <p className="mt-3 text-xs text-muted-foreground">
-                    {String(
-                      (n.actorUser as { name?: string })?.name || n.sourceAuthorName || 'Equipe',
-                    )}{' '}
-                    · {new Date(String(n.createdAt)).toLocaleString('pt-BR')}
-                  </p>
-                </article>
-              ))}
+            {closureNotes.map((n) => (
+              <article key={String(n.id)} className="rounded-lg border border-border p-4">
+                <p className="mb-3 text-xs font-medium">
+                  {String(n.message).includes('para FECHADA.')
+                    ? 'Encerramento'
+                    : 'Solução registrada'}
+                </p>
+                <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                  {String(n.message).replace(
+                    /^(Status alterado de \S+ para \S+\. Motivo:|Atendimento concluído:|DEMONSTRAÇÃO · Resultado registrado:?)[\s]*/,
+                    '',
+                  )}
+                </p>
+                <p className="mt-3 text-xs text-muted-foreground">
+                  {String(
+                    (n.actorUser as { name?: string })?.name || n.sourceAuthorName || 'Equipe',
+                  )}{' '}
+                  ·{' '}
+                  {new Date(String(n.createdAt)).toLocaleString('pt-BR', {
+                    timeZone: 'America/Fortaleza',
+                  })}
+                </p>
+              </article>
+            ))}
+            {completedOrder && workControls}
           </section>
         </TabsContent>
-        <TabsContent value="Anotações">
-          <section className="panel p-6">
-            {kind === 'orders' ? (
+        <TabsContent
+          value="Anotações"
+          keepMounted={embedded && canOperate}
+          className={contentClass}
+        >
+          <section className={embedded ? 'space-y-5' : 'panel p-6'}>
+            {kind === 'orders' || kind === 'occurrences' ? (
               <OrderAnnotations
                 orderId={id}
                 notes={annotations as ErpRecord[]}
                 refresh={query.mutate}
+                resource={kind}
               />
             ) : (
               <>
@@ -408,19 +487,33 @@ export function RecordWorkspace({
             )}
           </section>
         </TabsContent>
-        <TabsContent value="Histórico">
-          <section className="panel">
-            <PanelHeading
-              title="Histórico do atendimento"
-              description="Eventos e anotações retornados pelo servidor, sem eventos fabricados."
-            />
+        <TabsContent value="Histórico" className={contentClass}>
+          <section className={embedded ? 'space-y-5' : 'panel'}>
+            {embedded ? (
+              <div>
+                <h2 className="section-title">Histórico do atendimento</h2>
+                <p className="mt-2 text-xs text-muted-foreground">
+                  Alterações e registros, do mais recente para o mais antigo.
+                </p>
+              </div>
+            ) : (
+              <PanelHeading
+                title="Histórico do atendimento"
+                description="Alterações, responsáveis e registros do atendimento, do mais recente para o mais antigo."
+              />
+            )}
             {annotations.length ? (
-              <div className="p-6 pt-0">
+              <div className={embedded ? '' : 'p-6 pt-0'}>
                 {historyAnnotations.map((row, i) => (
                   <div className="timeline-item" key={String(row.id || i)}>
-                    <p className="text-xs leading-6">{displayValue(row.message)}</p>
+                    <p className="whitespace-pre-wrap break-words text-sm leading-6">
+                      {displayValue(row.message)}
+                    </p>
                     <p className="mt-2 text-[10px] text-muted-foreground">
-                      {displayValue(row.createdAt)} ·{' '}
+                      {new Date(String(row.createdAt)).toLocaleString('pt-BR', {
+                        timeZone: 'America/Fortaleza',
+                      })}{' '}
+                      ·{' '}
                       {displayValue(
                         (row.actorUser as { name?: string })?.name ||
                           row.sourceAuthorName ||
@@ -435,8 +528,8 @@ export function RecordWorkspace({
             )}
           </section>
         </TabsContent>
-        <TabsContent value="Anexos">
-          <section className="panel p-6">
+        <TabsContent value="Anexos" keepMounted={embedded && canOperate} className={contentClass}>
+          <section className={embedded ? 'space-y-5' : 'panel p-6'}>
             <h2 className="section-title mb-5">Arquivos do atendimento</h2>
             {rows('attachments').map((row, index) => (
               <div
@@ -444,8 +537,7 @@ export function RecordWorkspace({
                 className="mb-4 flex items-center justify-between gap-3 rounded-lg border border-border p-4"
               >
                 <p className="min-w-0 truncate text-xs">
-                  {displayValue(row.fileName || row.originalName)} · {displayValue(row.sizeBytes)}{' '}
-                  bytes
+                  {displayValue(row.fileName || row.originalName)} · {attachmentSize(row.sizeBytes)}
                 </p>
                 <Button
                   variant="outline"
@@ -462,10 +554,17 @@ export function RecordWorkspace({
                 </Button>
               </div>
             ))}
+            {!rows('attachments').length && (
+              <p className="rounded-lg border border-dashed border-border p-5 text-sm text-muted-foreground">
+                Nenhum arquivo anexado. Adicione imagens, áudios, documentos ou backups relacionados
+                a este trabalho.
+              </p>
+            )}
             <form
               key={uploadKey}
               onSubmit={async (event) => {
                 event.preventDefault();
+                if (uploadInFlight.current) return;
                 setUploadError('');
                 const data = new FormData(event.currentTarget);
                 const files = data
@@ -479,6 +578,8 @@ export function RecordWorkspace({
                   setUploadError('Selecione de 1 a 10 arquivos, cada um com até 10 MB.');
                   return;
                 }
+                uploadInFlight.current = true;
+                setUploading(true);
                 try {
                   await action.execute({
                     path: endpoint + '/attachments',
@@ -486,32 +587,81 @@ export function RecordWorkspace({
                     body: data,
                   });
                   setUploadKey((k) => k + 1);
-                  await query.mutate();
-                  toast.success('Upload confirmado pelo ERP');
+                  setSelectedFiles([]);
+                  toast.success('Anexos enviados.');
+                  try {
+                    await query.mutate();
+                  } catch {
+                    setUploadError(
+                      'Os anexos foram enviados, mas a lista não pôde ser atualizada. Recarregue a página para consultá-los.',
+                    );
+                  }
                 } catch (error) {
                   setUploadError(errorMessage(error));
+                } finally {
+                  uploadInFlight.current = false;
+                  setUploading(false);
                 }
               }}
               className="flex flex-col gap-4"
             >
-              <label className="text-xs" htmlFor="erp-attachments">
-                Anexar arquivos · até 10 arquivos de 10 MB
+              <p className="text-xs text-muted-foreground">
+                Até 10 arquivos por envio, com até 10 MB cada.
+              </p>
+              <label className="text-sm">
+                Visibilidade
+                <select
+                  name="isInternal"
+                  defaultValue="true"
+                  className="ml-2 rounded border p-2"
+                  disabled={!connected || !canOperate || uploading}
+                >
+                  <option value="true">Somente equipe</option>
+                  <option value="false">Disponível no portal do cliente</option>
+                </select>
               </label>
-              <Input
+              <input
+                ref={uploadInput}
                 id="erp-attachments"
                 name="files"
                 type="file"
+                accept=".pdf,.png,.jpg,.jpeg,.txt,.csv,.zip,.mp4,.mov,.webm,.mp3,.wav,.ogg,.aac,.m4a"
+                className="hidden"
                 multiple
                 required
-                disabled={!connected || !canOperate}
+                disabled={!connected || !canOperate || uploading}
+                onChange={(event) => setSelectedFiles(Array.from(event.currentTarget.files || []))}
               />
+              <Button
+                type="button"
+                variant="outline"
+                className="w-fit"
+                disabled={!connected || !canOperate || uploading}
+                onClick={() => uploadInput.current?.click()}
+              >
+                <Paperclip className="size-3.5" />
+                Anexo
+              </Button>
+              {selectedFiles.length > 0 && (
+                <ul className="space-y-1 text-xs text-muted-foreground">
+                  {selectedFiles.map((file, index) => (
+                    <li className="break-words" key={`${file.name}-${index}`}>
+                      {file.name} · {attachmentSize(file.size)}
+                    </li>
+                  ))}
+                </ul>
+              )}
               {uploadError && (
                 <p role="alert" className="text-xs text-danger">
                   {uploadError}
                 </p>
               )}
-              <Button type="submit" disabled={!connected || !canOperate || action.pending}>
-                Enviar anexos ao ERP
+              <Button
+                type="submit"
+                className="w-fit"
+                disabled={!connected || !canOperate || uploading || !selectedFiles.length}
+              >
+                {uploading ? 'Enviando…' : 'Enviar anexos'}
               </Button>
             </form>
           </section>
@@ -572,6 +722,11 @@ export function RecordWorkspace({
         <TabsContent value="Trabalho">
           <section className="panel p-6">
             <h2 className="section-title mb-5">Registrar tempo nesta ordem</h2>
+            {hours.data && (
+              <p className="mb-4 text-sm">
+                Tempo total da equipe nesta O.S.: {hours.data.totalMinutes} minutos.
+              </p>
+            )}
             <ContractForm
               fields={modules.time.fields.filter((f) => f.name !== 'orderId')}
               connected={connected && canOperate}
@@ -582,6 +737,7 @@ export function RecordWorkspace({
                   method: 'POST',
                   body: { ...values, orderId: id },
                 });
+                await hours.mutate();
                 toast.success('Trabalho confirmado pelo ERP');
               }}
             />
@@ -609,9 +765,11 @@ export function RecordWorkspace({
           ) : (
             <ErpEmpty />
           )}
-          <Link className="text-link mt-5" href={`${base}/calendario-sla`}>
-            Calendário e simulação
-          </Link>
+          {manager && (
+            <Link className="text-link mt-5" href={`${base}/calendario-sla`}>
+              Calendário e simulação
+            </Link>
+          )}
         </TabsContent>
         <TabsContent value="Aprovação e execução">
           <section className="panel p-6">
@@ -634,7 +792,9 @@ export function RecordWorkspace({
               ]}
               connected={connected && manager}
               pending={action.pending}
-              onSubmit={(values) => submit('/transition', 'PATCH', values)}
+              onSubmit={(values) =>
+                submit('/transition', 'PATCH', { ...values, expectedVersion: version })
+              }
               label="Confirmar transição da RFC"
             />
             <p className="mt-4 text-xs text-muted-foreground">

@@ -1,5 +1,5 @@
 'use client';
-import { useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import {
@@ -10,6 +10,8 @@ import {
   Download,
   FileUp,
   History,
+  Maximize2,
+  Minimize2,
   Network,
   Pencil,
   Plus,
@@ -21,6 +23,7 @@ import { Button } from '@/components/ui/button';
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from '@/components/ui/dialog';
 import { useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import { useRouteBase } from '@/lib/erp/visual-data';
+import { cn } from '@/lib/utils';
 import { PageHeading, Avatar } from './primitives';
 import { QueryState } from './contract-form';
 import { downloadDiagram } from './drawio-frame';
@@ -80,6 +83,8 @@ export function NetworkTopologiesPage({ customerId }: { customerId?: string }) {
   } | null>(null);
   const versionRef = useRef(0);
   const fileInput = useRef<HTMLInputElement>(null);
+  const viewer = useRef<HTMLElement>(null);
+  const [fullscreen, setFullscreen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
   const history = useErpQuery<Revision[]>(
     customerId && historyOpen ? `/network-topologies/${customerId}/history` : null,
@@ -96,6 +101,53 @@ export function NetworkTopologiesPage({ customerId }: { customerId?: string }) {
       (filter === 'all' || (filter === 'with') === !!p.networkTopology),
   );
   const displayed = rows.slice(page * 25, (page + 1) * 25);
+
+  useEffect(() => {
+    const syncFullscreen = () =>
+      setFullscreen(!!viewer.current && document.fullscreenElement === viewer.current);
+    document.addEventListener('fullscreenchange', syncFullscreen);
+    return () => document.removeEventListener('fullscreenchange', syncFullscreen);
+  }, []);
+
+  useEffect(() => {
+    if (!fullscreen) return;
+    const exitOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape' && document.fullscreenElement === viewer.current) {
+        // The browser may already be exiting fullscreen when this promise settles.
+        void document.exitFullscreen().catch(() => undefined);
+      }
+    };
+    // Keyboard events inside an iframe do not bubble to the ERP document.
+    const frame = viewer.current?.querySelector('iframe');
+    let frameDocument: Document | null = null;
+    const listenInsideDiagram = () => {
+      frameDocument?.removeEventListener('keydown', exitOnEscape, true);
+      frameDocument = frame?.contentDocument || null;
+      frameDocument?.addEventListener('keydown', exitOnEscape, true);
+    };
+    document.addEventListener('keydown', exitOnEscape, true);
+    frame?.addEventListener('load', listenInsideDiagram);
+    listenInsideDiagram();
+    return () => {
+      document.removeEventListener('keydown', exitOnEscape, true);
+      frame?.removeEventListener('load', listenInsideDiagram);
+      frameDocument?.removeEventListener('keydown', exitOnEscape, true);
+    };
+  }, [fullscreen]);
+
+  async function toggleFullscreen() {
+    try {
+      if (document.fullscreenElement === viewer.current) {
+        await document.exitFullscreen();
+      } else if (viewer.current?.requestFullscreen) {
+        await viewer.current.requestFullscreen();
+      } else {
+        toast.info('Este navegador não oferece tela cheia. Use F11 para ampliar a janela.');
+      }
+    } catch {
+      toast.error('Não foi possível abrir a tela cheia. Tente novamente.');
+    }
+  }
 
   function edit(
     xml: string,
@@ -212,14 +264,28 @@ export function NetworkTopologiesPage({ customerId }: { customerId?: string }) {
           }}
         />
         {customer && (
-          <section className="overflow-hidden rounded-2xl border border-border bg-card">
-            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
+          <section
+            ref={viewer}
+            aria-label={`Diagrama de rede de ${name(customer)}`}
+            className={cn(
+              'overflow-hidden border-border bg-card',
+              fullscreen ? 'flex h-dvh w-screen flex-col' : 'rounded-2xl border',
+            )}
+          >
+            <div
+              className={cn(
+                'flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-border',
+                fullscreen ? 'px-4 py-2' : 'px-5 py-4',
+              )}
+            >
               <div className="flex items-center gap-3">
                 <span className="rounded-xl bg-primary/10 p-2.5 text-primary">
                   <Network className="size-5" />
                 </span>
                 <div>
-                  <h2 className="font-semibold">Topologia de rede</h2>
+                  <h2 className="font-semibold">
+                    {fullscreen ? name(customer) : 'Topologia de rede'}
+                  </h2>
                   <p className="text-xs text-muted-foreground">
                     {topology
                       ? `Versão ${topology.version} · ${date(topology.updatedAt)} · ${topology.updatedByName}`
@@ -227,14 +293,38 @@ export function NetworkTopologiesPage({ customerId }: { customerId?: string }) {
                   </p>
                 </div>
               </div>
-              {topology && (
-                <span className="rounded-full bg-success/10 px-3 py-1 text-xs text-success">
-                  Diagrama disponível
-                </span>
-              )}
+              <div className="flex items-center gap-3">
+                {topology && !fullscreen && (
+                  <span className="hidden rounded-full bg-success/10 px-3 py-1 text-xs text-success sm:inline-flex">
+                    Diagrama disponível
+                  </span>
+                )}
+                {topology?.diagramXml && (
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => void toggleFullscreen()}
+                    aria-pressed={fullscreen}
+                    title={
+                      fullscreen
+                        ? 'Voltar à visualização normal (Esc)'
+                        : 'Ocupar toda a tela com o diagrama'
+                    }
+                  >
+                    {fullscreen ? (
+                      <Minimize2 className="size-4" />
+                    ) : (
+                      <Maximize2 className="size-4" />
+                    )}
+                    {fullscreen ? 'Sair da tela cheia' : 'Tela cheia'}
+                  </Button>
+                )}
+              </div>
             </div>
             {topology?.diagramXml ? (
-              <div className="h-[calc(100dvh-310px)] min-h-[480px]">
+              <div
+                className={fullscreen ? 'min-h-0 flex-1' : 'h-[calc(100dvh-310px)] min-h-[480px]'}
+              >
                 <DrawioFrame
                   key={topology.version}
                   xml={topology.diagramXml}

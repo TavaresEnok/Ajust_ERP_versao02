@@ -51,6 +51,10 @@ const statusLabel: Record<MonitorStatus, string> = {
 };
 
 export function RealtimeEventsWorkspace() {
+  const { scope } = useErp();
+  return <RealtimeEventsSession key={`${scope?.sessionKey}:${scope?.tenantId}:${scope?.role}`} />;
+}
+function RealtimeEventsSession() {
   const { scope, transport } = useErp();
   const action = useErpAction();
   const socketRef = useRef<Socket | null>(null);
@@ -63,9 +67,6 @@ export function RealtimeEventsWorkspace() {
   useEffect(() => {
     socketRef.current?.disconnect();
     socketRef.current = null;
-    setStatus('idle');
-    setEvents([]);
-    setLastError('');
     return () => {
       socketRef.current?.disconnect();
       socketRef.current = null;

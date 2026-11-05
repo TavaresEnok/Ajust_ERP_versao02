@@ -104,6 +104,13 @@ export async function proxy(request: NextRequest) {
     );
   }
 
+  if (role === 'analista' && normalized === '/analista/sla') {
+    return withRefreshedCookies(
+      NextResponse.redirect(new URL('/analista/ordens?deadline=overdue', request.url)),
+      session.refreshed,
+    );
+  }
+
   requestHeaders.set(
     SCOPE_HEADER,
     JSON.stringify({

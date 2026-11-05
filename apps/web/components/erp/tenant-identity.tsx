@@ -1,4 +1,5 @@
 'use client';
+import Image from 'next/image';
 import { useEffect, useState } from 'react';
 import useSWR from 'swr';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
@@ -21,11 +22,17 @@ function LogoImage({ blob, name }: { blob: Blob; name: string }) {
   const [src, setSrc] = useState('');
   useEffect(() => {
     const url = URL.createObjectURL(blob);
-    setSrc(url);
-    return () => URL.revokeObjectURL(url);
+    const update = setTimeout(() => setSrc(url), 0);
+    return () => {
+      clearTimeout(update);
+      URL.revokeObjectURL(url);
+    };
   }, [blob]);
   return src ? (
-    <img
+    <Image
+      unoptimized
+      width={32}
+      height={32}
       src={src}
       alt={`Logo de ${name}`}
       className="size-8 rounded-md bg-card object-contain"

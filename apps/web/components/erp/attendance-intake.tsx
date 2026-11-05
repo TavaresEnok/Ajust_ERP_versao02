@@ -28,7 +28,15 @@ export function AttendanceIntake({
   const selection: FieldSpec[] = occurrence
     ? []
     : mode === 'existing'
-      ? [{ name: 'occurrenceId', label: 'Ocorrência existente', type: 'uuid', required: true }]
+      ? [
+          {
+            name: 'occurrenceId',
+            label: 'Ocorrência existente (abertas)',
+            type: 'uuid',
+            required: true,
+            reference: { resource: 'occurrences', hideClosed: true },
+          },
+        ]
       : providerId
         ? []
         : [
@@ -66,6 +74,22 @@ export function AttendanceIntake({
           </label>
         </fieldset>
       )}
+      {mode === 'new' && (
+        <label className="flex gap-3 rounded-lg border border-border p-4 text-sm leading-6">
+          <input
+            type="checkbox"
+            className="mt-1 size-4 accent-primary"
+            checked={completed}
+            onChange={(event) => setCompleted(event.target.checked)}
+          />
+          <span>
+            <strong>Registrar trabalho já realizado</strong>
+            <span className="block text-muted-foreground">
+              A O.S. nasce concluída. Descreva o resultado e os identificadores na descrição.
+            </span>
+          </span>
+        </label>
+      )}
       {(occurrence || fixedCustomer) && (
         <p className="rounded-lg border border-border p-3 text-sm">
           Provedor:{' '}
@@ -83,7 +107,13 @@ export function AttendanceIntake({
         }}
         connected={connected}
         pending={pending}
-        label={completed ? 'Registrar atendimento concluído' : mode === 'new' ? 'Abrir atendimento' : 'Adicionar O.S. à ocorrência'}
+        label={
+          completed
+            ? 'Registrar atendimento concluído'
+            : mode === 'new'
+              ? 'Abrir atendimento'
+              : 'Adicionar O.S. à ocorrência'
+        }
         onSubmit={async (values) => {
           const { customerId, occurrenceId, ...order } = values;
           if (mode === 'existing') {
@@ -109,12 +139,15 @@ export function AttendanceIntake({
               openedByName: 'Equipe Ajust',
               analystResponsible: 'Equipe Ajust',
               description: order.description,
-              firstOrder: { ...order, recordCompleted: completed, requester: customer.tradeName || customer.legalName },
+              firstOrder: {
+                ...order,
+                recordCompleted: completed,
+                requester: customer.tradeName || customer.legalName,
+              },
             });
           }
         }}
       />
-      {mode === 'new' && <label className="flex gap-2 text-sm"><input type="checkbox" checked={completed} onChange={e => setCompleted(e.target.checked)} />O trabalho já foi realizado. Registrar como concluído; descreva o resultado e os identificadores na descrição.</label>}
     </div>
   );
 }

@@ -253,6 +253,7 @@ export function AuthPage({ mode }: { mode: string }) {
                         method: 'POST',
                         body: {
                           identifier: cnpj,
+                          email: bootstrapEmail,
                           password: data.get('password'),
                           bootstrapToken: validation.bootstrapToken,
                         },

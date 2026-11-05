@@ -17,33 +17,60 @@ import { FlowReport } from './reports-workspace';
 import { DataReport } from './data-report';
 import { OperationControl } from './operation-controls';
 import { cn } from '@/lib/utils';
+import { isDemonstration, type ManagementOverview } from '@/lib/erp/management';
+const reportTabs = {
+  overview: 'Visão gerencial',
+  team: 'Performance da equipe',
+  providers: 'Provedores',
+  types: 'Tipos de serviço',
+  flow: 'Trilha e fluxo',
+  exports: 'Exportações',
+  satisfaction: 'Satisfação',
+};
 const value = (data: unknown) => (data === undefined || data === null ? '—' : String(data));
 export function ReportsPage() {
+  const [now] = useState(() => Date.now());
   const params = useSearchParams();
   const base = useRouteBase();
   const { scope } = useErp();
   const [period, setPeriod] = useState('month');
-  const [tab, setTab] = useState(
-    !scope || ['super_admin', 'gerente'].includes(scope.role)
-      ? params.get('tab') === 'team'
-        ? 'Performance da equipe'
-        : 'Visão gerencial'
-      : 'Provedores',
-  );
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
+  const requestedTab = reportTabs[params.get('tab') as keyof typeof reportTabs];
+  const tab =
+    requestedTab &&
+    (manager || !['Visão gerencial', 'Performance da equipe', 'Satisfação'].includes(requestedTab))
+      ? requestedTab
+      : manager
+        ? 'Visão gerencial'
+        : 'Provedores';
+  const setTab = (name: string) => {
+    const next = new URLSearchParams(params.toString());
+    next.set('tab', Object.entries(reportTabs).find(([, label]) => label === name)![0]);
+    window.history.replaceState(null, '', `${base}/relatorios?${next}`);
+  };
   const daysBack = period === 'week' ? 7 : period === 'quarter' ? 90 : 30;
-  const kpi = useErpQuery<{
-    overview?: Record<string, unknown>;
-    performanceByAnalyst?: ErpRecord[];
-  }>(manager ? `/reports/manager-kpi?daysBack=${daysBack}` : null);
+  const kpi = useErpQuery<ManagementOverview>(
+    manager ? `/reports/management-overview?daysBack=${daysBack}` : null,
+  );
   const health = useErpQuery<unknown>(`/reports/operational-health?daysBack=${daysBack}`);
   const tenants = useVisualSource('providers');
   const source = useVisualSource('orders');
-  const overview = kpi.data?.overview;
-  const performance = kpi.data?.performanceByAnalyst || [];
+  const report = kpi.error ? undefined : kpi.data;
+  const overview = report
+    ? {
+        ...report.results,
+        totalOpen: report.operation.totalOpen,
+        totalClosed: report.results.closed,
+        slaBreaches: report.operation.overdue,
+      }
+    : undefined;
+  const performance = report?.team || [];
   const providers = listRecords(health.data);
   const filtered = source.raw.filter(
-    (row) => new Date(String(row.createdAt)).getTime() >= Date.now() - daysBack * 86400000,
+    (row) =>
+      !isDemonstration(row) &&
+      new Date(String(row.createdAt)).getTime() >=
+        (report ? new Date(report.period.start).getTime() : now - daysBack * 86400000),
   );
   const distribution = Object.entries(orderTypes)
     .map(([key, label]) => ({ label, count: filtered.filter((row) => row.type === key).length }))
@@ -65,6 +92,36 @@ export function ReportsPage() {
           value(row.closed),
           value(row.slaBreaches),
         ]),
+      );
+    else if (tab === 'Visão gerencial')
+      exportCsv(
+        'visao-gerencial',
+        ['Indicador', 'Valor', 'Base'],
+        [
+          [
+            'Pendentes atuais',
+            value(overview?.totalOpen),
+            'Todas as pendências, inclusive antigas',
+          ],
+          ['Atrasadas atuais', value(overview?.slaBreaches), 'Ativas com SLA e sem pausa'],
+          [
+            'Entregas no período',
+            value(overview?.totalClosed),
+            'Data efetiva de resolução ou fechamento',
+          ],
+          [
+            'Tempo médio de resolução (h)',
+            value(overview?.tmrHours),
+            `${overview?.measuredClosed ?? 0} entregas válidas`,
+          ],
+          [
+            'SLA (%)',
+            value(overview?.slaPercentage),
+            `${overview?.slaEvaluated ?? 0} entregas elegíveis`,
+          ],
+          ['Início', report?.period.start || '', 'Fortaleza'],
+          ['Fim', report?.period.end || '', 'Fortaleza'],
+        ],
       );
     else
       exportCsv(
@@ -91,15 +148,25 @@ export function ReportsPage() {
           <option value="week">Últimos 7 dias</option>
           <option value="quarter">Últimos 90 dias</option>
         </select>
-        <Button disabled={!kpi.connected} onClick={exportCurrent}>
+        <Button
+          disabled={
+            tab === 'Visão gerencial' || tab === 'Performance da equipe'
+              ? !report
+              : tab === 'Tipos de serviço'
+                ? !source.connected
+                : !health.data || !['Provedores'].includes(tab)
+          }
+          onClick={exportCurrent}
+        >
           <ArrowDownToLine data-icon="inline-start" />
           Exportar dados consultados
         </Button>
       </PageHeading>
       <p className="mb-5 text-xs leading-6 text-muted-foreground">
-        Indicadores das O.S. criadas no período selecionado, considerando sua situação atual.
-        Resolução usa apenas datas válidas, não tempo trabalhado. Cancelamentos não são conclusões
-        nem ordens ativas.
+        Pendências e atrasos consideram toda a fila atual. Entregas usam a data efetiva de resolução
+        ou fechamento no período, inclusive de ordens antigas. Demonstrações ficam fora dos
+        indicadores. Resolução mede tempo decorrido, incluindo esperas; não representa horas
+        trabalhadas.
       </p>
       <div className="mb-6 flex gap-6 overflow-x-auto border-b border-border">
         {[
@@ -136,17 +203,17 @@ export function ReportsPage() {
         <>
           <div className="metrics-grid mb-5 grid grid-cols-4 gap-4">
             <Metric
-              label="Abertas"
+              label="Pendentes agora"
               value={value(overview?.totalOpen)}
               change="ERP"
-              foot="entre as criadas no período"
+              foot="todas as pendências, inclusive antigas"
               icon={ClipboardList}
             />
             <Metric
-              label="Concluídas"
+              label="Entregas no período"
               value={value(overview?.totalClosed)}
               change="ERP"
-              foot="resolvidas/fechadas entre as criadas no período"
+              foot="pela data efetiva de resolução ou fechamento"
               icon={CheckCircle2}
             />
             <Metric
@@ -160,14 +227,14 @@ export function ReportsPage() {
               label="Violações de SLA"
               value={value(overview?.slaBreaches)}
               change="ERP"
-              foot="no período consultado"
+              foot="pendências atuais sem pausa"
               icon={ShieldCheck}
             />
           </div>
           <section className="panel mb-5">
             <PanelHeading
               title="Evolução do volume de atendimento"
-              description="Criação e situação atual das ordens consultadas; não substitui uma série histórica de encerramentos."
+              description="Entradas por criação e entregas por resolução ou fechamento, em dias de Fortaleza."
             />
             <div className="px-6 pb-5">
               <VolumeChart period={period} />
@@ -216,7 +283,10 @@ export function ReportsPage() {
         </section>
       ) : tab === 'Performance da equipe' ? (
         <section className="panel">
-          <PanelHeading title="Desempenho dos integrantes" />
+          <PanelHeading
+            title="Distribuição e entregas da equipe"
+            description="Ativas e atrasadas são da fila atual; entregas e resolução média pertencem ao período. O responsável é identificado pelo vínculo de usuário. Quantidade não mede esforço, complexidade ou jornada."
+          />
           <ReportChart
             data={performance}
             spec={{
@@ -234,9 +304,9 @@ export function ReportsPage() {
               <thead>
                 <tr>
                   <th>Integrante</th>
-                  <th>Ativas</th>
-                  <th>Concluídas</th>
-                  <th>Violações SLA</th>
+                  <th>Pendentes atuais</th>
+                  <th>Entregas no período</th>
+                  <th>Atrasadas atuais</th>
                   <th>Resolução média (h)</th>
                 </tr>
               </thead>
@@ -247,6 +317,11 @@ export function ReportsPage() {
                       <span className="flex items-center gap-3">
                         <Avatar name={value(row.name)} />
                         {value(row.name)}
+                        {!row.userId && (
+                          <span className="text-xs text-muted-foreground">
+                            Sem vínculo com usuário
+                          </span>
+                        )}
                       </span>
                     </td>
                     <td>{value(row.open)}</td>
@@ -327,7 +402,6 @@ function ProviderReport({
             <tr>
               <th>Provedor</th>
               <th>Ordens</th>
-              <th>Nota</th>
               <th>Resolução (%)</th>
               <th>Horas consumidas</th>
             </tr>
@@ -350,7 +424,6 @@ function ProviderReport({
                     )}
                   </td>
                   <td>{value(row.totalOrders)}</td>
-                  <td>{value(row.grade)}</td>
                   <td>{value(row.resolutionRate)}</td>
                   <td>{value(row.hoursConsumed)}</td>
                 </tr>

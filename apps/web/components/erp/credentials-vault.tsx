@@ -24,6 +24,7 @@ import {
   Building2,
   FolderKey,
 } from 'lucide-react';
+import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import {
@@ -39,6 +40,7 @@ import { copyToClipboard } from '@/lib/erp/clipboard';
 import { listRecords } from '@/lib/erp/visual-data';
 import { cn } from '@/lib/utils';
 import { RecordDialog } from './record-dialog';
+import { useVaultConfirmation } from './vault-confirmation';
 import { CredentialTotp } from './credential-totp';
 import { VaultAccessEditor, StructuredAccesses, type VaultAccess } from './vault-access-editor';
 import { QueryState } from './contract-form';
@@ -231,11 +233,23 @@ export function CredentialsPage() {
   const [search, setSearch] = useState('');
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [providerMode, setProviderMode] = useState<'cards' | 'table'>('cards');
+  const confirmation = useVaultConfirmation();
   const [detailTab, setDetailTab] = useState<'access' | 'notes' | 'history'>('access');
   const [providerSearch, setProviderSearch] = useState('');
   const [deleteChallenge, setDeleteChallenge] = useState<string | null>(null);
   const [deleteInput, setDeleteInput] = useState('');
-  const [provider, setProvider] = useState('Todos');
+  const providerParams = useSearchParams();
+  const provider = providerParams.get('provider') || 'Todos';
+  const setProvider = (value: string) => {
+    const next = new URLSearchParams(window.location.search);
+    if (value === 'Todos') next.delete('provider');
+    else next.set('provider', value);
+    window.history.replaceState(
+      null,
+      '',
+      `${window.location.pathname}${next.size ? `?${next}` : ''}`,
+    );
+  };
   const [type, setType] = useState('Todos');
   const [page, setPage] = useState(1);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -353,10 +367,13 @@ export function CredentialsPage() {
   useEffect(() => hideSecret, []);
 
   async function fetchSecret(item: ErpRecord) {
+    const body = await confirmation.request();
+    if (!body) return null;
     const version = ++revealVersion.current;
     try {
       const response = await action.execute<Record<string, unknown>>({
         path: `/knowledge/credentials/${encodeURIComponent(item.id)}/reveal`,
+        body,
         method: 'POST',
       });
       if (version !== revealVersion.current) return null;
@@ -657,6 +674,7 @@ export function CredentialsPage() {
     );
   return (
     <>
+      {confirmation.dialog}
       <div className="mx-auto max-w-[1500px] space-y-5">
         <div className="flex flex-wrap items-center justify-between gap-4 rounded-2xl border border-border bg-card p-5">
           <div className="flex items-center gap-4">
@@ -1110,6 +1128,8 @@ export function CredentialsPage() {
                         variant="outline"
                         disabled={action.pending}
                         onClick={async () => {
+                          const body = await confirmation.request();
+                          if (!body) return;
                           const version = ++revealVersion.current;
                           try {
                             const result = await action.execute<{
@@ -1117,6 +1137,7 @@ export function CredentialsPage() {
                               accessEntries: VaultAccess[];
                             }>({
                               path: `/knowledge/credentials/${selected.id}/reveal`,
+                              body,
                               method: 'POST',
                             });
                             if (version === revealVersion.current) {

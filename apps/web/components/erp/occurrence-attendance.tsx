@@ -124,7 +124,7 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
             {pendingOrders.length > 0 && (
               <div
                 role="status"
-                className="mt-4 rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-950"
+                className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-300"
               >
                 <p className="font-medium">
                   Este atendimento tem {pendingOrders.length} O.S. pendente(s).
@@ -253,7 +253,7 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
                       </td>
                       <td>
                         {o.slaEligible === false
-                          ? 'Não informado na origem'
+                          ? 'Sem prazo de SLA'
                           : o.deadlineAt
                             ? new Date(String(o.deadlineAt)).toLocaleString('pt-BR', {
                                 timeZone: 'America/Fortaleza',
@@ -283,25 +283,19 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
             flows.map(([flowId, label]) => (
               <FlowDisclosure key={flowId} id={flowId} base={base} label={label} />
             ))}
-          <div className="mb-4 flex flex-wrap gap-2">
-            {['Anotações', 'Editar', 'Histórico'].map((name) => (
-              <Button
-                key={name}
-                variant={name === tab ? 'secondary' : 'outline'}
-                onClick={() => setTab(name)}
-              >
-                {name === 'Editar' ? 'Editar ocorrência' : name}
-              </Button>
-            ))}
-          </div>
-          <RecordWorkspace
-            key={`${id}-${tab}`}
-            kind="occurrences"
-            id={id}
-            base={base}
-            embedded
-            initialTab={tab}
-          />
+          <section className="panel min-w-0 overflow-hidden">
+            <RecordWorkspace
+              key={id}
+              kind="occurrences"
+              id={id}
+              base={base}
+              embedded
+              showTabs
+              activeTab={tab}
+              onTabChange={setTab}
+              initialTab={tab}
+            />
+          </section>
         </>
       )}
     </>

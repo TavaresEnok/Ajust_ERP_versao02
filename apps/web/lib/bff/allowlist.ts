@@ -97,6 +97,9 @@ const ROUTES: Record<string, Method[]> = {
   '/on-call': ['GET', 'POST'],
   '/on-call/:id': ['DELETE'],
   '/on-call/current': ['GET'],
+  '/on-call/roster': ['GET'],
+  '/on-call/roster/policy': ['PUT'],
+  '/on-call/roster/days/:date': ['PUT', 'DELETE'],
 
   '/os-process-templates': ['GET', 'POST'],
   '/service-processes': ['GET', 'POST'],
@@ -121,7 +124,10 @@ const ROUTES: Record<string, Method[]> = {
   '/shift-reports/authors': ['GET'],
   '/shift-reports/order-search': ['GET'],
   '/shift-reports/:id': ['GET', 'PATCH'],
+  '/shift-reports/:id/attachments': ['POST'],
+  '/shift-reports/:id/attachments/:attachmentId/download': ['GET'],
   '/reports/manager-kpi': ['GET'],
+  '/reports/management-overview': ['GET'],
   '/reports/operational-health': ['GET'],
   '/reports/service-order-flow': ['GET'],
   '/reports/service-types': ['GET'],
@@ -163,6 +169,7 @@ const ROUTES: Record<string, Method[]> = {
   '/time-entries': ['GET', 'POST'],
   '/time-entries/:id': ['DELETE'],
   '/time-entries/summary': ['GET'],
+  '/time-entries/order-total': ['GET'],
 
   '/workflows': ['GET', 'POST'],
   '/workflows/:id': ['GET', 'PATCH', 'DELETE'],

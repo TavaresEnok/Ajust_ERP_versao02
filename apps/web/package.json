@@ -6,7 +6,7 @@
     "dev": "next dev -p ${PORT:-3000} -H 0.0.0.0",
     "build": "next build",
     "start": "next start -p ${PORT:-3000} -H 0.0.0.0",
-    "lint": "eslint .",
+    "lint": "eslint . --max-warnings=0",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test"
   },

@@ -63,7 +63,9 @@ function redirectFor(role: string, next: unknown) {
 function authenticated(login: LoginApiResponse, next: unknown) {
   const response = NextResponse.json({
     authenticated: true,
-    redirectTo: redirectFor(login.user.role, next),
+    redirectTo: login.twoFactorSetupRequired
+      ? `${roleHome(login.user.role) || '/cliente'}/seguranca/2fa`
+      : redirectFor(login.user.role, next),
   });
   applyAuthCookies(response.cookies, login);
   return response;
@@ -73,13 +75,14 @@ async function login(request: NextRequest) {
   const body = await readBody(request);
   const identifier = String(body.identifier ?? '').trim();
   const password = String(body.password ?? '');
-  if (!identifier || !password) return json(400, 'Informe e-mail, usuário ou CNPJ e a senha.');
+  if (!identifier || !password) return json(400, 'Informe e-mail ou CNPJ e a senha.');
   const upstream = await callApi(request, '/auth/login', 'POST', {
     identifier,
     password,
+    ...(typeof body.email === 'string' ? { email: body.email } : {}),
     ...(typeof body.bootstrapToken === 'string' ? { bootstrapToken: body.bootstrapToken } : {}),
   });
-  if (upstream.status === 401) return json(400, 'E-mail, usuário, CNPJ ou senha inválidos.');
+  if (upstream.status === 401) return json(400, 'E-mail, CNPJ ou senha inválidos.');
   if (!upstream.ok) return failure(upstream, 'Não foi possível entrar agora.');
   const result = (await upstream.json()) as LoginApiResponse | TwoFactorChallengeResponse;
   if ('twoFactorRequired' in result && result.twoFactorRequired) {

@@ -8,6 +8,7 @@ import { DataReport, ReportTable } from './data-report';
 import { useErp, useErpAction } from '@/lib/erp/gateway';
 import { PanelHeading } from './primitives';
 import type { CalendarConflict } from '@/lib/erp/contracts';
+import { TeamRosterPage } from './team-roster';
 export function ScheduleWorkspace({
   onCall = false,
   initialTab = 'calendar',
@@ -19,21 +20,7 @@ export function ScheduleWorkspace({
   const { scope } = useErp();
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   const [conflicts, setConflicts] = useState<CalendarConflict | null>(null);
-  if (onCall)
-    return (
-      <div className="flex flex-col gap-5">
-        <ResourcePage moduleKey="onCall" />
-        <DataReport
-          title="Cobertura atual do NOC"
-          path="/on-call/current"
-          metrics={[
-            { key: 'user.name', label: 'Plantonista' },
-            { key: 'startsAt', label: 'Início' },
-            { key: 'endsAt', label: 'Fim' },
-          ]}
-        />
-      </div>
-    );
+  if (onCall) return <TeamRosterPage />;
   return (
     <Tabs defaultValue={initialTab} className="min-w-0 gap-5">
       <div className="overflow-x-auto">

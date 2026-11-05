@@ -32,6 +32,16 @@ export function orderDeadline(row: ErpRecord) {
   return row.slaEligible === false ? null : timestamp(row.deadlineAt);
 }
 
+export function deadlineSituation(row: ErpRecord, now: Date) {
+  if (!isActiveOrder(row)) return 'Concluída';
+  if (row.pausedAt) return 'Pausada';
+  const deadline = orderDeadline(row);
+  if (deadline === null) return 'Sem prazo de SLA';
+  if (deadline < now.getTime()) return 'Atrasada';
+  if (deadline <= now.getTime() + 2 * 3_600_000) return 'Vence em até 2h';
+  return 'Dentro do prazo';
+}
+
 export function completionTime(row: ErpRecord) {
   if (!completed.has(String(row.status))) return null;
   // A resolution and its subsequent administrative closure are one delivery.
@@ -47,18 +57,12 @@ export function buildAnalystOverview(rows: ErpRecord[], days: number | null, now
   const inPeriod = (time: number | null) =>
     time !== null && time <= nowMs && (startMs === null || time >= startMs);
   const active = rows.filter(isActiveOrder);
-  const overdue = active.filter((r) => {
-    const deadline = orderDeadline(r);
-    return deadline !== null && deadline < nowMs;
-  });
+  const overdue = active.filter((r) => deadlineSituation(r, now) === 'Atrasada');
   const dueToday = active.filter((r) => {
     const deadline = orderDeadline(r);
-    return deadline !== null && localDay(new Date(deadline)) === today;
+    return !r.pausedAt && deadline !== null && localDay(new Date(deadline)) === today;
   });
-  const dueSoon = active.filter((r) => {
-    const deadline = orderDeadline(r);
-    return deadline !== null && deadline >= nowMs && deadline <= nowMs + 2 * 3_600_000;
-  });
+  const dueSoon = active.filter((r) => deadlineSituation(r, now) === 'Vence em até 2h');
   const closed = rows.filter((r) => inPeriod(completionTime(r)));
   const withoutSla = active.filter((r) => orderDeadline(r) === null).length;
   const missingCompletionDate = rows.filter(

@@ -1,4 +1,5 @@
 'use client';
+import { useVaultConfirmation } from './vault-confirmation';
 import { useEffect, useRef, useState } from 'react';
 import { Eye, EyeOff, Copy, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -131,6 +132,7 @@ export function VaultAccessEditor({
   onSaved: () => Promise<void>;
   onOpen: () => void;
 }) {
+  const confirmation = useVaultConfirmation();
   const action = useErpAction();
   const generation = useRef(0);
   const expectedUpdatedAt = useRef<string | undefined>(undefined);
@@ -156,6 +158,10 @@ export function VaultAccessEditor({
     [totp, setTotp] = useState(''),
     [removeTotp, setRemoveTotp] = useState(false);
   async function load() {
+    close();
+    const body = await confirmation.request();
+    if (!body) return;
+    setOpen(true);
     const version = ++generation.current;
     setLoaded(false);
     setError('');
@@ -166,7 +172,7 @@ export function VaultAccessEditor({
         protectedContent: string;
         secret: string;
         updatedAt: string;
-      }>({ path: `/knowledge/credentials/${record.id}/reveal`, method: 'POST' });
+      }>({ path: `/knowledge/credentials/${record.id}/reveal`, method: 'POST', body });
       if (version !== generation.current) return;
       expectedUpdatedAt.current = data.updatedAt;
       setEntries(
@@ -213,11 +219,11 @@ export function VaultAccessEditor({
     );
   return (
     <>
+      {confirmation.dialog}
       <Button
         variant="outline"
         onClick={() => {
           onOpen();
-          setOpen(true);
           void load();
         }}
       >

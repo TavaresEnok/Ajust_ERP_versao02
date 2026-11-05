@@ -1,143 +1,15 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { ArrowRight } from 'lucide-react';
-import { useErp, useErpQuery } from '@/lib/erp/gateway';
+import { useErpQuery } from '@/lib/erp/gateway';
 import { listRecords, useRouteBase, useVisualSource } from '@/lib/erp/visual-data';
 import type { ErpRecord } from '@/lib/erp/contracts';
-import { PageHeading, PanelHeading, StatusBadge, Avatar, ViewLink } from './primitives';
-import { RecordDialog } from './record-dialog';
-import { OperationControl } from './operation-controls';
-import { QueryState, ErpEmpty } from './contract-form';
+import { PageHeading, StatusBadge, ViewLink } from './primitives';
+import { QueryState } from './contract-form';
 import { FlowReport } from './reports-workspace';
 import { cn } from '@/lib/utils';
 const date = (value: unknown) => (value ? new Date(String(value)).toLocaleString('pt-BR') : '—');
-const userName = (record?: ErpRecord | null) =>
-  record?.user && typeof record.user === 'object'
-    ? String((record.user as { name?: string }).name || record.userId || '—')
-    : String(record?.userName || record?.userId || '—');
-export function OnCallPage() {
-  const { scope } = useErp();
-  const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
-  const query = useErpQuery<unknown>('/on-call');
-  const current = useErpQuery<ErpRecord | null>('/on-call/current');
-  const rows = listRecords(query.data);
-  const active = current.data;
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 60000);
-    return () => clearInterval(timer);
-  }, []);
-  const upcoming = [...rows]
-    .filter((row) => new Date(String(row.startsAt)).getTime() > now)
-    .sort((a, b) => String(a.startsAt).localeCompare(String(b.startsAt)))[0];
-  return (
-    <>
-      <PageHeading
-        title="Plantão NOC"
-        description="Presença e cobertura para uma operação que não para."
-      >
-        {manager && <RecordDialog title="Novo plantão" moduleKey="onCall" fields={[]} />}
-      </PageHeading>
-      <QueryState
-        loading={query.isLoading || current.isLoading}
-        error={query.error || current.error}
-        onRetry={() => {
-          void query.mutate();
-          void current.mutate();
-        }}
-      />
-      <div className="mb-6 grid gap-5 md:grid-cols-2">
-        <div className="rounded-xl border border-primary/15 bg-secondary/60 p-6">
-          <p className="mini-label text-primary">Plantão atual</p>
-          <div className="mt-5 flex flex-wrap items-center gap-4">
-            <Avatar name={userName(active)} className="size-12 bg-card text-sm text-primary" />
-            <div>
-              <h2 className="text-lg font-semibold">
-                {active ? userName(active) : 'Nenhum plantonista informado'}
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {active
-                  ? `${date(active.startsAt)} até ${date(active.endsAt)}`
-                  : 'Aguardando cobertura retornada pelo ERP.'}
-              </p>
-            </div>
-            {active && <StatusBadge status="Em plantão" />}
-          </div>
-        </div>
-        <div className="panel p-6">
-          <p className="mini-label">Próxima cobertura</p>
-          <div className="mt-5 flex items-center gap-4">
-            <Avatar name={userName(upcoming)} className="size-12 text-sm" />
-            <div>
-              <h2 className="text-lg font-semibold">
-                {upcoming ? userName(upcoming) : 'Sem escala futura consultada'}
-              </h2>
-              <p className="mt-1 text-xs text-muted-foreground">
-                {upcoming
-                  ? `${date(upcoming.startsAt)} até ${date(upcoming.endsAt)}`
-                  : manager
-                    ? 'Cadastre o próximo período de cobertura.'
-                    : 'A gestão ainda não cadastrou uma escala futura.'}
-              </p>
-            </div>
-          </div>
-        </div>
-      </div>
-      <section className="panel">
-        <PanelHeading
-          title="Escalas da equipe"
-          description="Períodos e orientações retornados pelo ERP"
-        />
-        <div className="table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Integrante</th>
-                <th>Início</th>
-                <th>Fim</th>
-                <th>Orientações</th>
-                {manager && <th>Ações</th>}
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((row) => (
-                <tr key={row.id}>
-                  <td>
-                    <span className="flex items-center gap-3">
-                      <Avatar name={userName(row)} />
-                      {userName(row)}
-                    </span>
-                  </td>
-                  <td>{date(row.startsAt)}</td>
-                  <td>{date(row.endsAt)}</td>
-                  <td>{String(row.notes || '—')}</td>
-                  {manager && (
-                    <td>
-                      <OperationControl
-                        title="Remover plantão"
-                        description="Remover este período de cobertura do ERP?"
-                        path={`/on-call/${encodeURIComponent(row.id)}`}
-                        method="DELETE"
-                        roles={['super_admin', 'gerente']}
-                        after={async () => {
-                          await query.mutate();
-                          await current.mutate();
-                        }}
-                      />
-                    </td>
-                  )}
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-        {!rows.length && !query.isLoading && !query.error && (
-          <ErpEmpty connected={query.connected} />
-        )}
-      </section>
-    </>
-  );
-}
+export { TeamRosterPage as OnCallPage } from './team-roster';
 export function OrderTrailPage() {
   const base = useRouteBase();
   const query = useVisualSource('orders');

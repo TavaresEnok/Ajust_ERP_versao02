@@ -5,6 +5,7 @@ import { useSWRConfig } from 'swr';
 import { toast } from 'sonner';
 import { useErp, useErpAction, useErpQuery } from './gateway';
 import { modules } from './modules';
+import { agendaDay, agendaTime } from './agenda';
 import {
   errorMessage,
   orderStatuses,
@@ -57,7 +58,8 @@ export function listRecords(data: unknown): ErpRecord[] {
 }
 const text = (value: unknown, fallback = '—') =>
   value === undefined || value === null || value === '' ? fallback : String(value);
-const date = (value: unknown) => (value ? new Date(String(value)).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' }) : '—');
+const date = (value: unknown) =>
+  value ? new Date(String(value)).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' }) : '—';
 const label = (labels: Readonly<Record<string, string>>, value: unknown) =>
   labels[String(value)] || text(value);
 export function visualRecord(key: string, record: ErpRecord): ErpRecord {
@@ -155,22 +157,35 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
       active: r.active === true,
       count: text(r.orderCount),
     };
-  if (key === 'orders')
+  if (key === 'orders') {
+    const provider = text(
+      r.provider ||
+        (r.occurrence as ErpRecord | undefined)?.provider ||
+        r.requester ||
+        r.tenantName,
+    );
     return {
       ...common,
       title: text(r.title),
       protocol: text(r.protocol),
-      provider: text(
-        r.provider || (r.occurrence as ErpRecord | undefined)?.provider || r.tenantName,
+      provider,
+      initials: provider
+        .split(/\s+/)
+        .slice(0, 2)
+        .map((part) => part[0])
+        .join('')
+        .toUpperCase(),
+      analyst: text(
+        (r.assignee as { name?: string } | undefined)?.name || r.analystName || r.ownerName,
       ),
-      analyst: text(r.analystName || r.ownerName),
       status: label(orderStatuses, r.status),
       priority: label(priorities, r.priority),
       type: label(orderTypes, r.type),
       date: date(r.createdAt),
-      deadline: `${r.slaEligible === false ? 'Meta demonstrativa · ' : ''}${date(r.deadlineAt)}`,
+      deadline: r.slaEligible === false ? 'Sem prazo de SLA' : date(r.deadlineAt),
       description: text(r.description, ''),
     };
+  }
   if (key === 'incidents')
     return {
       ...common,
@@ -191,14 +206,18 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
       ...common,
       name: text(r.title),
       title: text(r.title),
-      date: `${start.getFullYear()}-${String(start.getMonth() + 1).padStart(2, '0')}-${String(start.getDate()).padStart(2, '0')}`,
-      day: start.getDate(),
-      month: start.getMonth(),
-      year: start.getFullYear(),
-      time: start.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }),
-      end: end?.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }) || '—',
+      date: agendaDay(start),
+      day: Number(agendaDay(start).slice(8, 10)),
+      month: Number(agendaDay(start).slice(5, 7)) - 1,
+      year: Number(agendaDay(start).slice(0, 4)),
+      time: r.allDay ? 'Dia inteiro' : agendaTime(String(r.startAt)),
+      end: r.allDay ? '' : end ? agendaTime(String(r.endAt)) : '',
       type: text(r.type),
-      person: text(r.assigneeName),
+      person: text(
+        (r.assignee as { name?: string } | undefined)?.name ||
+          r.assigneeName ||
+          (r.createdBy as { name?: string } | undefined)?.name,
+      ),
       color: text(r.color, 'primary'),
     };
   }

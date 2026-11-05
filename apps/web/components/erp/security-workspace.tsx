@@ -200,6 +200,12 @@ export function SecurityWorkspace({
               fields={[
                 { name: 'name', label: 'Nome', min: 2 },
                 { name: 'email', label: 'E-mail', type: 'email' },
+                {
+                  name: 'currentPassword',
+                  label: 'Senha atual',
+                  type: 'password',
+                  hint: 'Necessária só para trocar o e-mail.',
+                },
               ]}
               connected={action.connected}
               pending={action.pending}

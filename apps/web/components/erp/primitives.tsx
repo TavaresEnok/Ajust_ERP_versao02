@@ -144,7 +144,8 @@ export function Metric({
 }: {
   label: string;
   value: string;
-  change: string;
+  /** Variação no período; omitida quando o indicador não tem comparação (C-001). */
+  change?: string;
   foot: string;
   icon: LucideIcon;
   warning?: boolean;
@@ -163,15 +164,17 @@ export function Metric({
         {children}
       </div>
       <div className="metric-foot">
-        <span
-          className={cn(
-            'inline-flex items-center gap-0.5',
-            warning ? 'text-warning' : 'text-success',
-          )}
-        >
-          <ArrowUpRight className="size-3" />
-          {change}
-        </span>
+        {change ? (
+          <span
+            className={cn(
+              'inline-flex items-center gap-0.5',
+              warning ? 'text-warning' : 'text-success',
+            )}
+          >
+            <ArrowUpRight className="size-3" />
+            {change}
+          </span>
+        ) : null}
         <span>{foot}</span>
       </div>
     </article>

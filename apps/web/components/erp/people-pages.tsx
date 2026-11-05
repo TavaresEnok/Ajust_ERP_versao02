@@ -525,7 +525,7 @@ export function TechniciansPage() {
         </div>
         <div className="mt-4 flex gap-6">
           <ViewLink href={portalBase + '/agenda'}>Agenda da equipe</ViewLink>
-          <ViewLink href={portalBase + '/plantao'}>Escala de plantão</ViewLink>
+          <ViewLink href={portalBase + '/plantao'}>Escala da equipe</ViewLink>
         </div>
       </div>
     </>
