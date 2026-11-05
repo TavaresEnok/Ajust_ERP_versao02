@@ -1,3 +1,4 @@
+import { transactionScope } from '../prisma/transaction-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -19,6 +20,12 @@ import {
   OperationalDefinitionSchema,
   validateOperational,
 } from './operational-definition';
+import {
+  AWAITING_APPROVAL_MESSAGE,
+  hasCurrentApproval,
+  needsClosingApproval,
+  statusDates,
+} from '../service-orders/service-order-rules';
 
 type Tx = Prisma.TransactionClient;
 const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -42,6 +49,10 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(WorkflowsService) private readonly automations: WorkflowsService,
   ) {}
+  inTransaction(tx: Prisma.TransactionClient) {
+    return new OperationalProcessesService(transactionScope(tx), this.automations);
+  }
+
   onModuleInit() {
     this.timer = setInterval(() => void this.deliverEvents().catch(() => undefined), 10000);
     this.timer.unref();
@@ -212,7 +223,9 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
         where: { tenantId_code: { tenantId, code: templateCode } },
       });
       if (!template?.publishedAt)
-        throw new BadRequestException('Publique o modelo antes de iniciar.');
+        throw new BadRequestException(
+          `O serviço escolhido usa o fluxo "${templateCode}", que não está publicado. Abra sem serviço do catálogo ou avise a gestão.`,
+        );
       const def = validateOperational(storedProcessDefinition(template.definition));
       const instance = await tx.serviceProcessInstance.create({
         data: {
@@ -979,19 +992,40 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     if (order.status === 'CANCELADA')
       throw new BadRequestException('O.S. cancelada não pode ser concluída sem reabertura.');
     const now = new Date();
+    // Mesma regra de aprovação da transição manual (C-039): alta/crítica atrasada fica
+    // resolvida aguardando a gestão, e o fechamento sai pela aba Aprovações.
+    const blocked = needsClosingApproval(order, now) && !(await hasCurrentApproval(tx, order));
+    if (blocked && order.status === 'RESOLVIDA') return;
+    const target = blocked ? 'RESOLVIDA' : 'FECHADA';
     const changed = await tx.serviceOrder.updateMany({
       where: { id: orderId, version: order.version },
-      data: { status: 'FECHADA', resolvedAt: now, closedAt: now, version: { increment: 1 } },
+      data: { ...statusDates(order, target, now), status: target, version: { increment: 1 } },
     });
     if (changed.count !== 1) throw new ConflictException('O.S. alterada durante a conclusão.');
     await tx.serviceOrderOccurrence.create({
       data: {
         serviceOrderId: orderId,
         actorUserId: actorId,
-        message: `Atendimento concluído: ${reason}`,
+        message: blocked
+          ? `Atendimento concluído: ${reason}. ${AWAITING_APPROVAL_MESSAGE}`
+          : `Atendimento concluído: ${reason}`,
         isCustomerVisible: true,
       },
     });
+    if (blocked) {
+      await tx.serviceOrderStatusEvent.create({
+        data: {
+          tenantId,
+          serviceOrderId: orderId,
+          fromStatus: order.status,
+          toStatus: 'RESOLVIDA',
+          actorUserId: actorId,
+          reason,
+          metadata: { engine: 'operational-v2', instanceId, stepId, awaitingApproval: true },
+        },
+      });
+      return;
+    }
     await tx.serviceOrderStatusEvent.create({
       data: {
         tenantId,
@@ -1084,18 +1118,19 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
         if (!claim.count) continue;
         try {
           const startedAt = new Date();
-          await this.automations.executeForEvent(event.tenantId, {
-            type: 'order_closed',
-            order: event.payload as Record<string, unknown>,
-          });
-          const order = event.payload as Record<string, unknown>;
+          await this.automations.executeForEvent(
+            event.tenantId,
+            { type: 'order_closed', order: event.payload as Record<string, unknown> },
+            { eventKey: event.eventKey },
+          );
+          // Falha só desta execução (mesma chave de evento), não de outras da mesma O.S. (C-038).
           if (
             await this.prisma.workflowExecutionLog.count({
               where: {
                 tenantId: event.tenantId,
                 status: 'FAILED',
                 createdAt: { gte: startedAt },
-                context: { path: ['order', 'id'], equals: String(order.id) },
+                context: { path: ['eventKey'], equals: event.eventKey },
               },
             })
           )

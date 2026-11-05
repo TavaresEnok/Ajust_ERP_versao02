@@ -1,8 +1,9 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { Priority, ServiceOrderStatus, ServiceOrderType } from '@prisma/client';
-import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
+import { syncOccurrenceStatus } from '../service-orders/occurrence-sync';
+import { withFreshProtocol } from '../service-orders/order-protocol';
 
 export interface ChildOrderSpec {
   id: string;
@@ -167,9 +168,12 @@ export class OsProcessTemplateService {
   ): Promise<void> {
     const managed = await this.prisma.serviceOrder.findFirst({
       where: { id: order.id, tenantId },
-      select: { processInstanceId: true },
+      select: { processInstanceId: true, parentOrderId: true, tags: true },
     });
     if (!managed || managed.processInstanceId) return;
+    // Sem laço: O.S. criada por modelo não dispara modelo de novo (C-034).
+    if (managed.parentOrderId || (managed.tags ?? []).some((tag) => tag.startsWith('template:')))
+      return;
     const templates = await this.prisma.osProcessTemplate.findMany({
       where: { tenantId, enabled: true },
     });
@@ -181,9 +185,15 @@ export class OsProcessTemplateService {
 
     if (matching.length === 0) return;
 
+    let createdAny = false;
     for (const template of matching) {
       const def = template.definition as unknown as OsProcessTemplateDefinition;
       if (!Array.isArray(def.childOrders) || def.childOrders.length === 0) continue;
+      // Sem duplicar: reabrir e fechar de novo a origem não cria outra leva (C-034).
+      const already = await this.prisma.serviceOrder.count({
+        where: { tenantId, parentOrderId: order.id, tags: { has: `template:${template.id}` } },
+      });
+      if (already) continue;
 
       const createdProtocols: string[] = [];
 
@@ -191,35 +201,39 @@ export class OsProcessTemplateService {
         try {
           const deadlineAt = new Date(Date.now() + (spec.deadlineHours ?? 24) * 60 * 60 * 1000);
 
-          const protocol = `WF-${randomUUID().slice(0, 12)}`;
-          const child = await this.prisma.serviceOrder.create({
-            data: {
-              tenantId,
-              protocol,
-              occurrenceId: order.occurrenceId ?? undefined,
-              sourceSystem: 'ERP',
-              type: spec.type,
-              priority: spec.priority,
-              status: ServiceOrderStatus.ABERTA,
-              title: spec.title,
-              description:
-                spec.description || `OS criada automaticamente pelo template "${template.name}".`,
-              sector: spec.sector || order.sector || undefined,
-              origin: 'TEMPLATE',
-              deadlineAt,
-              tags: [`template:${template.id}`, ...(spec.tags || [])],
-              internalNotes: `Template: ${template.name} (${template.id}) · OS origem: ${order.protocol}`,
-              occurrences: {
-                create: {
-                  sourceSystem: 'ERP',
-                  message: `OS criada automaticamente pelo template "${template.name}". OS origem: ${order.protocol}.`,
+          const child = await withFreshProtocol(this.prisma, tenantId, (protocol) =>
+            this.prisma.serviceOrder.create({
+              data: {
+                tenantId,
+                protocol,
+                parentOrderId: order.id,
+                rootOrderId: order.id,
+                occurrenceId: order.occurrenceId ?? undefined,
+                sourceSystem: 'ERP',
+                type: spec.type,
+                priority: spec.priority,
+                status: ServiceOrderStatus.ABERTA,
+                title: spec.title,
+                description:
+                  spec.description || `OS criada automaticamente pelo template "${template.name}".`,
+                sector: spec.sector || order.sector || undefined,
+                origin: 'TEMPLATE',
+                deadlineAt,
+                tags: [`template:${template.id}`, ...(spec.tags || [])],
+                internalNotes: `Template: ${template.name} (${template.id}) · OS origem: ${order.protocol}`,
+                occurrences: {
+                  create: {
+                    sourceSystem: 'ERP',
+                    message: `OS criada automaticamente pelo template "${template.name}". OS origem: ${order.protocol}.`,
+                  },
                 },
               },
-            },
-            select: { id: true, protocol: true },
-          });
+              select: { id: true, protocol: true },
+            }),
+          );
 
           createdProtocols.push(child.protocol);
+          createdAny = true;
         } catch (err) {
           this.logger.warn(
             `Template ${template.id}: falha ao criar OS filha "${spec.title}" — ${(err as Error).message}`,
@@ -244,6 +258,8 @@ export class OsProcessTemplateService {
           });
       }
     }
+    // As filhas entram na ocorrência depois do fechamento da origem: reabre se preciso.
+    if (createdAny) await syncOccurrenceStatus(this.prisma, tenantId, order.occurrenceId);
   }
 
   private validate(

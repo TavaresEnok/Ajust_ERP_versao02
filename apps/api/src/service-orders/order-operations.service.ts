@@ -1,3 +1,4 @@
+import { transactionScope } from '../prisma/transaction-scope';
 import {
   BadRequestException,
   ConflictException,
@@ -5,14 +6,23 @@ import {
   Inject,
   Injectable,
   NotFoundException,
+  Optional,
 } from '@nestjs/common';
-import { Prisma } from '@prisma/client';
+import { Prisma, type ServiceOrderStatus } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
 import { PrismaService } from '../prisma/prisma.service';
 import { SlaEngineService } from '../sla/sla-engine.service';
 import { OperationalProcessesService } from '../service-processes/operational-processes.service';
 import { storedProcessDefinition } from '../service-processes/stored-process-roles';
 import { validateOperational } from '../service-processes/operational-definition';
+import { syncOccurrenceStatus } from './occurrence-sync';
+import {
+  AWAITING_APPROVAL_MESSAGE,
+  hasCurrentApproval,
+  needsClosingApproval,
+  statusDates,
+} from './service-order-rules';
+import { ServiceOrderLifecycleService } from './service-order-lifecycle.service';
 
 type Command = {
   action: 'start' | 'pause' | 'resume' | 'schedule' | 'unschedule' | 'assign' | 'finish' | 'reopen';
@@ -21,6 +31,7 @@ type Command = {
   assigneeUserId?: string;
   scheduledAt?: string;
   outcome?: string;
+  evidence?: Record<string, string>;
   change?: { impact: string; rollbackPlan: string };
 };
 @Injectable()
@@ -29,7 +40,50 @@ export class OrderOperationsService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(SlaEngineService) private readonly sla: SlaEngineService,
     @Inject(OperationalProcessesService) private readonly processes: OperationalProcessesService,
+    @Optional()
+    @Inject(ServiceOrderLifecycleService)
+    private readonly lifecycle?: ServiceOrderLifecycleService,
   ) {}
+
+  private async after(
+    tenantId: string,
+    actorId: string,
+    order: { id: string; status: ServiceOrderStatus },
+    reason: string,
+    workflows = true,
+  ) {
+    const current = await this.prisma.serviceOrder.findUnique({
+      where: { id: order.id },
+      select: { status: true },
+    });
+    if (current && current.status !== order.status)
+      await this.lifecycle?.afterStatusChange({
+        tenantId,
+        orderId: order.id,
+        from: order.status,
+        to: current.status,
+        actorId,
+        reason,
+        source: 'operations',
+        workflows,
+        syncOccurrence: false,
+      });
+  }
+
+  private async auditAction(tenantId: string, actorId: string, orderId: string, action: string) {
+    await this.prisma.auditLog
+      .create({
+        data: {
+          tenantId,
+          actorUserId: actorId,
+          action: 'OS_UPDATE',
+          resourceType: 'service_order',
+          resourceId: orderId,
+          metadata: { operation: action },
+        },
+      })
+      .catch(() => undefined);
+  }
 
   async alerts(tenantId: string) {
     return this.prisma.serviceOrder.findMany({
@@ -66,8 +120,8 @@ export class OrderOperationsService {
     if (order.version !== input.expectedVersion)
       throw new ConflictException('O.S. alterada. Atualize antes de continuar.');
     if (input.action === 'reopen') {
-      if (order.status !== 'FECHADA')
-        throw new BadRequestException('Somente O.S. fechada pode ser reaberta.');
+      if (order.status !== 'FECHADA' && order.status !== 'RESOLVIDA')
+        throw new BadRequestException('Somente O.S. resolvida ou fechada pode ser reaberta.');
       await this.prisma.$transaction(async (tx) => {
         const changed = await tx.serviceOrder.updateMany({
           where: { id, tenantId, version: input.expectedVersion },
@@ -110,7 +164,7 @@ export class OrderOperationsService {
             tenantId,
             serviceOrderId: id,
             actorUserId: actorId,
-            fromStatus: 'FECHADA',
+            fromStatus: order.status,
             toStatus: 'EM_ANALISE',
             reason: input.reason,
           },
@@ -124,6 +178,7 @@ export class OrderOperationsService {
         });
       });
       await this.syncOccurrence(tenantId, order.occurrenceId);
+      await this.after(tenantId, actorId, order, input.reason);
       return this.prisma.serviceOrder.findUniqueOrThrow({ where: { id } });
     }
     if (['FECHADA', 'CANCELADA'].includes(order.status))
@@ -149,7 +204,10 @@ export class OrderOperationsService {
         stepId: step.id,
         outcome,
         reason: input.reason,
-        evidence: Object.fromEntries(node.requiredFields.map((f) => [f, input.reason])),
+        // Older integrations send one combined technical record. The analyst UI sends
+        // each requirement explicitly; missing fields are then rejected by the engine.
+        evidence:
+          input.evidence ?? Object.fromEntries(node.requiredFields.map((f) => [f, input.reason])),
       });
       const unfinished = await this.prisma.serviceOrder.count({
         where: {
@@ -167,6 +225,7 @@ export class OrderOperationsService {
           data: { status: 'COMPLETED', completedAt: new Date() },
         });
       await this.syncOccurrence(tenantId, order.occurrenceId);
+      await this.after(tenantId, actorId, order, input.reason, false);
       if (
         order.changeRequestId &&
         (await this.prisma.serviceOrder.findUniqueOrThrow({ where: { id } })).status === 'FECHADA'
@@ -231,15 +290,27 @@ export class OrderOperationsService {
     }
     if (input.action === 'start') {
       if (order.pausedAt) throw new BadRequestException('Retome a O.S. antes de iniciar.');
+      if (order.status === 'RESOLVIDA')
+        throw new BadRequestException(
+          'A O.S. está resolvida. Use "Reabrir" para voltar a trabalhar nela.',
+        );
       data.status = 'EM_ANALISE';
       data.scheduleStartedAt = order.scheduledAt ? now : null;
       message = input.reason ? `Execução iniciada: ${input.reason}` : 'Execução iniciada.';
     }
     if (input.action === 'finish') {
-      data.status = 'FECHADA';
-      data.resolvedAt = now;
-      data.closedAt = now;
-      message = `Atendimento concluído: ${input.reason}`;
+      // Concluir = resolver e fechar. Se o fechamento exige aprovação gerencial (alta/crítica
+      // atrasada), a O.S. fica resolvida aguardando a gestão (C-013/C-039).
+      const blocked =
+        needsClosingApproval(order) && !(await hasCurrentApproval(this.prisma, order));
+      if (blocked && order.status === 'RESOLVIDA')
+        throw new BadRequestException('Esta O.S. aguarda a aprovação gerencial para fechar.');
+      const target = blocked ? 'RESOLVIDA' : 'FECHADA';
+      Object.assign(data, statusDates(order, target, now));
+      data.status = target;
+      message = blocked
+        ? `Atendimento concluído: ${input.reason}. ${AWAITING_APPROVAL_MESSAGE}`
+        : `Atendimento concluído: ${input.reason}`;
     }
     await this.prisma.$transaction(async (tx) => {
       const changed = await tx.serviceOrder.updateMany({
@@ -302,7 +373,7 @@ export class OrderOperationsService {
             serviceOrderId: id,
             actorUserId: actorId,
             fromStatus: order.status,
-            toStatus: data.status as 'FECHADA' | 'EM_ANALISE',
+            toStatus: data.status as ServiceOrderStatus,
             reason: input.reason,
           },
         });
@@ -355,38 +426,13 @@ export class OrderOperationsService {
         });
     });
     await this.syncOccurrence(tenantId, order.occurrenceId);
+    if (data.status) await this.after(tenantId, actorId, order, input.reason);
+    else await this.auditAction(tenantId, actorId, id, input.action);
     return this.prisma.serviceOrder.findUniqueOrThrow({ where: { id } });
   }
 
   async syncOccurrence(tenantId: string, occurrenceId: string | null) {
-    if (!occurrenceId) return;
-    await this.prisma.$transaction(
-      async (tx) => {
-        const pending = await tx.serviceOrder.count({
-          where: {
-            tenantId,
-            occurrenceId,
-            deletedAt: null,
-            status: { notIn: ['FECHADA', 'CANCELADA'] },
-          },
-        });
-        const flows = await tx.serviceProcessInstance.count({
-          where: {
-            tenantId,
-            occurrenceId,
-            status: { in: ['ACTIVE', 'WAITING', 'PAUSED', 'FAILED'] },
-          },
-        });
-        await tx.occurrence.updateMany({
-          where: { id: occurrenceId, tenantId },
-          data: {
-            status: pending || flows ? 'EM_EXECUCAO' : 'ENCERRADA',
-            closedAt: pending || flows ? null : new Date(),
-          },
-        });
-      },
-      { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
-    );
+    await syncOccurrenceStatus(this.prisma, tenantId, occurrenceId);
   }
 
   async closeOccurrence(
@@ -395,6 +441,42 @@ export class OrderOperationsService {
     role: string,
     id: string,
     input: { reason: string; orders: { id: string; version: number }[] },
+  ) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
+    const changes: { id: string; status: ServiceOrderStatus; processInstanceId: string | null }[] =
+      [];
+    let result;
+    try {
+      result = await this.prisma.$transaction(
+        async (tx) => {
+          const scoped = new OrderOperationsService(
+            transactionScope(tx),
+            this.sla,
+            this.processes.inTransaction(tx),
+          );
+          return scoped.closeOccurrenceInTransaction(tenantId, actorId, role, id, input, changes);
+        },
+        { isolationLevel: Prisma.TransactionIsolationLevel.Serializable, timeout: 60000 },
+      );
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2034')
+        throw new ConflictException(
+          'A ocorrência foi alterada durante a conclusão. Atualize e tente novamente.',
+        );
+      throw error;
+    }
+    for (const order of changes)
+      await this.after(tenantId, actorId, order, input.reason, !order.processInstanceId);
+    return result;
+  }
+
+  private async closeOccurrenceInTransaction(
+    tenantId: string,
+    actorId: string,
+    role: string,
+    id: string,
+    input: { reason: string; orders: { id: string; version: number }[] },
+    changes: { id: string; status: ServiceOrderStatus; processInstanceId: string | null }[],
   ) {
     const occurrence = await this.prisma.occurrence.findFirst({
       where: { tenantId, id, deletedAt: null },
@@ -410,18 +492,28 @@ export class OrderOperationsService {
     });
     if (pending.some((o) => o.pausedAt))
       throw new BadRequestException('Retome as O.S. pausadas antes da conclusão conjunta.');
-    if (
-      role === 'analista' &&
-      pending.some((o) => o.assigneeUserId && o.assigneeUserId !== actorId)
-    )
-      throw new ForbiddenException(
-        'Cada analista conclui suas entregas. A gestão pode registrar a conclusão conjunta.',
-      );
     if (pending.some((o) => !input.orders.some((c) => c.id === o.id && c.version === o.version)))
       throw new ConflictException(
         'A lista de O.S. mudou. Revise as ordens pendentes antes de confirmar.',
       );
-    // Each completion uses the same operational authority. Newly generated children must be reviewed separately.
+    // Valida todas antes de concluir qualquer uma, para não deixar a ocorrência pela metade (C-016).
+    const blockers: string[] = [];
+    for (const order of pending) {
+      if (!order.processInstanceId) continue;
+      const process = await this.processes.find(tenantId, order.processInstanceId);
+      const step = process.steps.find((s) => s.orderId === order.id && s.status === 'ACTIVE');
+      const definition = validateOperational(storedProcessDefinition(process.definition));
+      const node = definition.nodes.find((n) => n.id === step?.nodeId);
+      if (!step || !node) blockers.push(`${order.protocol}: aguarda uma etapa anterior do fluxo`);
+      else if (Object.keys(node.routes).length !== 1)
+        blockers.push(`${order.protocol}: precisa escolher o resultado do trabalho`);
+    }
+    if (blockers.length)
+      throw new BadRequestException(
+        `Nenhuma O.S. foi concluída. Conclua estas individualmente primeiro: ${blockers.join('; ')}.`,
+      );
+    changes.push(...pending);
+    // All completions reuse the outer transaction; effects run only after commit.
     for (const order of pending)
       await this.run(tenantId, actorId, role, order.id, {
         action: 'finish',

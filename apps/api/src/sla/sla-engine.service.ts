@@ -156,16 +156,13 @@ export class SlaEngineService {
 
   /**
    * Calculates the SLA target (deadline) based on business hours.
-   * Basic assumption: 08:00 to 18:00 Mon-Fri.
-   * When tenantId is provided, uses the tenant's BusinessCalendar config.
+   * Always uses the tenant's calendar, exceptions and timezone.
    */
-  calculateTargetDate(startDate: Date, slaHours: number): Date;
-  calculateTargetDate(startDate: Date, slaHours: number, tenantId: string): Promise<Date>;
-  calculateTargetDate(startDate: Date, slaHours: number, tenantId?: string): Date | Promise<Date> {
-    if (tenantId) {
-      return this.calcTargetWithCalendar(startDate, slaHours, tenantId);
-    }
-    return this.calcTargetDefault(startDate, slaHours);
+  async calculateTargetDate(startDate: Date, slaHours: number, tenantId: string): Promise<Date> {
+    if (!tenantId) throw new BadRequestException('Informe a empresa para calcular o SLA.');
+    if (!Number.isFinite(slaHours) || slaHours < 0)
+      throw new BadRequestException('Prazo de SLA inválido.');
+    return this.calcTargetWithCalendar(startDate, slaHours, tenantId);
   }
 
   /**
@@ -187,14 +184,20 @@ export class SlaEngineService {
       : undefined;
     if (legacyExactMatch) return legacyExactMatch;
 
-    // A prioridade ordena a fila, não altera o prazo acordado do serviço.
+    // Ordem (decisão de 04/11, C-024): exceção do tipo → política do tipo → política da
+    // prioridade → política NORMAL → 48 h. "CRÍTICA = 4 h" vale para qualquer tipo sem política.
     const priorityPolicy = policies.find(
+      (policy) =>
+        !policy.isOverride && policy.priority === priority && policy.serviceOrderType === null,
+    );
+    if (priorityPolicy) return priorityPolicy;
+    const normalPolicy = policies.find(
       (policy) =>
         !policy.isOverride &&
         policy.priority === Priority.NORMAL &&
         policy.serviceOrderType === null,
     );
-    if (priorityPolicy) return priorityPolicy;
+    if (normalPolicy) return normalPolicy;
 
     return { hours: 48, priority };
   }
@@ -202,48 +205,13 @@ export class SlaEngineService {
   /**
    * Adjust deadline dynamically based on pauses.
    */
-  calculateBusinessPauseDuration(startPause: Date, endPause: Date): number;
-  calculateBusinessPauseDuration(
+  async calculateBusinessPauseDuration(
     startPause: Date,
     endPause: Date,
     tenantId: string,
-  ): Promise<number>;
-  calculateBusinessPauseDuration(
-    startPause: Date,
-    endPause: Date,
-    tenantId?: string,
-  ): number | Promise<number> {
-    if (tenantId) {
-      return this.calcPauseWithCalendar(startPause, endPause, tenantId);
-    }
-    return this.calcPauseDefault(startPause, endPause);
-  }
-
-  // ── private helpers ──────────────────────────────────────────
-
-  private calcTargetDefault(startDate: Date, slaHours: number): Date {
-    let remainingMinutes = slaHours * 60;
-    const current = new Date(startDate);
-    this.adjustToBusinessHours(current);
-
-    while (remainingMinutes > 0) {
-      const eod = new Date(current);
-      eod.setHours(18, 0, 0, 0);
-
-      const minutesToEndOfDay = (eod.getTime() - current.getTime()) / 60000;
-
-      if (remainingMinutes <= minutesToEndOfDay) {
-        current.setTime(current.getTime() + remainingMinutes * 60000);
-        remainingMinutes = 0;
-      } else {
-        remainingMinutes -= minutesToEndOfDay;
-        current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
-        this.adjustToBusinessHours(current);
-      }
-    }
-
-    return current;
+  ): Promise<number> {
+    if (!tenantId) throw new BadRequestException('Informe a empresa para calcular a pausa.');
+    return this.calcPauseWithCalendar(startPause, endPause, tenantId);
   }
 
   private async calcTargetWithCalendar(
@@ -294,67 +262,6 @@ export class SlaEngineService {
     return fromZonedTime(current, timezone);
   }
 
-  /**
-   * Adjust date to next valid business time (skip weekends, push to start if early).
-   * When `calendar` is provided, uses per-tenant day-of-week config.
-   */
-  /* private */
-  adjustToBusinessHours(date: Date, calendar?: CalendarConfig | null) {
-    if (calendar) {
-      this.adjustWithConfig(date, calendar);
-    } else {
-      this.adjustDefault(date);
-    }
-  }
-
-  private adjustDefault(date: Date) {
-    while (date.getDay() === 0 || date.getDay() === 6 || date.getHours() >= 18) {
-      if (date.getHours() >= 18) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-      }
-      if (date.getDay() === 0 || date.getDay() === 6) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-      }
-    }
-
-    if (date.getHours() < 8) {
-      date.setHours(8, 0, 0, 0);
-    }
-  }
-
-  private adjustWithConfig(date: Date, calendar: CalendarConfig) {
-    for (let i = 0; i < 366; i++) {
-      const day = date.getDay();
-      const config = calendar[day];
-
-      if (!config || !config.isWorkDay) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-        continue;
-      }
-
-      const [startH, startM] = config.startTime.split(':').map(Number);
-      const [endH, endM] = config.endTime.split(':').map(Number);
-      const startMinutes = startH * 60 + startM;
-      const endMinutes = endH * 60 + endM;
-      const currentMinutes = date.getHours() * 60 + date.getMinutes();
-
-      if (currentMinutes >= endMinutes) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-        continue;
-      }
-
-      if (currentMinutes < startMinutes) {
-        date.setHours(startH, startM, 0, 0);
-      }
-
-      break;
-    }
-  }
-
   private async adjustWithExceptions(date: Date, tenantId: string, calendar: CalendarConfig) {
     for (let i = 0; i < 366; i++) {
       const exception = await this.getCalendarExceptionForWallDate(tenantId, date);
@@ -391,53 +298,6 @@ export class SlaEngineService {
       }
       return;
     }
-  }
-
-  private adjustWithConfigSingle(date: Date, calendar: CalendarConfig) {
-    const day = date.getDay();
-    const config = calendar[day];
-    if (!config || !config.isWorkDay) {
-      date.setDate(date.getDate() + 1);
-      date.setHours(8, 0, 0, 0);
-      return;
-    }
-    const [startH, startM] = config.startTime.split(':').map(Number);
-    const [endH, endM] = config.endTime.split(':').map(Number);
-    const startMinutes = startH * 60 + startM;
-    const endMinutes = endH * 60 + endM;
-    const currentMinutes = date.getHours() * 60 + date.getMinutes();
-    if (currentMinutes >= endMinutes) {
-      date.setDate(date.getDate() + 1);
-      date.setHours(8, 0, 0, 0);
-    } else if (currentMinutes < startMinutes) {
-      date.setHours(startH, startM, 0, 0);
-    }
-  }
-
-  // ── pause duration helpers ───────────────────────────────────
-
-  private calcPauseDefault(startPause: Date, endPause: Date): number {
-    let pausedMinutes = 0;
-    const current = new Date(startPause);
-    this.adjustToBusinessHours(current);
-
-    while (current.getTime() < endPause.getTime()) {
-      const eod = new Date(current);
-      eod.setHours(18, 0, 0, 0);
-
-      const chunkEnd = Math.min(eod.getTime(), endPause.getTime());
-      pausedMinutes += (chunkEnd - current.getTime()) / 60000;
-
-      if (eod.getTime() < endPause.getTime()) {
-        current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
-        this.adjustToBusinessHours(current);
-      } else {
-        break;
-      }
-    }
-
-    return pausedMinutes;
   }
 
   private async calcPauseWithCalendar(
@@ -499,10 +359,12 @@ export class SlaEngineService {
   }
 
   private getCalendarExceptionForWallDate(tenantId: string, wallDate: Date) {
-    const startOfDay = new Date(wallDate);
-    startOfDay.setHours(0, 0, 0, 0);
+    // Exceções são gravadas como "AAAA-MM-DDT00:00:00Z". A data de parede (fuso do tenant)
+    // vem nos campos locais do objeto; montar a chave em UTC a partir deles não depende do
+    // fuso do processo Node (C-026).
+    const day = new Date(Date.UTC(wallDate.getFullYear(), wallDate.getMonth(), wallDate.getDate()));
     return this.prisma.businessCalendarException.findUnique({
-      where: { tenantId_date: { tenantId, date: startOfDay } },
+      where: { tenantId_date: { tenantId, date: day } },
     });
   }
 

@@ -23,6 +23,10 @@ const command = z
     assigneeUserId: z.string().uuid().optional(),
     scheduledAt: z.string().datetime({ offset: true }).optional(),
     outcome: z.string().max(200).optional(),
+    evidence: z
+      .record(z.string().min(1).max(300), z.string().trim().min(1).max(20000))
+      .refine((value) => Object.keys(value).length <= 20, 'Limite de 20 evidências por etapa.')
+      .optional(),
     change: z
       .object({
         impact: z.string().trim().min(3).max(4000),

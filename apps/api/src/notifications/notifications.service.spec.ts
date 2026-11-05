@@ -1,4 +1,5 @@
 jest.mock('../common/ssrf-guard', () => ({
+  safeFetch: (...args: Parameters<typeof fetch>) => fetch(...args),
   assertSafeUrl: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -117,5 +118,33 @@ describe('NotificationsService.dispatch', () => {
       expect.stringContaining('ORDER_ESCALATED'),
       expect.stringContaining('OS-1'),
     );
+  });
+});
+
+describe('NotificationsService.notifyOrderClosed (C-033)', () => {
+  it('usa ORDER_CLOSED, sem descrição interna e com horário do tenant', async () => {
+    const prisma: any = {
+      serviceOrder: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'o1',
+          protocol: '2026100050',
+          title: 'Link restabelecido',
+          description: 'Senha do roteador: segredo',
+          requester: 'Meganet',
+          analystName: 'Ana',
+          closedAt: new Date('2026-11-04T15:00:00Z'),
+          occurrence: null,
+        }),
+      },
+      tenant: { findUnique: jest.fn().mockResolvedValue({ timezone: 'America/Fortaleza' }) },
+    };
+    const { NotificationsService } = await import('./notifications.service');
+    const service = new NotificationsService(prisma, { sendEmail: jest.fn() } as any);
+    const dispatch = jest.spyOn(service, 'dispatch').mockResolvedValue(undefined as never);
+    await service.notifyOrderClosed('t', 'o1');
+    const [, trigger, payload] = dispatch.mock.calls[0];
+    expect(trigger).toBe('ORDER_CLOSED');
+    expect(payload.message).toContain('04/11/2026, 12:00:00');
+    expect(payload.message).not.toContain('segredo');
   });
 });

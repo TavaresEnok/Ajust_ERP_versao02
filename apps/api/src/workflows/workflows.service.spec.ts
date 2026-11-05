@@ -275,3 +275,62 @@ describe('WorkflowsService - governance', () => {
     ).resolves.toContain('change ticket');
   });
 });
+
+describe('WorkflowsService - gatilho os_critica (C-036)', () => {
+  it('só casa com O.S. de prioridade CRITICA', () => {
+    const svc = makeService();
+    const node: WorkflowNode = {
+      id: 't',
+      type: 'trigger',
+      subtype: 'os_critica',
+      config: {},
+      position: { x: 0, y: 0 },
+    };
+    expect((svc as any).triggerMatchesOrder(node, { priority: 'NORMAL' })).toBe(false);
+    expect((svc as any).triggerMatchesOrder(node, { priority: 'CRITICA' })).toBe(true);
+    expect((svc as any).triggerMatchesOrder({ ...node, subtype: 'os_criada' }, {})).toBe(true);
+  });
+});
+
+describe('Workflow authoring boundary', () => {
+  it.each(['action_close_order', 'action_assign', 'action_escalate', 'task_service'])(
+    'rejects %s even through direct API input',
+    async (subtype) => {
+      await expect(
+        makeService().create('tenant', 'actor', {
+          name: 'Legacy rule',
+          definition: makeDef(
+            [makeTriggerNode(), makeActionNode({ subtype })],
+            [makeEdge('trigger', 'action-1')],
+          ),
+        }),
+      ).rejects.toThrow('processos operacionais');
+    },
+  );
+});
+
+it('does not reactivate or restore a legacy mutating rule', async () => {
+  const definition = makeDef(
+    [makeTriggerNode(), makeActionNode({ subtype: 'action_close_order' })],
+    [makeEdge('trigger', 'action-1')],
+  );
+  const prisma = {
+    workflowRule: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'rule',
+        enabled: false,
+        definition: { ...definition, versions: [{ version: 1, definition }] },
+      }),
+      update: jest.fn(),
+    },
+  };
+  const service = new WorkflowsService(prisma as never, {} as never, {} as never);
+  await expect(service.toggle('tenant', 'actor', 'rule')).rejects.toThrow('processos operacionais');
+  await expect(service.update('tenant', 'actor', 'rule', { enabled: true })).rejects.toThrow(
+    'processos operacionais',
+  );
+  await expect(service.rollbackToVersion('tenant', 'actor', 'rule', 1)).rejects.toThrow(
+    'processos operacionais',
+  );
+  expect(prisma.workflowRule.update).not.toHaveBeenCalled();
+});

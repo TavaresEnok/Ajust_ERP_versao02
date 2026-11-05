@@ -71,9 +71,12 @@ describe('Order annotation corrections and historical completion', () => {
     ).rejects.toThrow('A anotação mudou');
     expect(tx.occurrenceAnnotation.updateMany).not.toHaveBeenCalled();
   });
-  it.each([false, true])(
-    'only allows ordinary transitions for an archived process with no active work (%s)',
-    async (archived) => {
+  it.each([
+    [1, 'Esta O.S. está numa etapa de processo.'],
+    [0, 'A O.S. já está nesta etapa.'],
+  ])(
+    'só libera a transição manual de O.S. com processo quando não há etapa ativa (%s ativas)',
+    async (activeSteps, message) => {
       const { service, prisma } = fixture();
       prisma.serviceOrder.findFirst.mockResolvedValue({
         id: 'order',
@@ -81,24 +84,15 @@ describe('Order annotation corrections and historical completion', () => {
         status: 'ABERTA',
         processInstanceId: 'process',
       });
-      prisma.serviceProcessInstance.findFirst.mockResolvedValue(
-        archived ? { id: 'process' } : null,
-      );
+      (prisma as any).serviceProcessStep = { count: jest.fn().mockResolvedValue(activeSteps) };
       await expect(
         service.transition('tenant', 'order', 'actor', 'analista', {
           toStatus: 'ABERTA' as never,
           reason: 'Teste',
         }),
-      ).rejects.toThrow(
-        archived
-          ? 'Source and destination statuses are equal.'
-          : 'Esta O.S. pertence a um processo.',
-      );
-      expect(prisma.serviceProcessInstance.findFirst.mock.calls[0][0].where).toMatchObject({
-        tenantId: 'tenant',
-        status: 'HISTORICAL',
-        engineVersion: 2,
-        steps: { none: { status: { in: ['ACTIVE', 'WAITING'] } } },
+      ).rejects.toThrow(message);
+      expect((prisma as any).serviceProcessStep.count).toHaveBeenCalledWith({
+        where: { instanceId: 'process', status: { in: ['ACTIVE', 'WAITING'] } },
       });
     },
   );

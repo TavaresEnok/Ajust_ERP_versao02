@@ -21,6 +21,7 @@ describe('ServiceOrdersService - Optimistic Concurrency Control (OS-01 & SEC-01)
       emitTenantEvent: jest.fn(),
     };
 
+    mockPrisma.$transaction = jest.fn((fn) => fn(mockPrisma));
     service = new ServiceOrdersService(
       mockPrisma,
       mockEventsGateway,
@@ -37,6 +38,7 @@ describe('ServiceOrdersService - Optimistic Concurrency Control (OS-01 & SEC-01)
         id: 'order-1',
         protocol: 'OS-2026-100',
         version: 3,
+        assigneeUserId: 'another-analyst',
       });
 
       mockPrisma.serviceOrder.update.mockResolvedValue({
@@ -48,27 +50,38 @@ describe('ServiceOrdersService - Optimistic Concurrency Control (OS-01 & SEC-01)
         attachments: [],
       });
 
-      const result = await service.updateOrder(
-        'tenant-1',
-        'order-1',
-        'user-1',
-        'analista',
-        {
-          title: 'Novo Título',
-          expectedVersion: 3,
-        },
-      );
+      const result = await service.updateOrder('tenant-1', 'order-1', 'user-1', 'analista', {
+        title: 'Novo Título',
+        expectedVersion: 3,
+      });
 
       expect(result.version).toBe(4);
+      expect(mockPrisma.serviceOrder.update.mock.calls[0][0].data).not.toHaveProperty('assignee');
       expect(mockPrisma.serviceOrder.update).toHaveBeenCalledWith(
         expect.objectContaining({
           where: { id: 'order-1', version: 3 },
           data: expect.objectContaining({
             title: 'Novo Título',
             version: { increment: 1 },
+            occurrences: { create: expect.objectContaining({ actorUserId: 'user-1' }) },
           }),
         }),
       );
+    });
+
+    it('does not let an analyst rewrite opening authorship or names without stable IDs', async () => {
+      mockPrisma.serviceOrder.findFirst.mockResolvedValue({
+        id: 'order-1',
+        version: 3,
+        ownerUserId: 'original-author',
+      });
+      await expect(
+        service.updateOrder('tenant-1', 'order-1', 'actor', 'analista', {
+          expectedVersion: 3,
+          ownerUserId: 'actor',
+        }),
+      ).rejects.toThrow('autoria');
+      expect(mockPrisma.serviceOrder.update).not.toHaveBeenCalled();
     });
 
     it('rejects with ConflictException (409) when expectedVersion does not match current version', async () => {

@@ -13,9 +13,16 @@ export class CsatService {
   async createForOrder(tenantId: string, orderId: string) {
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, occurrence: { select: { customer: { select: { contacts: true } } } } },
     });
     if (!order) throw new NotFoundException('Order not found.');
+    // A pesquisa vai para o provedor atendido, não para o contato da Ajust (C-032).
+    const contacts = (order.occurrence?.customer?.contacts ?? {}) as { emails?: unknown };
+    const recipient = Array.isArray(contacts.emails)
+      ? contacts.emails.find(
+          (item): item is string => typeof item === 'string' && item.includes('@'),
+        )
+      : undefined;
 
     const existing = await this.prisma.satisfactionResponse.findFirst({
       where: { orderId, tenantId },
@@ -24,18 +31,15 @@ export class CsatService {
 
     const survey = await this.prisma.satisfactionResponse.create({
       data: { tenantId, orderId, score: 1, answered: false },
-      include: {
-        tenant: { select: { techContactEmail: true } },
-        order: { select: { protocol: true } },
-      },
+      include: { order: { select: { protocol: true } } },
     });
 
-    if (survey.tenant?.techContactEmail) {
+    if (recipient) {
       const webBaseUrl =
         process.env.WEB_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:8070';
       const link = `${webBaseUrl.replace(/\/+$/, '')}/csat/${survey.token}`;
       this.emailService.sendEmail(
-        survey.tenant.techContactEmail,
+        recipient,
         `Pesquisa de Satisfação - O.S ${survey.order?.protocol || ''}`,
         `Olá!\n\nA Ordem de Serviço ${survey.order?.protocol || ''} foi resolvida. Gostaríamos de saber como foi sua experiência.\n\nPor favor, acesse o link abaixo para nos avaliar:\n${link}\n\nObrigado,\nEquipe Ajust ERP`,
         `

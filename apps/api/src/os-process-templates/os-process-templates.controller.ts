@@ -1,6 +1,7 @@
 import { ApiTags, ApiOperation, ApiBearerAuth, ApiResponse } from '@nestjs/swagger';
 import {
   Body,
+  GoneException,
   Controller,
   Delete,
   Get,
@@ -11,42 +12,11 @@ import {
   Req,
   UseGuards,
 } from '@nestjs/common';
-import { z } from 'zod';
-import { Priority, ServiceOrderType } from '@prisma/client';
 import { OsProcessTemplateService } from './os-process-templates.service';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { assertManagerRole } from '../common/role-utils';
-
-const OS_TYPES = Object.values(ServiceOrderType) as [string, ...string[]];
-const PRIORITIES = Object.values(Priority) as [string, ...string[]];
-
-const ChildOrderSchema = z.object({
-  id: z.string().min(1),
-  title: z.string().min(1),
-  type: z.enum(OS_TYPES),
-  priority: z.enum(PRIORITIES),
-  sector: z.string().optional(),
-  origin: z.string().optional(),
-  description: z.string().optional(),
-  deadlineHours: z.number().int().positive().optional(),
-  tags: z.array(z.string()).optional(),
-});
-
-const DefinitionSchema = z.object({
-  childOrders: z.array(ChildOrderSchema).min(1),
-});
-
-const CreateSchema = z.object({
-  name: z.string().min(1),
-  description: z.string().optional(),
-  enabled: z.boolean().optional(),
-  triggerOsTypes: z.array(z.enum(OS_TYPES)).min(1),
-  definition: DefinitionSchema,
-});
-
-const UpdateSchema = CreateSchema.partial();
 
 @ApiTags('Templates de OS')
 @ApiBearerAuth()
@@ -84,35 +54,41 @@ export class OsProcessTemplateController {
   @ApiOperation({ summary: 'Criar template de OS' })
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
   @Post()
-  create(@Req() req: RequestWithAuth, @Body() body: unknown) {
+  create(@Req() req: RequestWithAuth, @Body() _body: unknown) {
     assertManagerRole(req.auth);
-    const data = CreateSchema.parse(body);
-    return this.service.create(this.tid(req), this.uid(req), data as any);
+    throw new GoneException(
+      'Modelos antigos estão disponíveis apenas para consulta. Configure as etapas nos processos operacionais.',
+    );
   }
 
   @ApiOperation({ summary: 'Atualizar template de OS' })
   @ApiResponse({ status: 400, description: 'Dados inválidos' })
   @ApiResponse({ status: 404, description: 'Template não encontrado' })
   @Patch(':id')
-  update(@Req() req: RequestWithAuth, @Param('id') id: string, @Body() body: unknown) {
+  update(@Req() req: RequestWithAuth, @Param('id') _id: string, @Body() _body: unknown) {
     assertManagerRole(req.auth);
-    const data = UpdateSchema.parse(body);
-    return this.service.update(this.tid(req), this.uid(req), id, data as any);
+    throw new GoneException(
+      'Modelos antigos estão disponíveis apenas para consulta. Configure as etapas nos processos operacionais.',
+    );
   }
 
   @ApiOperation({ summary: 'Remover template de OS' })
   @ApiResponse({ status: 404, description: 'Template não encontrado' })
   @Delete(':id')
-  remove(@Req() req: RequestWithAuth, @Param('id') id: string) {
+  remove(@Req() req: RequestWithAuth, @Param('id') _id: string) {
     assertManagerRole(req.auth);
-    return this.service.remove(this.tid(req), this.uid(req), id);
+    throw new GoneException(
+      'Modelos antigos estão disponíveis apenas para consulta. Configure as etapas nos processos operacionais.',
+    );
   }
 
   @ApiOperation({ summary: 'Ativar/desativar template' })
   @ApiResponse({ status: 404, description: 'Template não encontrado' })
   @Patch(':id/toggle')
-  toggle(@Req() req: RequestWithAuth, @Param('id') id: string) {
+  toggle(@Req() req: RequestWithAuth, @Param('id') _id: string) {
     assertManagerRole(req.auth);
-    return this.service.toggle(this.tid(req), this.uid(req), id);
+    throw new GoneException(
+      'Modelos antigos estão disponíveis apenas para consulta. Configure as etapas nos processos operacionais.',
+    );
   }
 }

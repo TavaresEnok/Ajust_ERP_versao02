@@ -2,6 +2,7 @@ import { WorkflowActionExecutor, ActionResult } from './action-executor.service'
 import type { WorkflowNode, WorkflowContext } from './workflows.service';
 
 jest.mock('../common/ssrf-guard', () => ({
+  safeFetch: (...args: Parameters<typeof fetch>) => fetch(...args),
   assertSafeUrl: jest.fn().mockResolvedValue(undefined),
 }));
 
@@ -25,12 +26,21 @@ function makePrisma(overrides: any = {}): any {
     serviceOrderOccurrence: { create: jest.fn().mockResolvedValue({ id: 'occ-1' }) },
     serviceOrderStatusEvent: { create: jest.fn().mockResolvedValue({ id: 'evt-1' }) },
     satisfactionResponse: { upsert: jest.fn().mockResolvedValue({ id: 'csat-1' }) },
-    userTenant: { findUnique: jest.fn().mockResolvedValue({ userId: 'analyst-7' }) },
+    userTenant: {
+      findUnique: jest.fn().mockResolvedValue({ userId: 'analyst-7' }),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ userId: 'analyst-7', user: { name: 'Analista Sete' } }),
+    },
+    serviceOrderApproval: { findFirst: jest.fn().mockResolvedValue(null) },
+    occurrence: { updateMany: jest.fn() },
+    $queryRaw: jest.fn().mockResolvedValue([{ max: 100041 }]),
     $transaction: jest.fn(async (cb) =>
       cb({
-        serviceOrder: { update: jest.fn().mockResolvedValue({}) },
+        serviceOrder: { updateMany: jest.fn().mockResolvedValue({ count: 1 }) },
         serviceOrderOccurrence: { create: jest.fn().mockResolvedValue({}) },
         serviceOrderStatusEvent: { create: jest.fn().mockResolvedValue({}) },
+        auditLog: { create: jest.fn().mockResolvedValue({}) },
       }),
     ),
     ...overrides,
@@ -164,73 +174,6 @@ describe('WorkflowActionExecutor - action_notify_slack', () => {
   });
 });
 
-describe('WorkflowActionExecutor - action_assign', () => {
-  it('atualiza assigneeUserId quando analystId é fornecido', async () => {
-    const prisma = makePrisma();
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'action_assign', config: { analystId: 'analyst-7' } });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SUCCESS');
-    expect(prisma.serviceOrder.update).toHaveBeenCalledWith({
-      where: { id: 'order-1' },
-      data: { assigneeUserId: 'analyst-7' },
-    });
-  });
-
-  it('retorna SKIPPED sem analystId', async () => {
-    const executor = makeExecutor(makePrisma(), makeNotifications());
-    const node = makeNode({ subtype: 'action_assign', config: {} });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SKIPPED');
-    expect(result.error).toBe('Missing analystId');
-  });
-
-  it('rejeita analista que não pertence ao tenant do workflow', async () => {
-    const prisma = makePrisma();
-    prisma.userTenant.findUnique.mockResolvedValueOnce(null);
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'action_assign', config: { analystId: 'foreign-user' } });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('FAILED');
-    expect(result.error).toContain('not a member');
-    expect(prisma.serviceOrder.update).not.toHaveBeenCalled();
-  });
-});
-
-describe('WorkflowActionExecutor - action_escalate', () => {
-  it('muda prioridade para CRITICA', async () => {
-    const prisma = makePrisma();
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'action_escalate', config: { to: 'oncall' } });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SUCCESS');
-    expect(prisma.serviceOrder.update).toHaveBeenCalledWith({
-      where: { id: 'order-1' },
-      data: { priority: 'CRITICA' },
-    });
-  });
-
-  it('dispara notificação ORDER_ESCALATED quando `to` é fornecido', async () => {
-    const prisma = makePrisma();
-    const notifications = makeNotifications();
-    const executor = makeExecutor(prisma, notifications);
-    const node = makeNode({ subtype: 'action_escalate', config: { to: 'oncall-team' } });
-    await executor.executeNode(node, makeContext());
-    expect(notifications.dispatch).toHaveBeenCalledWith('tenant-1', 'ORDER_ESCALATED', {
-      protocol: 'OS-001',
-      escalatedTo: 'oncall-team',
-    });
-  });
-
-  it('retorna SKIPPED sem order id', async () => {
-    const executor = makeExecutor(makePrisma(), makeNotifications());
-    const node = makeNode({ subtype: 'action_escalate', config: { to: 'oncall' } });
-    const result = await executor.executeNode(node, makeContext({ order: undefined }));
-    expect(result.status).toBe('SKIPPED');
-    expect(result.error).toBe('Missing order id');
-  });
-});
-
 describe('WorkflowActionExecutor - action_csat', () => {
   it('cria e envia a pesquisa pelo serviço de CSAT', async () => {
     const prisma = makePrisma();
@@ -240,117 +183,6 @@ describe('WorkflowActionExecutor - action_csat', () => {
     const result = await executor.executeNode(node, makeContext());
     expect(result.status).toBe('SUCCESS');
     expect(csat.createForOrder).toHaveBeenCalledWith('tenant-1', 'order-1');
-  });
-});
-
-describe('WorkflowActionExecutor - task_service', () => {
-  it('cria service order filha com protocol WF- e tag workflow', async () => {
-    const prisma = makePrisma();
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({
-      subtype: 'task_service',
-      config: {
-        taskName: 'Configurar',
-        team: 'NOC',
-        serviceOrderType: 'AUDITORIA',
-        priority: 'ALTA',
-      },
-    });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SUCCESS');
-    expect(result.createdOrderId).toBe('new-order');
-    expect(prisma.serviceOrder.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({
-          title: 'Configurar',
-          type: 'AUDITORIA',
-          priority: 'ALTA',
-          origin: 'WORKFLOW',
-          tags: ['workflow:rule-1', 'workflow-node:n1'],
-        }),
-      }),
-    );
-  });
-
-  it('cai para AUDITORIA quando serviceOrderType é inválido', async () => {
-    const prisma = makePrisma();
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({
-      subtype: 'task_service',
-      config: { taskName: 'Tarefa', serviceOrderType: 'INVALID_X', priority: 'INVALID_P' },
-    });
-    await executor.executeNode(node, makeContext());
-    expect(prisma.serviceOrder.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ type: 'AUDITORIA', priority: 'NORMAL' }),
-      }),
-    );
-  });
-
-  it('retorna SKIPPED sem taskName', async () => {
-    const executor = makeExecutor(makePrisma(), makeNotifications());
-    const node = makeNode({ subtype: 'task_service', config: {} });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SKIPPED');
-    expect(result.error).toBe('Missing taskName');
-  });
-
-  it('cria ocorrência na OS origem', async () => {
-    const prisma = makePrisma();
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'task_service', config: { taskName: 'Tarefa' } });
-    await executor.executeNode(node, makeContext());
-    expect(prisma.serviceOrderOccurrence.create).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ serviceOrderId: 'order-1' }) }),
-    );
-  });
-});
-
-describe('WorkflowActionExecutor - action_close_order', () => {
-  it('fecha a OS via transação e gera status event', async () => {
-    const tx = {
-      serviceOrder: { update: jest.fn().mockResolvedValue({}) },
-      serviceOrderOccurrence: { create: jest.fn().mockResolvedValue({}) },
-      serviceOrderStatusEvent: { create: jest.fn().mockResolvedValue({}) },
-    };
-    const prisma = makePrisma();
-    prisma.$transaction = jest.fn(async (cb) => cb(tx));
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'action_close_order' });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SUCCESS');
-    expect(tx.serviceOrder.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: expect.objectContaining({ status: 'FECHADA' }) }),
-    );
-    expect(tx.serviceOrderStatusEvent.create).toHaveBeenCalledWith(
-      expect.objectContaining({
-        data: expect.objectContaining({ fromStatus: 'ABERTA', toStatus: 'FECHADA' }),
-      }),
-    );
-  });
-
-  it('retorna SKIPPED se OS já está FECHADA', async () => {
-    const prisma = makePrisma();
-    prisma.serviceOrder.findFirst.mockResolvedValueOnce({
-      id: 'order-1',
-      status: 'FECHADA',
-      tenantId: 'tenant-1',
-    });
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'action_close_order' });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SKIPPED');
-    expect(result.error).toContain('FECHADA');
-  });
-
-  it('retorna SKIPPED se OS não encontrada', async () => {
-    const prisma = makePrisma();
-    prisma.serviceOrder.findFirst.mockResolvedValueOnce(null);
-    const executor = makeExecutor(prisma, makeNotifications());
-    const node = makeNode({ subtype: 'action_close_order' });
-    const result = await executor.executeNode(node, makeContext());
-    expect(result.status).toBe('SKIPPED');
-    expect(result.error).toBe('Order not found');
   });
 });
 
@@ -409,4 +241,20 @@ describe('WorkflowActionExecutor - action_webhook', () => {
     expect(result.status).toBe('FAILED');
     expect(result.error).toContain('500');
   });
+});
+
+describe('Workflow effects boundary', () => {
+  it.each(['task_service', 'action_assign', 'action_escalate', 'action_close_order'])(
+    'rejects legacy mutation %s without writing an order',
+    async (subtype) => {
+      const prisma = makePrisma();
+      const executor = makeExecutor(prisma, makeNotifications());
+      const result = await executor.executeNode(makeNode({ subtype }), makeContext());
+      expect(result.status).toBe('FAILED');
+      expect(result.error).toContain('processos operacionais');
+      expect(prisma.serviceOrder.update).not.toHaveBeenCalled();
+      expect(prisma.serviceOrder.create).not.toHaveBeenCalled();
+      expect(prisma.$transaction).not.toHaveBeenCalled();
+    },
+  );
 });

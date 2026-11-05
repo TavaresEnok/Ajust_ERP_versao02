@@ -1,4 +1,4 @@
-import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
 import { Priority, Prisma, ServiceCatalogItem, ServiceOrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -156,7 +156,24 @@ export class ServiceCatalogService {
     return item;
   }
 
+  /**
+   * O código de fluxo do serviço precisa existir e estar publicado: toda O.S. aberta com
+   * esse serviço inicia o fluxo, e um código inválido travaria a abertura (C-009).
+   */
+  private async assertPublishedFlow(tenantId: string, code: string | null | undefined) {
+    if (!code) return;
+    const template = await this.prisma.serviceProcessTemplate.findUnique({
+      where: { tenantId_code: { tenantId, code } },
+      select: { publishedAt: true },
+    });
+    if (!template?.publishedAt)
+      throw new BadRequestException(
+        `O fluxo "${code}" não existe ou não está publicado. Publique o fluxo em Processos antes de usá-lo no catálogo.`,
+      );
+  }
+
   async create(tenantId: string, input: ServiceCatalogWriteInput): Promise<ServiceCatalogItem> {
+    await this.assertPublishedFlow(tenantId, input.workflowTemplateCode);
     return this.prisma.serviceCatalogItem.create({
       data: {
         tenantId,
@@ -179,9 +196,13 @@ export class ServiceCatalogService {
   ): Promise<ServiceCatalogItem> {
     const item = await this.prisma.serviceCatalogItem.findFirst({ where: { id, tenantId } });
     if (!item) throw new NotFoundException('Item de catálogo não encontrado');
+    if (input.workflowTemplateCode !== undefined)
+      await this.assertPublishedFlow(tenantId, input.workflowTemplateCode);
 
     const data: Prisma.ServiceCatalogItemUpdateInput = {
-      ...(input.workflowTemplateCode !== undefined ? { workflowTemplateCode: input.workflowTemplateCode } : {}),
+      ...(input.workflowTemplateCode !== undefined
+        ? { workflowTemplateCode: input.workflowTemplateCode }
+        : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.category !== undefined ? { category: input.category } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),

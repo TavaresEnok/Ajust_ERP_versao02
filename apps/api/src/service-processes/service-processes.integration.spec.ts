@@ -175,7 +175,19 @@ dbDescribe('Human process execution (real database, rollback after each scenario
           await svc.act(tenant, actor, 'gerente', id, {
             expectedVersion: item.version,
             action: 'advance',
-            outcome: ['Qualificado', 'Planejado', 'Preparado', 'Aprovado', 'Autorizado', 'Janela iniciada', 'Executado', 'Validado', 'Documentado', 'Comunicado', 'Ajuste local'].find(outcome => Object.prototype.hasOwnProperty.call(node.routes, outcome)),
+            outcome: [
+              'Qualificado',
+              'Planejado',
+              'Preparado',
+              'Aprovado',
+              'Autorizado',
+              'Janela iniciada',
+              'Executado',
+              'Validado',
+              'Documentado',
+              'Comunicado',
+              'Ajuste local',
+            ].find((outcome) => Object.prototype.hasOwnProperty.call(node.routes, outcome)),
             reason: 'Caminho principal em teste transacional',
             evidence: Object.fromEntries(
               node.requiredFields.map((f) => [f, 'Evidência validada no teste']),

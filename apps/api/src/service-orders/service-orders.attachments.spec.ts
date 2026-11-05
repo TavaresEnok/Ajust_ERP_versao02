@@ -118,3 +118,77 @@ describe('ServiceOrdersService - Attachment Security (SEC-01 & SEC-02)', () => {
     ).rejects.toThrow(ForbiddenException);
   });
 });
+
+describe('Attachment upload validation and storage', () => {
+  const { mkdtempSync, rmSync, existsSync: fileExists } = require('node:fs');
+  const { tmpdir } = require('node:os');
+  const { join } = require('node:path');
+  let folder: string;
+  let previousRoot: string | undefined;
+  let prisma: any;
+  let service: ServiceOrdersService;
+  beforeEach(() => {
+    jest.restoreAllMocks();
+    folder = mkdtempSync(join(tmpdir(), 'ajust-upload-'));
+    previousRoot = process.env.UPLOAD_ROOT;
+    process.env.UPLOAD_ROOT = folder;
+    prisma = {
+      serviceOrder: { findFirst: jest.fn().mockResolvedValue({ id: 'order', protocol: 'OS-1' }) },
+      serviceOrderAttachment: {
+        count: jest.fn().mockResolvedValue(10),
+        create: jest.fn().mockImplementation(({ data }) => ({ id: 'attachment', ...data })),
+      },
+      serviceOrderOccurrence: { create: jest.fn().mockResolvedValue({}) },
+      auditLog: { create: jest.fn().mockResolvedValue({}) },
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      $transaction: jest.fn((run) => run(prisma)),
+    };
+    service = new ServiceOrdersService(
+      prisma,
+      { emitTenantEvent: jest.fn() } as never,
+      {} as never,
+    );
+  });
+  afterEach(() => {
+    rmSync(folder, { recursive: true, force: true });
+    if (previousRoot === undefined) delete process.env.UPLOAD_ROOT;
+    else process.env.UPLOAD_ROOT = previousRoot;
+  });
+  const file = (name: string, body: string) =>
+    ({
+      originalname: name,
+      buffer: Buffer.from(body),
+      size: body.length,
+      mimetype: 'application/octet-stream',
+    }) as Express.Multer.File;
+  it('allows another batch after ten files, stores relative paths and explicit visibility', async () => {
+    const [saved] = await service.uploadAttachments(
+      'tenant',
+      'order',
+      'user',
+      'analista',
+      [file('note.txt', 'Nota técnica')],
+      false,
+    );
+    expect(saved).toMatchObject({
+      mimeType: 'text/plain',
+      isInternal: false,
+      sizeBytes: Buffer.byteLength('Nota técnica'),
+    });
+    expect(saved.storageKey).toMatch(/^service-orders\/order\//);
+    expect(fileExists(join(folder, saved.storageKey))).toBe(true);
+  });
+  it('rejects forged content and the total quota before writing', async () => {
+    await expect(
+      service.uploadAttachments('tenant', 'order', 'user', 'analista', [
+        file('fake.png', '<html>'),
+      ]),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(prisma.serviceOrderAttachment.create).not.toHaveBeenCalled();
+    prisma.serviceOrderAttachment.count.mockResolvedValue(100);
+    await expect(
+      service.uploadAttachments('tenant', 'order', 'user', 'analista', [file('note.txt', 'note')]),
+    ).rejects.toMatchObject({ status: 400 });
+    expect(prisma.serviceOrderAttachment.create).not.toHaveBeenCalled();
+  });
+});

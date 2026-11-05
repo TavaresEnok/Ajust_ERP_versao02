@@ -69,8 +69,10 @@ const UpdateOrderSchema = z.object({
   ownerName: z.string().nullable().optional(),
   analystName: z.string().nullable().optional(),
   deadlineAt: z.string().datetime().optional(),
+  deadlineReason: z.string().trim().max(2000).optional(),
   tags: z.array(z.string()).optional(),
   internalNotes: z.string().nullable().optional(),
+  // Obrigatória (no corpo ou no cabeçalho If-Match): sem ela vale "última vence" (C-017).
   expectedVersion: z.coerce.number().int().positive().optional(),
 });
 
@@ -83,7 +85,7 @@ const OccurrenceOrderSchema = z.object({
   ownerUserId: z.string().uuid().optional(),
   assigneeUserId: z.string().uuid().optional(),
   type: z.nativeEnum(ServiceOrderType),
-  status: z.nativeEnum(ServiceOrderStatus).optional(),
+  // Sem "status": toda O.S. nasce ABERTA; registrar trabalho já feito é recordCompleted (C-004).
   priority: z.nativeEnum(Priority).optional(),
   title: z.string().min(3).optional(),
   description: z.string().min(3),
@@ -97,11 +99,10 @@ const OccurrenceOrderSchema = z.object({
 });
 
 const CreateOccurrenceSchema = z.object({
-  customerId: z.string().uuid().optional(),
+  customerId: z.string().uuid(),
   tenantId: z.string().uuid().optional(),
   provider: z.string().min(2),
   type: z.string().min(2),
-  status: z.nativeEnum(OccurrenceStatus).optional(),
   sector: z.string().min(2),
   origin: z.string().min(2),
   openedByName: z.string().min(2),
@@ -121,6 +122,7 @@ const UpdateOccurrenceSchema = z.object({
 });
 
 const ListOccurrencesSchema = z.object({
+  customerId: z.string().uuid().optional(),
   provider: z.string().trim().min(2).optional(),
   search: z.string().trim().min(2).optional(),
   status: z.nativeEnum(OccurrenceStatus).optional(),
@@ -145,6 +147,9 @@ const ApprovalSchema = z.object({
 });
 
 const ListSchema = z.object({
+  customerId: z.string().uuid().optional(),
+  situation: z.enum(['active', 'completed', 'all']).optional(),
+  deadline: z.enum(['overdue', 'today', 'soon', 'paused', 'without']).optional(),
   provider: z.string().trim().min(1).max(300).optional(),
   scope: z.enum(['mine', 'operation']).optional(),
   status: z.nativeEnum(ServiceOrderStatus).optional(),
@@ -208,12 +213,17 @@ export class ServiceOrdersController {
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string,
     @Query('provider') provider?: string,
+    @Query('deadline') deadline?: string,
+    @Query('situation') situation?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     const input = ListSchema.parse({
+      situation,
+      deadline,
       scope,
       provider,
+      customerId: req.query.customerId,
       status,
       priority,
       type,
@@ -251,16 +261,41 @@ export class ServiceOrdersController {
     @Query('to') to?: string,
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string,
+    @Query('scope') scope?: string,
+    @Query('provider') provider?: string,
+    @Query('deadline') deadline?: string,
+    @Query('situation') situation?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    const input = ListSchema.parse({ status, priority, type, search, from, to, orderBy, orderDir });
+    const input = ListSchema.parse({
+      situation,
+      status,
+      priority,
+      type,
+      search,
+      from,
+      to,
+      orderBy,
+      orderDir,
+      scope,
+      provider,
+      customerId: req.query.customerId,
+      deadline,
+    });
 
     if (input.from && input.to && new Date(input.from).getTime() > new Date(input.to).getTime()) {
       throw new BadRequestException('from must be less than or equal to to.');
     }
 
-    return this.serviceOrdersService.summary(req.auth.tenantId, input, req.auth.role);
+    return this.serviceOrdersService.summary(
+      req.auth.tenantId,
+      {
+        ...input,
+        responsibleUserId: input.scope === 'mine' ? req.auth.userId : undefined,
+      },
+      req.auth.role,
+    );
   }
 
   @Get('occurrences')
@@ -277,6 +312,7 @@ export class ServiceOrdersController {
 
     const input = ListOccurrencesSchema.parse({
       provider,
+      customerId: req.query.customerId,
       search,
       status,
       limit,
@@ -476,6 +512,8 @@ export class ServiceOrdersController {
         input.expectedVersion = parsed;
       }
     }
+    if (input.expectedVersion === undefined)
+      throw new BadRequestException('Recarregue a O.S. antes de salvar (versão ausente).');
 
     const updated = await this.serviceOrdersService.updateOrder(
       req.auth.tenantId,
@@ -546,6 +584,8 @@ export class ServiceOrdersController {
         input.expectedVersion = parsed;
       }
     }
+    if (input.expectedVersion === undefined)
+      throw new BadRequestException('Recarregue a O.S. antes de alterar a etapa (versão ausente).');
 
     const updated = await this.serviceOrdersService.transition(
       req.auth.tenantId,
@@ -588,15 +628,19 @@ export class ServiceOrdersController {
     @Param('id') id: string,
     @UploadedFiles() files: Array<Express.Multer.File>,
     @Req() req: RequestWithAuth,
+    @Body() body?: { isInternal?: string },
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
+    if (body?.isInternal !== undefined && !['true', 'false'].includes(body.isInternal))
+      throw new BadRequestException('Visibilidade do anexo inválida.');
     return this.serviceOrdersService.uploadAttachments(
       req.auth.tenantId,
       id,
       req.auth.userId,
       req.auth.role || '',
       files || [],
+      body?.isInternal !== 'false',
     );
   }
 
@@ -627,7 +671,7 @@ export class ServiceOrdersController {
     res.setHeader('x-content-type-options', 'nosniff');
 
     const stream = createReadStream(result.filePath);
-    stream.on('error', (err) => {
+    stream.on('error', (_err) => {
       if (!res.headersSent) {
         res.status(500).json({ error: 'Failed to read attachment file.' });
       }

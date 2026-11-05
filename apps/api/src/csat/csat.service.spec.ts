@@ -44,8 +44,12 @@ describe('CsatService.createForOrder', () => {
     expect(prisma.satisfactionResponse.create).not.toHaveBeenCalled();
   });
 
-  it('envia email se tenant tem techContactEmail', async () => {
+  it('envia a pesquisa ao e-mail do provedor atendido, não ao contato do tenant (C-032)', async () => {
     const prisma = makePrisma();
+    prisma.serviceOrder.findFirst.mockResolvedValueOnce({
+      id: 'o1',
+      occurrence: { customer: { contacts: { emails: ['noc@provedor.com'] } } },
+    });
     prisma.satisfactionResponse.findFirst.mockResolvedValueOnce(null);
     prisma.satisfactionResponse.create.mockResolvedValueOnce({
       id: 'r1',
@@ -58,14 +62,14 @@ describe('CsatService.createForOrder', () => {
     const result = await svc.createForOrder('t1', 'o1');
     expect(result.id).toBe('r1');
     expect(email.sendEmail).toHaveBeenCalledWith(
-      'tech@acme.com',
+      'noc@provedor.com',
       expect.stringContaining('OS-001'),
       expect.any(String),
       expect.stringContaining('Avaliar'),
     );
   });
 
-  it('não envia email se tenant sem techContactEmail', async () => {
+  it('não envia email se o provedor não tem e-mail cadastrado', async () => {
     const prisma = makePrisma();
     prisma.satisfactionResponse.findFirst.mockResolvedValueOnce(null);
     prisma.satisfactionResponse.create.mockResolvedValueOnce({

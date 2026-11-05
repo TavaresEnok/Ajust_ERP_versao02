@@ -1,3 +1,4 @@
+import { attachmentMime } from '../common/attachment-content';
 /**
  * ServiceOrdersService
  *
@@ -25,6 +26,7 @@ import {
   Optional,
 } from '@nestjs/common';
 import { csvCell, compactRecord, reduceCountRows } from './service-orders.helpers';
+import { deadlineWhere, type DeadlineFilter } from './service-order-deadlines';
 import {
   ApprovalStatus,
   AuditAction,
@@ -32,6 +34,7 @@ import {
   Prisma,
   Priority,
   ServiceOrderStatus,
+  ServiceOrderAttachment,
   ServiceOrderType,
 } from '@prisma/client';
 import { existsSync } from 'node:fs';
@@ -47,6 +50,16 @@ import { SlaEngineService } from '../sla/sla-engine.service';
 import { OsProcessTemplateService } from '../os-process-templates/os-process-templates.service';
 import { NotificationsService } from '../notifications/notifications.service';
 import { OperationalProcessesService } from '../service-processes/operational-processes.service';
+import {
+  STATUS_LABEL,
+  assertTransition,
+  hasCurrentApproval,
+  needsClosingApproval,
+  statusDates,
+} from './service-order-rules';
+import { ServiceOrderLifecycleService } from './service-order-lifecycle.service';
+import { syncOccurrenceStatus } from './occurrence-sync';
+import { nextOrderProtocol } from './order-protocol';
 
 export type AttachmentDownloadResult = {
   fileName: string;
@@ -87,6 +100,10 @@ type CreateOccurrenceInput = {
   analystResponsible: string;
   description: string;
   createdAt?: string;
+  /** Origem externa (integrações): deduplicada por @@unique(tenantId, sourceSystem, externalId). */
+  sourceSystem?: 'WEBHOOK' | 'POLLING';
+  externalId?: string;
+  sourceMetadata?: Prisma.InputJsonValue;
   firstOrder: {
     recordCompleted?: boolean;
     workflowTemplateCode?: string;
@@ -117,6 +134,7 @@ type UpdateOccurrenceInput = {
 };
 
 type ListOccurrencesInput = {
+  customerId?: string;
   provider?: string;
   search?: string;
   status?: OccurrenceStatus;
@@ -156,6 +174,7 @@ type UpdateOrderInput = {
   analystName?: string | null;
   ownerName?: string | null;
   deadlineAt?: string;
+  deadlineReason?: string;
   tags?: string[];
   internalNotes?: string | null;
   expectedVersion?: number;
@@ -168,6 +187,9 @@ type TransitionInput = {
 };
 
 type ListInput = {
+  customerId?: string;
+  situation?: 'active' | 'completed' | 'all';
+  deadline?: DeadlineFilter;
   provider?: string;
   /** Internal scope resolved from the authenticated user, never a public user-ID filter. */
   responsibleUserId?: string;
@@ -210,47 +232,12 @@ const ROLE_SET = ['super_admin', 'gerente', 'analista'] as const;
 const ATTACHMENT_LIMIT = 10;
 const ATTACHMENT_MAX_BYTES = 10 * 1024 * 1024;
 const EXPORT_MAX_ROWS = 10000;
-const ALLOWED_EXTENSIONS = new Set([
-  '.pdf',
-  '.png',
-  '.jpg',
-  '.jpeg',
-  '.txt',
-  '.csv',
-  '.zip',
-  '.mp4',
-  '.mov',
-  '.webm',
-  '.mp3',
-  '.wav',
-  '.ogg',
-  '.aac',
-  '.m4a',
-]);
-const ALLOWED_MIME = new Set([
-  'application/pdf',
-  'image/png',
-  'image/jpeg',
-  'image/jpg',
-  'text/plain',
-  'text/csv',
-  'application/zip',
-  'application/x-zip-compressed',
-  'application/octet-stream',
-  'video/mp4',
-  'video/quicktime',
-  'video/webm',
-  'audio/mpeg',
-  'audio/mp3',
-  'audio/wav',
-  'audio/x-wav',
-  'audio/ogg',
-  'audio/aac',
-  'audio/mp4',
-]);
-const MAX_CREATE_RETRIES = 5;
 
-type Role = string;
+const MAX_CREATE_RETRIES = 5;
+/** Teto e padrão das listagens de O.S. e ocorrências (igual ao máximo do schema da API). */
+const DEFAULT_PAGE_SIZE = 200;
+/** Marca a pausa de SLA aplicada automaticamente por "Aguardando terceiros" (C-030). */
+const AUTO_PAUSE_PREFIX = 'Aguardando terceiros: ';
 
 @Injectable()
 export class ServiceOrdersService {
@@ -273,7 +260,38 @@ export class ServiceOrdersService {
     @Optional()
     @Inject(OperationalProcessesService)
     private readonly operationalProcesses?: OperationalProcessesService,
+    @Optional()
+    @Inject(ServiceOrderLifecycleService)
+    private lifecycleService?: ServiceOrderLifecycleService,
   ) {}
+
+  /**
+   * Responsáveis precisam ser da equipe (super_admin, gerente ou analista) do tenant; nunca
+   * um login de cliente (C-007). Devolve o nome de cada id para gravar junto.
+   */
+  private async teamMemberNames(tenantId: string, ids: Array<string | null | undefined>) {
+    const wanted = [...new Set(ids.filter((id): id is string => !!id))];
+    if (!wanted.length) return new Map<string, string>();
+    const members = await this.prisma.userTenant.findMany({
+      where: { tenantId, userId: { in: wanted }, role: { code: { in: [...ROLE_SET] } } },
+      select: { userId: true, user: { select: { name: true } } },
+    });
+    if (wanted.some((id) => !members.some((m) => m.userId === id)))
+      throw new BadRequestException('Selecione responsáveis da equipe da Ajust.');
+    return new Map(members.map((m) => [m.userId, m.user.name]));
+  }
+
+  /** Serviço único de efeitos; criado na hora quando não vem injetado (testes). */
+  private get lifecycle(): ServiceOrderLifecycleService {
+    return (this.lifecycleService ??= new ServiceOrderLifecycleService(
+      this.prisma,
+      this.eventsGateway,
+      this.csatService,
+      this.notificationsService,
+      this.osProcessTemplateService,
+      this.workflowsService,
+    ));
+  }
 
   async create(authUserId: string | null, role: string, input: CreateOrderInput) {
     if (!ROLE_SET.includes(role as (typeof ROLE_SET)[number])) {
@@ -288,40 +306,22 @@ export class ServiceOrdersService {
     if (input.occurrenceId) {
       const occurrence = await this.prisma.occurrence.findFirst({
         where: { id: input.occurrenceId, tenantId: input.tenantId, deletedAt: null },
-        select: { id: true },
+        select: { id: true, number: true, status: true },
       });
       if (!occurrence) {
         throw new BadRequestException('Occurrence not found for this tenant.');
       }
+      this.assertOccurrenceOpen(occurrence);
     }
 
-    const assignedUserIds = [
-      ...new Set([input.ownerUserId, input.assigneeUserId].filter(Boolean)),
-    ] as string[];
-    if (assignedUserIds.length > 0) {
-      const memberships = await this.prisma.userTenant.findMany({
-        where: { tenantId: input.tenantId, userId: { in: assignedUserIds } },
-        select: { userId: true },
-      });
-      const tenantUsers = new Set(memberships.map((membership) => membership.userId));
-      if (assignedUserIds.some((userId) => !tenantUsers.has(userId))) {
-        throw new BadRequestException(
-          'Owner and assignee must belong to the service order tenant.',
-        );
-      }
-    }
-
-    if (assignedUserIds.length) {
-      const users = await this.prisma.user.findMany({
-        where: { id: { in: assignedUserIds } },
-        select: { id: true, name: true },
-      });
-      if (input.ownerUserId)
-        input.ownerName = users.find((u) => u.id === input.ownerUserId)?.name || input.ownerName;
-      if (input.assigneeUserId)
-        input.analystName =
-          users.find((u) => u.id === input.assigneeUserId)?.name || input.analystName;
-    }
+    if (authUserId && (role === 'analista' || !input.ownerUserId)) input.ownerUserId = authUserId;
+    const names = await this.teamMemberNames(input.tenantId, [
+      input.ownerUserId,
+      input.assigneeUserId,
+    ]);
+    if (input.ownerUserId) input.ownerName = names.get(input.ownerUserId) || input.ownerName;
+    if (input.assigneeUserId)
+      input.analystName = names.get(input.assigneeUserId) || input.analystName;
     const now = new Date();
 
     // Utilize SLA Engine to dynamically compute deadlines rather than raw timestamp addition
@@ -336,6 +336,8 @@ export class ServiceOrdersService {
       input.tenantId,
     );
 
+    if (input.deadlineAt && new Date(input.deadlineAt).getTime() <= now.getTime())
+      throw new BadRequestException('O prazo excepcional precisa estar no futuro.');
     const deadlineAt = input.deadlineAt ? new Date(input.deadlineAt) : calculatedDeadline;
 
     const created = await this.withCreateRetry(async () => {
@@ -401,58 +403,22 @@ export class ServiceOrdersService {
         { timeout: 30000 },
       );
     });
-    await this.logAudit(input.tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
-      protocol: created.protocol,
-      type: input.type,
-      priority: input.priority,
+    await this.lifecycle.afterOrderCreated(created, authUserId, {
+      occurrenceId: created.occurrenceId,
+      manualDeadline: !!input.deadlineAt,
     });
-
-    this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order.created', {
-      tenantId: input.tenantId,
-      orderId: created.id,
-      protocol: created.protocol,
-      priority: created.priority,
-      status: created.status,
-      at: new Date().toISOString(),
-    });
-
-    this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order_created', {
-      orderId: created.id,
-      protocol: created.protocol,
-    });
-
-    this.workflowsService
-      ?.executeForEvent(input.tenantId, {
-        type: 'order_created',
-        order: {
-          id: created.id,
-          protocol: created.protocol,
-          title: created.title,
-          type: created.type,
-          priority: created.priority,
-          status: created.status,
-          requester: created.requester,
-          sector: created.sector,
-          analystName: created.analystName,
-          deadlineAt: created.deadlineAt?.toISOString(),
-        },
-      })
-      .catch((error) => {
-        this.logger.warn(
-          `Workflow execution failed after order creation: ${(error as Error).message}`,
-        );
-      });
 
     return created;
   }
 
   async list(tenantId: string, input: ListInput = {}, role?: string | null) {
-    const where = this.buildWhere(tenantId, input, role);
+    const where = await this.buildListWhere(tenantId, input, role);
 
     const rows = await this.prisma.serviceOrder.findMany({
       where,
       orderBy: this.buildOrderBy(input),
-      ...(input.limit ? { take: input.limit } : {}),
+      // Sem limite informado, vale o teto da API: nunca devolve o workspace inteiro (C-041).
+      take: Math.min(input.limit ?? DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
       ...(input.offset ? { skip: input.offset } : {}),
       include: {
         occurrence: {
@@ -479,7 +445,7 @@ export class ServiceOrdersService {
   }
 
   async summary(tenantId: string, input: ListInput = {}, role?: string | null) {
-    const where = this.buildWhere(tenantId, input, role);
+    const where = await this.buildListWhere(tenantId, input, role);
     const now = new Date();
     const twoHours = new Date(now.getTime() + 2 * 60 * 60 * 1000);
     const activeStatuses: ServiceOrderStatus[] = [
@@ -487,13 +453,13 @@ export class ServiceOrdersService {
       'EM_ANALISE',
       'AG_CAMPO',
       'AG_TERCEIROS',
-      'RESOLVIDA',
     ];
 
     const [
       total,
       active,
       closed,
+      resolvedAwaiting,
       overdueActive,
       risk2h,
       criticalOverdue,
@@ -507,7 +473,10 @@ export class ServiceOrdersService {
         where: this.andWhere(where, { status: { in: activeStatuses } }),
       }),
       this.prisma.serviceOrder.count({
-        where: this.andWhere(where, { status: { in: ['FECHADA', 'CANCELADA'] } }),
+        where: this.andWhere(where, { status: { in: ['FECHADA', 'RESOLVIDA'] } }),
+      }),
+      this.prisma.serviceOrder.count({
+        where: this.andWhere(where, { status: 'RESOLVIDA' }),
       }),
       this.prisma.serviceOrder.count({
         where: this.andWhere(where, {
@@ -615,6 +584,8 @@ export class ServiceOrdersService {
       total,
       active,
       closed,
+      /** Resolvidas que ainda aguardam o fechamento (já incluídas em `closed`). */
+      resolvedAwaiting,
       overdueActive,
       risk2h,
       criticalOverdue,
@@ -876,7 +847,8 @@ export class ServiceOrdersService {
       };
     }
 
-    if (input.provider) {
+    if (input.customerId) where.customerId = input.customerId;
+    if (input.provider && !input.customerId) {
       where.provider = { contains: input.provider, mode: 'insensitive' };
     }
     if (input.status) {
@@ -896,12 +868,14 @@ export class ServiceOrdersService {
     return this.prisma.occurrence.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      ...(input.limit ? { take: input.limit } : {}),
+      take: Math.min(input.limit ?? DEFAULT_PAGE_SIZE, DEFAULT_PAGE_SIZE),
       ...(input.offset ? { skip: input.offset } : {}),
       include: {
         annotations: {
           ...(this.isCustomerRole(role) ? { where: { isCustomerVisible: true } } : {}),
           orderBy: { createdAt: 'desc' },
+          // A lista traz só as últimas; o histórico completo está no detalhe (C-022).
+          take: 5,
           include: {
             actorUser: {
               select: { id: true, name: true, email: true },
@@ -989,7 +963,8 @@ export class ServiceOrdersService {
   }
 
   async createOccurrenceWithFirstOrder(
-    authUserId: string,
+    /** null = integração (chat, monitoramento): sem ator humano, a O.S. abre sem fluxo. */
+    authUserId: string | null,
     role: string,
     input: CreateOccurrenceInput,
   ) {
@@ -1006,6 +981,8 @@ export class ServiceOrdersService {
       input.provider = customer.tradeName || customer.legalName;
       input.firstOrder.requester = input.provider;
     }
+    if (authUserId && (role === 'analista' || !input.firstOrder.ownerUserId))
+      input.firstOrder.ownerUserId = authUserId;
     const assignedIds = [input.firstOrder.ownerUserId, input.firstOrder.assigneeUserId].filter(
       (id): id is string => !!id,
     );
@@ -1015,6 +992,7 @@ export class ServiceOrdersService {
             tenantId: input.tenantId,
             userId: { in: assignedIds },
             role: { code: { in: [...ROLE_SET] } },
+            user: { status: 'ACTIVE', deletedAt: null },
           },
           select: { userId: true, user: { select: { name: true } } },
         })
@@ -1029,6 +1007,13 @@ export class ServiceOrdersService {
       input.firstOrder.analystName ||
       input.analystResponsible;
     const now = new Date();
+    // Data retroativa só para a gestão, nunca no futuro, e vale para a O.S. e o prazo (C-006).
+    if (input.createdAt) {
+      if (!['super_admin', 'gerente'].includes(role))
+        throw new ForbiddenException('Só a gestão registra atendimento com data retroativa.');
+      if (new Date(input.createdAt).getTime() > now.getTime())
+        throw new BadRequestException('A data de abertura não pode estar no futuro.');
+    }
     const occurrenceCreatedAt = input.createdAt ? new Date(input.createdAt) : now;
     const firstOrderPriority = input.firstOrder.priority || 'NORMAL';
     const firstOrderPolicy = await this.slaEngine.findApplicablePolicy(
@@ -1036,9 +1021,19 @@ export class ServiceOrdersService {
       firstOrderPriority,
       input.firstOrder.type,
     );
+    if (
+      input.firstOrder.deadlineAt &&
+      !input.createdAt &&
+      new Date(input.firstOrder.deadlineAt).getTime() <= now.getTime()
+    )
+      throw new BadRequestException('O prazo excepcional precisa estar no futuro.');
     const firstOrderDeadline = input.firstOrder.deadlineAt
       ? new Date(input.firstOrder.deadlineAt)
-      : await this.slaEngine.calculateTargetDate(now, firstOrderPolicy.hours, input.tenantId);
+      : await this.slaEngine.calculateTargetDate(
+          occurrenceCreatedAt,
+          firstOrderPolicy.hours,
+          input.tenantId,
+        );
     if (
       input.firstOrder.recordCompleted &&
       input.firstOrder.workflowTemplateCode &&
@@ -1047,9 +1042,7 @@ export class ServiceOrdersService {
       throw new BadRequestException(
         'Para trabalhos com desdobramentos, abra o atendimento e registre a conclusão na O.S.',
       );
-    const firstOrderStatus = input.firstOrder.recordCompleted
-      ? 'FECHADA'
-      : input.firstOrder.status || 'ABERTA';
+    const firstOrderStatus = input.firstOrder.recordCompleted ? 'FECHADA' : 'ABERTA';
 
     const created = await this.withCreateRetry(() =>
       this.prisma.$transaction(async (tx) => {
@@ -1063,13 +1056,18 @@ export class ServiceOrdersService {
             provider: input.provider,
             customerId: input.customerId,
             type: input.type,
-            status: input.status || 'ABERTA',
+            status: 'ABERTA',
             sector: input.sector,
             origin: input.origin,
             openedByName: ownerName,
             analystResponsible: analystName,
+            analystResponsibleUserId: input.firstOrder.assigneeUserId || null,
+            openedByUserId: authUserId,
             description: input.description,
             createdAt: occurrenceCreatedAt,
+            ...(input.sourceSystem ? { sourceSystem: input.sourceSystem } : {}),
+            ...(input.externalId ? { externalId: input.externalId } : {}),
+            ...(input.sourceMetadata ? { sourceMetadata: input.sourceMetadata } : {}),
           },
         });
 
@@ -1078,7 +1076,7 @@ export class ServiceOrdersService {
             tenantId: input.tenantId,
             occurrenceId: occurrence.id,
             protocol,
-            sourceSystem: 'ERP',
+            sourceSystem: input.sourceSystem || 'ERP',
             type: input.firstOrder.type,
             sourceMetadata: {
               slaPolicyConfirmed: 'id' in firstOrderPolicy,
@@ -1098,6 +1096,7 @@ export class ServiceOrdersService {
             assigneeUserId: input.firstOrder.assigneeUserId,
             analystName,
             deadlineAt: firstOrderDeadline,
+            createdAt: occurrenceCreatedAt,
             tags: input.firstOrder.tags || [],
             internalNotes: input.firstOrder.internalNotes,
             occurrences: {
@@ -1127,14 +1126,14 @@ export class ServiceOrdersService {
               reason: input.firstOrder.description,
             },
           });
-          if (this.operationalProcesses)
+          if (this.operationalProcesses && authUserId)
             await this.operationalProcesses.recordCompleted(
               input.tenantId,
               authUserId,
               order.id,
               tx,
             );
-        } else if (this.operationalProcesses) {
+        } else if (this.operationalProcesses && authUserId) {
           await this.operationalProcesses.start(
             input.tenantId,
             authUserId,
@@ -1169,14 +1168,23 @@ export class ServiceOrdersService {
       at: new Date().toISOString(),
     });
 
-    this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order.created', {
-      tenantId: input.tenantId,
-      orderId: created.order.id,
-      protocol: created.order.protocol,
+    // Mesmos efeitos de "O.S. criada" dos outros caminhos, incluindo workflows (C-010).
+    await this.lifecycle.afterOrderCreated(created.order, authUserId, {
       occurrenceId: created.occurrence.id,
       occurrenceNumber: created.occurrence.number,
-      at: new Date().toISOString(),
+      manualDeadline: !!input.firstOrder.deadlineAt,
     });
+    if (input.firstOrder.recordCompleted)
+      await this.lifecycle.afterStatusChange({
+        tenantId: input.tenantId,
+        orderId: created.order.id,
+        from: 'ABERTA',
+        to: 'FECHADA',
+        actorId: authUserId,
+        reason: input.firstOrder.description,
+        source: 'transition',
+        syncOccurrence: false,
+      });
 
     return this.getOccurrenceById(input.tenantId, created.occurrence.id);
   }
@@ -1433,11 +1441,13 @@ export class ServiceOrdersService {
         sector: true,
         origin: true,
         analystResponsible: true,
+        status: true,
       },
     });
     if (!occurrence) {
       throw new NotFoundException('Occurrence not found.');
     }
+    this.assertOccurrenceOpen(occurrence);
 
     const priority = input.priority || 'NORMAL';
     if (this.operationalProcesses)
@@ -1455,7 +1465,7 @@ export class ServiceOrdersService {
     const deadlineAt = input.deadlineAt
       ? new Date(input.deadlineAt)
       : await this.slaEngine.calculateTargetDate(new Date(), slaPolicy.hours, tenantId);
-    const status = input.status || 'ABERTA';
+    const status = 'ABERTA';
 
     const created = await this.withCreateRetry(async () => {
       const protocol = await this.buildProtocol(tenantId);
@@ -1500,25 +1510,11 @@ export class ServiceOrdersService {
       });
     });
 
-    await this.logAudit(tenantId, authUserId, 'OS_CREATE', 'service_order', created.id, {
-      protocol: created.protocol,
+    await this.lifecycle.afterOrderCreated(created, authUserId, {
       occurrenceId: occurrence.id,
       occurrenceNumber: occurrence.number,
     });
-
-    this.eventsGateway.emitTenantEvent(tenantId, 'service_order.created', {
-      tenantId,
-      orderId: created.id,
-      protocol: created.protocol,
-      occurrenceId: occurrence.id,
-      occurrenceNumber: occurrence.number,
-      at: new Date().toISOString(),
-    });
-
-    this.eventsGateway.emitTenantEvent(tenantId, 'service_order_created', {
-      orderId: created.id,
-      protocol: created.protocol,
-    });
+    await syncOccurrenceStatus(this.prisma, tenantId, occurrence.id).catch(() => undefined);
     return created;
   }
 
@@ -1530,38 +1526,111 @@ export class ServiceOrdersService {
     patch: UpdateOrderInput,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) {
-      throw new ForbiddenException('Role is not allowed to update service order.');
+      throw new ForbiddenException('Seu perfil não edita O.S.');
     }
 
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId, deletedAt: null },
-      select: { id: true, protocol: true, version: true },
+      select: {
+        id: true,
+        protocol: true,
+        ownerUserId: true,
+        version: true,
+        type: true,
+        priority: true,
+        status: true,
+        createdAt: true,
+        deadlineAt: true,
+        originalDeadlineAt: true,
+        pausedAt: true,
+        slaEligible: true,
+      },
     });
     if (!order) {
-      throw new NotFoundException('Service order not found.');
+      throw new NotFoundException('O.S. não encontrada.');
     }
 
     if (patch.expectedVersion !== undefined && order.version !== patch.expectedVersion) {
       throw new ConflictException(
-        'Esta Ordem de Serviço foi alterada por outro usuário. Recarregue a página para obter a versão mais recente.',
+        'Esta O.S. foi alterada por outra pessoa. Recarregue a página para ver a versão mais recente.',
       );
     }
 
-    const selectedUsers = [patch.ownerUserId, patch.assigneeUserId].filter(
-      (id): id is string => !!id,
-    );
-    if (selectedUsers.length) {
-      const members = await this.prisma.userTenant.findMany({
-        where: { tenantId, userId: { in: selectedUsers } },
-        select: { userId: true, user: { select: { name: true } } },
-      });
-      if (selectedUsers.some((id) => !members.some((m) => m.userId === id)))
-        throw new BadRequestException('Selecione pessoas da equipe da Ajust.');
-      if (patch.ownerUserId)
-        patch.ownerName = members.find((m) => m.userId === patch.ownerUserId)!.user.name;
-      if (patch.assigneeUserId)
-        patch.analystName = members.find((m) => m.userId === patch.assigneeUserId)!.user.name;
+    if (role === 'analista' && patch.ownerUserId && patch.ownerUserId !== order.ownerUserId)
+      throw new ForbiddenException('Somente a gestão pode corrigir a autoria da abertura.');
+    if (!patch.ownerUserId) delete patch.ownerName;
+    if (!patch.assigneeUserId) delete patch.analystName;
+
+    const names = await this.teamMemberNames(tenantId, [patch.ownerUserId, patch.assigneeUserId]);
+    if (patch.ownerUserId) patch.ownerName = names.get(patch.ownerUserId)!;
+    if (patch.assigneeUserId) patch.analystName = names.get(patch.assigneeUserId)!;
+
+    // Prazo: a tela reenvia o prazo atual a cada salvamento; só conta como mudança se for
+    // diferente (precisão de minuto do campo datetime-local).
+    const requestedDeadline = patch.deadlineAt ? new Date(patch.deadlineAt) : null;
+    const deadlineChanged =
+      !!requestedDeadline &&
+      Math.abs(requestedDeadline.getTime() - order.deadlineAt.getTime()) >= 60_000;
+    const typeChanged = patch.type !== undefined && patch.type !== order.type;
+    const priorityChanged = patch.priority !== undefined && patch.priority !== order.priority;
+    let nextDeadline: Date | null = null;
+    let slaEvent: { eventType: string; reason: string } | null = null;
+    if (deadlineChanged) {
+      // Mudar o prazo depois da abertura é decisão gerencial, com motivo e auditoria (C-005).
+      if (!['super_admin', 'gerente'].includes(role))
+        throw new ForbiddenException(
+          'Só a gestão altera o prazo de uma O.S. aberta. Peça ao gerente ou registre a pausa do SLA.',
+        );
+      const reason = patch.deadlineReason?.trim();
+      if (!reason || reason.length < 3)
+        throw new BadRequestException('Informe o motivo da mudança de prazo.');
+      if (requestedDeadline!.getTime() <= Date.now())
+        throw new BadRequestException('O novo prazo precisa estar no futuro.');
+      nextDeadline = requestedDeadline;
+      slaEvent = { eventType: 'DEADLINE_CHANGED', reason };
+    } else if (
+      (typeChanged || priorityChanged) &&
+      order.slaEligible &&
+      !order.pausedAt &&
+      ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS'].includes(order.status)
+    ) {
+      // O prazo depende do tipo e da prioridade: corrigir um deles recalcula a partir da
+      // abertura (C-025, C-024).
+      const nextType = patch.type ?? order.type;
+      const nextPriority = patch.priority ?? order.priority;
+      const policy = await this.slaEngine.findApplicablePolicy(tenantId, nextPriority, nextType);
+      nextDeadline = await this.slaEngine.calculateTargetDate(
+        order.createdAt,
+        policy.hours,
+        tenantId,
+      );
+      slaEvent = {
+        eventType: 'RECALCULATED',
+        reason: [
+          typeChanged ? `tipo ${order.type} → ${nextType}` : '',
+          priorityChanged ? `prioridade ${order.priority} → ${nextPriority}` : '',
+        ]
+          .filter(Boolean)
+          .join('; '),
+      };
     }
+    const changedFields = (
+      [
+        'ownerUserId',
+        'assigneeUserId',
+        'type',
+        'priority',
+        'title',
+        'description',
+        'requester',
+        'sector',
+        'origin',
+        'tags',
+        'internalNotes',
+      ] as const
+    ).filter((key) => patch[key] !== undefined);
+    if (nextDeadline) changedFields.push('deadlineAt' as never);
+
     const data: Prisma.ServiceOrderUpdateInput = {
       ...(patch.ownerUserId ? { owner: { connect: { id: patch.ownerUserId } } } : {}),
       ...(patch.assigneeUserId ? { assignee: { connect: { id: patch.assigneeUserId } } } : {}),
@@ -1576,39 +1645,63 @@ export class ServiceOrdersService {
       ...(patch.ownerName !== undefined ? { ownerName: patch.ownerName } : {}),
       ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
       ...(patch.internalNotes !== undefined ? { internalNotes: patch.internalNotes } : {}),
-      ...(patch.deadlineAt ? { deadlineAt: new Date(patch.deadlineAt) } : {}),
+      ...(nextDeadline
+        ? {
+            deadlineAt: nextDeadline,
+            originalDeadlineAt: order.originalDeadlineAt ?? order.deadlineAt,
+          }
+        : {}),
     };
 
     let updated;
     try {
-      updated = await this.prisma.serviceOrder.update({
-        where: {
-          id: order.id,
-          ...(patch.expectedVersion !== undefined ? { version: patch.expectedVersion } : {}),
-        },
-        data: {
-          ...data,
-          version: { increment: 1 },
-          occurrences: {
-            create: {
-              actorUserId: authUserId,
-              sourceSystem: 'ERP',
-              message: 'Campos da O.S atualizados manualmente.',
-            },
+      updated = await this.prisma.$transaction(async (tx) => {
+        const saved = await tx.serviceOrder.update({
+          where: {
+            id: order.id,
+            ...(patch.expectedVersion !== undefined ? { version: patch.expectedVersion } : {}),
           },
-        },
-        include: {
-          occurrence: true,
-          occurrences: {
-            orderBy: { createdAt: 'desc' },
-            include: {
-              actorUser: {
-                select: { id: true, name: true, email: true },
+          data: {
+            ...data,
+            version: { increment: 1 },
+            occurrences: {
+              create: {
+                actorUserId: authUserId,
+                sourceSystem: 'ERP',
+                message: nextDeadline
+                  ? `O.S. editada. Prazo de ${order.deadlineAt.toISOString()} para ${nextDeadline.toISOString()}${slaEvent ? ` (${slaEvent.reason})` : ''}.`
+                  : 'O.S. editada.',
               },
             },
           },
-          attachments: { orderBy: { uploadedAt: 'desc' } },
-        },
+          include: {
+            occurrence: true,
+            occurrences: {
+              orderBy: { createdAt: 'desc' },
+              include: {
+                actorUser: {
+                  select: { id: true, name: true, email: true },
+                },
+              },
+            },
+            attachments: { orderBy: { uploadedAt: 'desc' } },
+          },
+        });
+        if (nextDeadline && slaEvent)
+          await tx.slaAuditEvent.create({
+            data: {
+              tenantId,
+              orderId: saved.id,
+              eventType: slaEvent.eventType,
+              deadlineAt: nextDeadline,
+              reason: slaEvent.reason,
+              metadata: {
+                previousDeadline: order.deadlineAt.toISOString(),
+                actorUserId: authUserId,
+              },
+            },
+          });
+        return saved;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
@@ -1621,7 +1714,13 @@ export class ServiceOrdersService {
 
     await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order', updated.id, {
       protocol: updated.protocol,
-      patch,
+      changedFields,
+      ...(nextDeadline
+        ? {
+            previousDeadline: order.deadlineAt.toISOString(),
+            deadlineAt: nextDeadline.toISOString(),
+          }
+        : {}),
     });
 
     this.eventsGateway.emitTenantEvent(tenantId, 'service_order.updated', {
@@ -1701,212 +1800,219 @@ export class ServiceOrdersService {
     role: string,
     input: TransitionInput,
   ) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
+      throw new ForbiddenException('Seu perfil não altera a etapa de O.S.');
+    }
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id, tenantId, deletedAt: null },
     });
-
-    if (!order) {
-      throw new NotFoundException('Service order not found.');
-    }
+    if (!order) throw new NotFoundException('O.S. não encontrada.');
 
     const from = order.status;
+    const to = input.toStatus;
     if (order.processInstanceId) {
-      const archived = await this.prisma.serviceProcessInstance.findFirst({
-        where: {
-          id: order.processInstanceId,
-          tenantId,
-          status: 'HISTORICAL',
-          engineVersion: 2,
-          steps: { none: { status: { in: ['ACTIVE', 'WAITING'] } } },
-        },
-        select: { id: true },
+      // Com etapa de processo em andamento, a O.S. anda pela tela de processos. Sem etapa
+      // ativa (processo concluído ou arquivado, ou aguardando aprovação), a transição manual vale.
+      const activeSteps = await this.prisma.serviceProcessStep.count({
+        where: { instanceId: order.processInstanceId, status: { in: ['ACTIVE', 'WAITING'] } },
       });
-      if (!archived)
+      if (activeSteps)
         throw new ForbiddenException(
-          'Esta O.S. pertence a um processo. Conclua a etapa na tela de processos.',
+          'Esta O.S. está numa etapa de processo. Conclua a etapa na tela de processos.',
         );
     }
-    const to = input.toStatus;
+    assertTransition(from, to);
 
-    if (from === to) {
-      throw new BadRequestException('Source and destination statuses are equal.');
+    if (
+      to === 'FECHADA' &&
+      needsClosingApproval(order) &&
+      !(await hasCurrentApproval(this.prisma, order))
+    ) {
+      throw new ForbiddenException(
+        'Esta O.S. de prioridade alta/crítica está atrasada: o fechamento precisa de aprovação gerencial na aba Aprovações.',
+      );
     }
-
-    this.assertTransitionAllowed(from, to, role as Role);
-
-    if (to === 'FECHADA' && from === 'RESOLVIDA' && order.requiresApproval) {
-      const needsApproval = this.requiresDelayedApproval(order.priority, order.deadlineAt);
-      if (needsApproval) {
-        const approved = await this.prisma.serviceOrderApproval.findFirst({
-          where: {
-            serviceOrderId: order.id,
-            status: 'APPROVED',
-          },
-          orderBy: {
-            createdAt: 'desc',
-          },
-        });
-
-        if (!approved) {
-          throw new ForbiddenException(
-            'Closing delayed ALTA/CRITICA order requires explicit approval before FECHADA.',
-          );
-        }
-      }
-    }
-
     if (input.expectedVersion !== undefined && order.version !== input.expectedVersion) {
       throw new ConflictException(
-        'Esta Ordem de Serviço foi alterada por outro usuário. Recarregue a página para obter a versão mais recente.',
+        'Esta O.S. foi alterada por outra pessoa. Recarregue a página para ver a versão mais recente.',
       );
     }
 
+    // "Aguardando terceiros" pausa o SLA; sair dela retoma e estende o prazo pelo tempo útil
+    // parado (decisão C-030 de 04/11). Pausa manual já existente não é alterada.
     const now = new Date();
+    let slaPatch: Prisma.ServiceOrderUpdateInput = {};
+    let slaAudit: { eventType: 'PAUSED' | 'RESUMED'; deadlineAt: Date; minutes?: number } | null =
+      null;
+    if (to === 'AG_TERCEIROS' && !order.pausedAt && order.slaEligible) {
+      slaPatch = {
+        pausedAt: now,
+        pauseReason: `${AUTO_PAUSE_PREFIX}${input.reason}`,
+        originalDeadlineAt: order.originalDeadlineAt ?? order.deadlineAt,
+      };
+      slaAudit = { eventType: 'PAUSED', deadlineAt: order.deadlineAt };
+    } else if (
+      from === 'AG_TERCEIROS' &&
+      order.pausedAt &&
+      order.pauseReason?.startsWith(AUTO_PAUSE_PREFIX)
+    ) {
+      const minutes = await this.slaEngine.calculateBusinessPauseDuration(
+        order.pausedAt,
+        now,
+        tenantId,
+      );
+      const deadlineAt =
+        minutes > 0
+          ? await this.slaEngine.calculateTargetDate(order.deadlineAt, minutes / 60, tenantId)
+          : order.deadlineAt;
+      slaPatch = { pausedAt: null, pauseReason: null, deadlineAt };
+      slaAudit = { eventType: 'RESUMED', deadlineAt, minutes };
+    }
 
     let updated;
     try {
-      updated = await this.prisma.serviceOrder.update({
-        where: {
-          id: order.id,
-          ...(input.expectedVersion !== undefined ? { version: input.expectedVersion } : {}),
-        },
-        data: {
-          status: to,
-          version: { increment: 1 },
-          resolvedAt: to === 'RESOLVIDA' ? now : order.resolvedAt,
-          closedAt: to === 'FECHADA' ? now : order.closedAt,
-          canceledAt: to === 'CANCELADA' ? now : order.canceledAt,
-          reopenedCount:
-            from === 'FECHADA' && to === 'EM_ANALISE'
-              ? order.reopenedCount + 1
-              : order.reopenedCount,
-          occurrences: {
-            create: {
-              actorUserId: authUserId,
-              sourceSystem: 'ERP',
-              message: `Status alterado de ${from} para ${to}. Motivo: ${input.reason}`,
-            },
+      updated = await this.prisma.$transaction(async (tx) => {
+        if (
+          to === 'FECHADA' &&
+          needsClosingApproval(order) &&
+          !(await hasCurrentApproval(tx, order))
+        )
+          throw new ForbiddenException('O fechamento precisa de aprovação gerencial vigente.');
+        const saved = await tx.serviceOrder.update({
+          where: {
+            id: order.id,
+            ...(input.expectedVersion !== undefined ? { version: input.expectedVersion } : {}),
           },
-          serviceOrderStatusEvents: {
-            create: {
-              tenantId,
-              fromStatus: from,
-              toStatus: to,
-              actorUserId: authUserId,
-              reason: input.reason || null,
+          data: {
+            ...(statusDates(order, to) as Prisma.ServiceOrderUpdateInput),
+            ...slaPatch,
+            status: to,
+            version: { increment: 1 },
+            occurrences: {
+              create: {
+                actorUserId: authUserId,
+                sourceSystem: 'ERP',
+                message: `Etapa alterada de ${STATUS_LABEL[from]} para ${STATUS_LABEL[to]}. Motivo: ${input.reason}`,
+              },
             },
-          },
-        },
-        include: {
-          occurrences: {
-            orderBy: { createdAt: 'desc' },
-            include: {
-              actorUser: {
-                select: { id: true, name: true, email: true },
+            serviceOrderStatusEvents: {
+              create: {
+                tenantId,
+                fromStatus: from,
+                toStatus: to,
+                actorUserId: authUserId,
+                reason: input.reason || null,
               },
             },
           },
-        },
+          include: {
+            occurrences: {
+              orderBy: { createdAt: 'desc' },
+              include: {
+                actorUser: {
+                  select: { id: true, name: true, email: true },
+                },
+              },
+            },
+          },
+        });
+        if (slaAudit)
+          await tx.slaAuditEvent.create({
+            data: {
+              tenantId,
+              orderId: saved.id,
+              eventType: slaAudit.eventType,
+              deadlineAt: slaAudit.deadlineAt,
+              reason: input.reason,
+              metadata: {
+                automatic: true,
+                trigger: 'AG_TERCEIROS',
+                actorId: authUserId,
+                previousDeadline: order.deadlineAt.toISOString(),
+                ...(slaAudit.minutes !== undefined
+                  ? { pausedBusinessMinutes: Math.round(slaAudit.minutes) }
+                  : {}),
+              },
+            },
+          });
+        return saved;
       });
     } catch (error) {
       if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2025') {
         throw new ConflictException(
-          'Esta Ordem de Serviço foi alterada concorrentemente por outro usuário. Recarregue a página para obter a versão mais recente.',
+          'Esta O.S. foi alterada ao mesmo tempo por outra pessoa. Recarregue a página e tente de novo.',
         );
       }
       throw error;
     }
 
-    const auditAction: AuditAction =
-      to === 'FECHADA'
-        ? 'OS_CLOSE'
-        : to === 'CANCELADA'
-          ? 'OS_CANCEL'
-          : to === 'EM_ANALISE' && from === 'FECHADA'
-            ? 'OS_REOPEN'
-            : 'OS_UPDATE';
-
-    await this.logAudit(tenantId, authUserId, auditAction, 'service_order', order.id, {
-      from,
-      to,
-      reason: input.reason,
-    });
-
-    this.eventsGateway.emitTenantEvent(tenantId, 'service_order.transitioned', {
+    await this.lifecycle.afterStatusChange({
       tenantId,
       orderId: updated.id,
-      protocol: updated.protocol,
       from,
       to,
-      byUserId: authUserId,
-      at: new Date().toISOString(),
+      actorId: authUserId,
+      reason: input.reason,
+      source: 'transition',
     });
-
-    // Auto-trigger CSAT survey when order is resolved
-    if (to === 'RESOLVIDA') {
-      this.csatService?.createForOrder(tenantId, order.id).catch((error) => {
-        this.logger.warn(`CSAT creation failed for order ${order.id}: ${(error as Error).message}`);
-      });
-    }
-
-    // Auto-dispatch WhatsApp notification when order is resolved or closed (COM-01)
-    if (to === 'RESOLVIDA' || to === 'FECHADA') {
-      this.notificationsService
-        ?.dispatchWhatsAppOrder(tenantId, {
-          orderId: updated.id,
-        })
-        .catch((error) => {
-          this.logger.warn(
-            `Auto WhatsApp notification failed for order ${updated.id}: ${(error as Error).message}`,
-          );
-        });
-    }
-
-    // Trigger workflow automation for this transition
-    const eventType = to === 'FECHADA' ? ('order_closed' as const) : ('order_updated' as const);
-    this.workflowsService
-      ?.executeForEvent(tenantId, {
-        type: eventType,
-        order: {
-          id: updated.id,
-          protocol: updated.protocol,
-          title: updated.title,
-          type: updated.type,
-          priority: updated.priority,
-          status: updated.status,
-          requester: updated.requester,
-          sector: updated.sector,
-          analystName: updated.analystName,
-          deadlineAt: updated.deadlineAt?.toISOString(),
-        },
-      })
-      .catch((error) => {
-        this.logger.warn(`Workflow execution failed after transition: ${(error as Error).message}`);
-      });
-
-    // Disparar templates de processo ao fechar OS
-    if (to === 'FECHADA') {
-      this.osProcessTemplateService
-        ?.executeForOrder(
-          tenantId,
-          {
-            id: updated.id,
-            protocol: updated.protocol,
-            type: updated.type,
-            occurrenceId: updated.occurrenceId,
-            sector: updated.sector,
-            origin: updated.origin,
-          },
-          authUserId,
-        )
-        .catch((error) => {
-          this.logger.warn(
-            `Process template execution failed for order ${updated.id}: ${(error as Error).message}`,
-          );
-        });
-    }
-
     return updated;
+  }
+
+  /**
+   * Integração informa que o problema foi resolvido (ex.: recuperação do Zabbix): as O.S.
+   * ativas da ocorrência sem etapa de processo passam a RESOLVIDA pelo ciclo de vida único.
+   */
+  async resolveFromIntegration(tenantId: string, occurrenceId: string, reason: string) {
+    const orders = await this.prisma.serviceOrder.findMany({
+      where: {
+        tenantId,
+        occurrenceId,
+        deletedAt: null,
+        status: { in: ['ABERTA', 'EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS'] },
+      },
+    });
+    const resolved: string[] = [];
+    for (const order of orders) {
+      if (order.processInstanceId) {
+        const active = await this.prisma.serviceProcessStep.count({
+          where: { instanceId: order.processInstanceId, status: { in: ['ACTIVE', 'WAITING'] } },
+        });
+        if (active) continue;
+      }
+      const changed = await this.prisma.serviceOrder.updateMany({
+        where: { id: order.id, version: order.version },
+        data: {
+          ...statusDates(order, 'RESOLVIDA'),
+          status: 'RESOLVIDA',
+          version: { increment: 1 },
+        },
+      });
+      if (changed.count !== 1) continue;
+      await this.prisma.serviceOrderOccurrence.create({
+        data: { serviceOrderId: order.id, sourceSystem: 'WEBHOOK', message: reason },
+      });
+      await this.prisma.serviceOrderStatusEvent.create({
+        data: {
+          tenantId,
+          serviceOrderId: order.id,
+          fromStatus: order.status,
+          toStatus: 'RESOLVIDA',
+          reason,
+          metadata: { source: 'integration' },
+        },
+      });
+      await this.lifecycle.afterStatusChange({
+        tenantId,
+        orderId: order.id,
+        from: order.status,
+        to: 'RESOLVIDA',
+        actorId: null,
+        reason,
+        source: 'integration',
+      });
+      resolved.push(order.protocol);
+    }
+    return resolved;
   }
 
   async approve(
@@ -1917,8 +2023,9 @@ export class ServiceOrdersService {
     decision: ApprovalStatus,
     reason?: string,
   ) {
-    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
-      throw new ForbiddenException('Role is not allowed to approve service orders.');
+    // A aprovação de fechamento é uma decisão gerencial: o analista não aprova o próprio trabalho.
+    if (!['super_admin', 'gerente'].includes(role)) {
+      throw new ForbiddenException('Somente gerentes podem aprovar o fechamento de O.S.');
     }
 
     const order = await this.prisma.serviceOrder.findFirst({
@@ -1927,6 +2034,11 @@ export class ServiceOrdersService {
 
     if (!order) {
       throw new NotFoundException('Service order not found.');
+    }
+    if (order.status !== 'RESOLVIDA') {
+      throw new ConflictException(
+        'A aprovação é registrada quando a O.S. está resolvida e aguardando fechamento.',
+      );
     }
 
     const approval = await this.prisma.serviceOrderApproval.create({
@@ -1964,6 +2076,7 @@ export class ServiceOrdersService {
     authUserId: string,
     role: string,
     files: Array<Express.Multer.File>,
+    isInternal = true,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) {
       throw new ForbiddenException('Role is not allowed to upload attachments.');
@@ -1984,72 +2097,66 @@ export class ServiceOrdersService {
       throw new NotFoundException('Service order not found.');
     }
 
-    const existingCount = await this.prisma.serviceOrderAttachment.count({
-      where: { serviceOrderId },
-    });
-    if (existingCount + files.length > ATTACHMENT_LIMIT) {
-      throw new BadRequestException(
-        `Attachment limit exceeded. Current=${existingCount}, incoming=${files.length}, max=${ATTACHMENT_LIMIT}.`,
-      );
-    }
-
     const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
     const orderDir = join(uploadRoot, 'service-orders', serviceOrderId);
     for (const file of files) {
       const originalName = basename(file.originalname || 'file');
-      const ext = extname(originalName).toLowerCase();
-      if (!ALLOWED_EXTENSIONS.has(ext)) {
-        throw new BadRequestException(`Unsupported extension: ${ext || 'none'}`);
-      }
-      if (!ALLOWED_MIME.has(file.mimetype)) {
-        throw new BadRequestException(`Unsupported mime type: ${file.mimetype}`);
-      }
-      if (file.size > ATTACHMENT_MAX_BYTES) {
+      file.mimetype = attachmentMime(originalName, file.buffer);
+      if (file.buffer.length > ATTACHMENT_MAX_BYTES) {
         throw new BadRequestException(`File too large: ${originalName}`);
       }
     }
 
     await mkdir(orderDir, { recursive: true });
 
-    const created = [];
+    const created: ServiceOrderAttachment[] = [];
     const storedPaths: string[] = [];
     try {
-      for (const file of files) {
-        const originalName = basename(file.originalname || 'file');
-        const ext = extname(originalName).toLowerCase();
-        const storageFileName = `${Date.now()}_${randomUUID()}${ext}`;
-        const storagePath = join(orderDir, storageFileName);
-        await writeFile(storagePath, file.buffer);
-        storedPaths.push(storagePath);
+      await this.prisma.$transaction(
+        async (tx) => {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${serviceOrderId}))::text`;
+          const configured = Number(process.env.ORDER_ATTACHMENT_TOTAL_LIMIT || 100);
+          const totalLimit =
+            Number.isInteger(configured) && configured >= ATTACHMENT_LIMIT ? configured : 100;
+          const existing = await tx.serviceOrderAttachment.count({ where: { serviceOrderId } });
+          if (existing + files.length > totalLimit)
+            throw new BadRequestException(
+              `Limite total de ${totalLimit} anexos por O.S. atingido.`,
+            );
+          for (const file of files) {
+            const originalName = basename(file.originalname || 'file');
+            const ext = extname(originalName).toLowerCase();
+            const storageFileName = `${Date.now()}_${randomUUID()}${ext}`;
+            const storagePath = join(orderDir, storageFileName);
+            await writeFile(storagePath, file.buffer);
+            storedPaths.push(storagePath);
 
-        const attachment = await this.prisma.serviceOrderAttachment.create({
-          data: {
-            serviceOrderId,
-            fileName: originalName,
-            mimeType: file.mimetype,
-            sizeBytes: file.size,
-            storageKey: storagePath,
-            isInternal: true,
-          },
-        });
+            const attachment = await tx.serviceOrderAttachment.create({
+              data: {
+                serviceOrderId,
+                fileName: originalName,
+                mimeType: file.mimetype,
+                sizeBytes: file.buffer.length,
+                storageKey: join('service-orders', serviceOrderId, storageFileName),
+                isInternal,
+              },
+            });
 
-        created.push(attachment);
-      }
+            created.push(attachment);
+          }
 
-      await this.prisma.serviceOrderOccurrence.create({
-        data: {
-          serviceOrderId,
-          actorUserId: authUserId,
-          sourceSystem: 'ERP',
-          message: `${created.length} anexo(s) adicionado(s).`,
+          await tx.serviceOrderOccurrence.create({
+            data: {
+              serviceOrderId,
+              actorUserId: authUserId,
+              sourceSystem: 'ERP',
+              message: `${created.length} anexo(s) adicionado(s).`,
+            },
+          });
         },
-      });
+        { timeout: 30000 },
+      );
     } catch (error) {
-      if (created.length > 0) {
-        await this.prisma.serviceOrderAttachment.deleteMany({
-          where: { id: { in: created.map((attachment) => attachment.id) } },
-        });
-      }
       await Promise.all(storedPaths.map((path) => rm(path, { force: true })));
       throw error;
     }
@@ -2138,45 +2245,26 @@ export class ServiceOrdersService {
     };
   }
 
-  private assertTransitionAllowed(from: ServiceOrderStatus, to: ServiceOrderStatus, role: Role) {
-    if (!['super_admin', 'gerente', 'analista'].includes(role)) {
-      throw new ForbiddenException('Role cannot transition service order status.');
+  private assertOccurrenceOpen(occurrence: { number?: string; status?: string | null }) {
+    if (occurrence.status === 'ENCERRADA') {
+      const label = occurrence.number ? `A ocorrência ${occurrence.number}` : 'A ocorrência';
+      throw new ConflictException(
+        `${label} está encerrada. Reabra a ocorrência ou abra um novo atendimento para incluir outra O.S.`,
+      );
     }
-
-    const table: Record<ServiceOrderStatus, ServiceOrderStatus[]> = {
-      ABERTA: ['EM_ANALISE', 'CANCELADA'],
-      EM_ANALISE: ['AG_CAMPO', 'AG_TERCEIROS', 'RESOLVIDA', 'CANCELADA'],
-      AG_CAMPO: ['EM_ANALISE', 'RESOLVIDA'],
-      AG_TERCEIROS: ['RESOLVIDA', 'EM_ANALISE'],
-      RESOLVIDA: ['FECHADA', 'EM_ANALISE'],
-      FECHADA: ['EM_ANALISE'],
-      CANCELADA: [],
-    };
-
-    const allowedTo = table[from] || [];
-    if (!allowedTo.includes(to)) {
-      throw new BadRequestException(`Transition ${from} -> ${to} is not allowed.`);
-    }
-  }
-
-  private requiresDelayedApproval(priority: Priority, deadlineAt: Date) {
-    const isHighPriority = priority === 'ALTA' || priority === 'CRITICA';
-    const delayed = deadlineAt.getTime() < Date.now();
-    return isHighPriority && delayed;
   }
 
   private async buildProtocol(tenantId: string) {
-    const year = new Date().getFullYear();
-    const count = await this.prisma.serviceOrder.count({ where: { tenantId } });
-    return `${year}${String(100000 + count + 1).padStart(6, '0')}`;
+    return nextOrderProtocol(this.prisma, tenantId);
   }
 
   private async buildOccurrenceNumber(tenantId: string) {
     const year = new Date().getFullYear();
-    const count = await this.prisma.occurrence.count({
-      where: { tenantId },
-    });
-    return `${year}${String(260000 + count + 1).padStart(6, '0')}`;
+    const rows = await this.prisma.$queryRaw<{ max: number | null }[]>`
+      SELECT MAX(CAST(SUBSTRING("number" FROM 5) AS INTEGER)) AS "max"
+      FROM "Occurrence"
+      WHERE "tenantId" = ${tenantId} AND "number" ~ ${`^${year}[0-9]{6}$`}`;
+    return `${year}${Math.max(Number(rows[0]?.max ?? 0), 260000) + 1}`;
   }
 
   private async withCreateRetry<T>(operation: () => Promise<T>): Promise<T> {
@@ -2199,6 +2287,16 @@ export class ServiceOrdersService {
     return known?.code === 'P2002';
   }
 
+  private async buildListWhere(tenantId: string, input: ListInput, role?: string | null) {
+    const where = this.buildWhere(tenantId, input, role);
+    if (!input.deadline) return where;
+    const tenant = await this.prisma.tenant.findUniqueOrThrow({
+      where: { id: tenantId },
+      select: { timezone: true },
+    });
+    return this.andWhere(where, deadlineWhere(input.deadline, new Date(), tenant.timezone));
+  }
+
   private buildWhere(
     tenantId: string,
     input: ListInput,
@@ -2214,11 +2312,22 @@ export class ServiceOrdersService {
     }
 
     if (input.status) where.status = input.status;
+    if (input.situation && input.situation !== 'all') {
+      where.AND = [
+        {
+          status:
+            input.situation === 'active'
+              ? { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] }
+              : { in: ['RESOLVIDA', 'FECHADA'] },
+        },
+      ];
+    }
     if (input.priority) where.priority = input.priority;
     if (input.type) where.type = input.type;
 
     if (input.responsibleUserId) {
       where.AND = [
+        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
         {
           OR: [
             { ownerUserId: input.responsibleUserId },
@@ -2235,7 +2344,8 @@ export class ServiceOrdersService {
       };
     }
 
-    if (input.provider) {
+    if (input.customerId) where.occurrence = { customerId: input.customerId, tenantId };
+    if (input.provider && !input.customerId) {
       const restrictions = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
       where.AND = [
         ...restrictions,
@@ -2290,10 +2400,10 @@ export class ServiceOrdersService {
     return sanitized as T;
   }
 
-  private buildOrderBy(input: ListInput): Prisma.ServiceOrderOrderByWithRelationInput {
+  private buildOrderBy(input: ListInput): Prisma.ServiceOrderOrderByWithRelationInput[] {
     const orderBy = input.orderBy || 'createdAt';
     const orderDir: Prisma.SortOrder = input.orderDir || 'desc';
-    return { [orderBy]: orderDir };
+    return [{ [orderBy]: orderDir }, { id: 'asc' }];
   }
 
   /**

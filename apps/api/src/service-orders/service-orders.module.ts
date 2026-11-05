@@ -10,6 +10,7 @@ import { ServiceOrdersService } from './service-orders.service';
 import { ServiceProcessesModule } from '../service-processes/service-processes.module';
 import { OrderOperationsService } from './order-operations.service';
 import { OrderOperationsController } from './order-operations.controller';
+import { ServiceOrderLifecycleModule } from './service-order-lifecycle.service';
 
 @Module({
   imports: [
@@ -20,10 +21,10 @@ import { OrderOperationsController } from './order-operations.controller';
     OsProcessTemplatesModule,
     NotificationsModule,
     ServiceProcessesModule,
+    ServiceOrderLifecycleModule,
   ],
   controllers: [OrderOperationsController, ServiceOrdersController],
   providers: [ServiceOrdersService, OrderOperationsService],
   exports: [ServiceOrdersService],
 })
 export class ServiceOrdersModule {}
-
