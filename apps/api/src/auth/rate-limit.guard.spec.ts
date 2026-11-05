@@ -32,7 +32,19 @@ describe('RateLimitGuard', () => {
       body: { identifier: ' User@Example.COM ' },
     } as any);
     expect(redis.del).toHaveBeenCalledWith('rate-limit:login:127.0.0.1:user@example.com');
-    expect(redis.del).toHaveBeenCalledTimes(1);
+    expect(redis.del).toHaveBeenCalledWith('rate-limit:login:account:user@example.com');
+    expect(redis.del).toHaveBeenCalledTimes(2);
+  });
+
+  it('permite login de outro IP apesar de tentativas distribuídas contra a conta (C-049)', async () => {
+    redis.incrEx.mockImplementation(async (key: string) => (key.includes(':account:') ? 21 : 1));
+    const context = makeContext({
+      body: { identifier: 'gerente@ajust.com' },
+      headers: {},
+      ip: '198.51.100.7',
+    });
+    await expect(guard.canActivate(context)).resolves.toBe(true);
+    expect(redis.set).not.toHaveBeenCalled();
   });
 
   it('uses the trusted Express client IP instead of spoofable forwarded headers', async () => {

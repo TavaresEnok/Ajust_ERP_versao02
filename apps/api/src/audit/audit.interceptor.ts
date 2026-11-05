@@ -15,11 +15,11 @@ export class AuditInterceptor implements NestInterceptor {
     return next.handle().pipe(
       mergeMap(async (response: unknown) => {
         // Log changes (POST, PATCH, PUT, DELETE)
-        // Shift reports audit safe metadata inside their transaction. Never copy a
-        // private draft into the tenant-wide audit feed through the generic interceptor.
+        // Shift reports and team rosters audit their changes inside the transaction.
+        // Keep private drafts out of the generic feed and avoid duplicate roster entries.
         if (
           ['POST', 'PATCH', 'PUT', 'DELETE'].includes(method) &&
-          !/^\/shift-reports(?:\/|$)/.test(String(url).split('?')[0])
+          !/^\/(?:shift-reports|on-call\/roster)(?:\/|$)/.test(String(url).split('?')[0])
         ) {
           const tenantId = auth?.tenantId;
           const userId = auth?.userId;
@@ -27,7 +27,7 @@ export class AuditInterceptor implements NestInterceptor {
           if (tenantId && userId) {
             const { resourceType, resourceId, action } = this.parseRequest(url, method, body);
             const userAgent = headers['user-agent'] || 'unknown';
-            const clientIp = ip || headers['x-forwarded-for'] || 'unknown';
+            const clientIp = ip || req.socket?.remoteAddress || 'unknown';
             const statusCode =
               typeof response === 'object' &&
               response !== null &&
@@ -48,7 +48,7 @@ export class AuditInterceptor implements NestInterceptor {
                   userAgent,
                   metadata: {
                     method,
-                    url,
+                    url: String(url).split('?')[0],
                     statusCode,
                     traceId:
                       (headers['x-trace-id'] as string) ||
@@ -99,7 +99,7 @@ export class AuditInterceptor implements NestInterceptor {
       resourceId = urlParts[1];
     }
 
-    let action: AuditAction = 'OS_UPDATE';
+    let action: AuditAction = 'RESOURCE_UPDATE';
 
     if (resource === 'auth') {
       if (pathOnly.includes('/login')) action = 'LOGIN';
@@ -142,12 +142,12 @@ export class AuditInterceptor implements NestInterceptor {
       return { resourceType: resource, resourceId, action };
     }
 
-    if (resource === 'knowledge' && pathOnly.includes('/credentials')) {
+    if (resource === 'knowledge' && /\/(reveal|totp)$/.test(pathOnly)) {
       return { resourceType: resource, resourceId, action: 'CREDENTIAL_ACCESS' };
     }
 
-    if (method === 'DELETE') action = 'EXPORT';
-    else if (method === 'POST') action = 'OS_CREATE';
+    if (method === 'DELETE') action = 'RESOURCE_DELETE';
+    else if (method === 'POST') action = 'RESOURCE_CREATE';
     return { resourceType: resource, resourceId, action };
   }
 

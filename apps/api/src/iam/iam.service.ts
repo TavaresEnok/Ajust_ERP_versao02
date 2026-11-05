@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -35,6 +36,8 @@ type CreateUserInput = {
   tenantId: string;
   roleCode: string;
   sector?: string;
+  customerId?: string;
+  actorRole?: string;
 };
 
 type UpdateTenantInput = {
@@ -59,6 +62,7 @@ type UpdateUserInTenantInput = {
   status?: UserStatus;
   roleCode?: string;
   sector?: string;
+  actorRole?: string;
 };
 
 type CreateTenantSectorInput = {
@@ -275,11 +279,22 @@ export class IamService {
       throw new NotFoundException('Tenant not found.');
     }
 
+    // Conta cliente sempre ligada a um provedor do próprio tenant (C-019).
+    if (input.roleCode === 'cliente') {
+      if (!input.customerId)
+        throw new BadRequestException('Selecione o provedor ao qual o usuário cliente pertence.');
+      const customer = await this.prisma.customer.findFirst({
+        where: { id: input.customerId, tenantId: input.tenantId, deletedAt: null },
+        select: { id: true },
+      });
+      if (!customer) throw new BadRequestException('Provedor não encontrado nesta empresa.');
+    }
+    const customerLink = input.roleCode === 'cliente' ? { customerId: input.customerId } : {};
+
     const normalizedEmail = input.email.toLowerCase();
-    const passwordHash = await hash(input.password, 12);
     const existingUser = await this.prisma.user.findUnique({
       where: { email: normalizedEmail },
-      select: { id: true },
+      select: { id: true, status: true, deletedAt: true },
     });
 
     if (existingUser) {
@@ -295,23 +310,21 @@ export class IamService {
       if (existingMembership) {
         throw new ConflictException('User is already linked to this tenant.');
       }
+      // A conta já existe: só cria o vínculo. Nome, senha e situação pertencem ao dono
+      // da conta e não podem ser trocados por quem está cadastrando (C-020).
+      if (existingUser.deletedAt || existingUser.status !== 'ACTIVE') {
+        throw new ConflictException(
+          'Este e-mail pertence a uma conta inativa ou excluída. A reativação é feita pelo super admin.',
+        );
+      }
 
       const membership = await this.prisma.$transaction(async (tx) => {
-        await tx.user.update({
-          where: { id: existingUser.id },
-          data: {
-            name: input.name,
-            passwordHash,
-            status: 'ACTIVE',
-            deletedAt: null,
-          },
-        });
-
         await tx.userTenant.create({
           data: {
             userId: existingUser.id,
             tenantId: input.tenantId,
             roleId: role.id,
+            ...customerLink,
             ...(input.sector !== undefined ? { sector: input.sector } : {}),
           },
         });
@@ -342,10 +355,12 @@ export class IamService {
       await this.audit.log(input.tenantId, actorUserId, 'CREATE_USER', 'user', existingUser.id, {
         op: 'create_link',
         role: input.roleCode,
+        existingAccountKept: true,
       });
       return membership;
     }
 
+    const passwordHash = await hash(input.password, 12);
     try {
       const created = await this.prisma.user.create({
         data: {
@@ -356,6 +371,7 @@ export class IamService {
             create: {
               tenantId: input.tenantId,
               roleId: role.id,
+              ...customerLink,
               ...(input.sector !== undefined ? { sector: input.sector } : {}),
             },
           },
@@ -467,6 +483,7 @@ export class IamService {
     if (!membership) {
       throw new NotFoundException('User membership not found for this tenant.');
     }
+    await this.assertCanManageUser(input.actorRole, input.userId);
 
     const nextRole = input.roleCode
       ? await this.prisma.role.findUnique({ where: { code: input.roleCode } })
@@ -501,7 +518,11 @@ export class IamService {
             },
           });
         }
-        if (input.password || (input.status !== undefined && input.status !== 'ACTIVE')) {
+        if (
+          input.password ||
+          input.email !== undefined ||
+          (input.status !== undefined && input.status !== 'ACTIVE')
+        ) {
           await tx.session.updateMany({
             where: { userId: input.userId, revokedAt: null },
             data: { revokedAt: new Date() },
@@ -511,7 +532,9 @@ export class IamService {
       await this.audit.log(input.tenantId, actorUserId, 'UPDATE_USER', 'user', input.userId, {
         op: 'update',
         sessionsRevoked:
-          Boolean(input.password) || (input.status !== undefined && input.status !== 'ACTIVE'),
+          Boolean(input.password) ||
+          input.email !== undefined ||
+          (input.status !== undefined && input.status !== 'ACTIVE'),
       });
     } catch {
       throw new ConflictException('User could not be updated. Check unique constraints.');
@@ -541,7 +564,28 @@ export class IamService {
     });
   }
 
-  async removeUserFromTenant(actorUserId: string, tenantId: string, userId: string) {
+  /**
+   * Só um super admin altera ou remove outro super admin. Vale para qualquer vínculo da
+   * conta, porque o usuário (e a senha) é global entre tenants (C-021).
+   */
+  private async assertCanManageUser(actorRole: string | undefined, targetUserId: string) {
+    if (actorRole === 'super_admin') return;
+    const privileged = await this.prisma.userTenant.count({
+      where: { userId: targetUserId, role: { code: 'super_admin' } },
+    });
+    if (privileged > 0) {
+      throw new ForbiddenException(
+        'Somente um super admin pode alterar ou remover outro super admin.',
+      );
+    }
+  }
+
+  async removeUserFromTenant(
+    actorUserId: string,
+    tenantId: string,
+    userId: string,
+    actorRole?: string,
+  ) {
     const membership = await this.prisma.userTenant.findUnique({
       where: {
         userId_tenantId: {
@@ -554,6 +598,7 @@ export class IamService {
     if (!membership) {
       throw new NotFoundException('User membership not found for this tenant.');
     }
+    await this.assertCanManageUser(actorRole, userId);
 
     await this.prisma.$transaction(async (tx) => {
       await tx.userTenant.delete({

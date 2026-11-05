@@ -88,7 +88,7 @@ export class RedisService {
       this.logger.log('Redis client initialized');
     } catch (error: unknown) {
       this.logger.warn(
-        `Failed to connect to Redis at ${redisUrl}: ${this.errorMessage(error)}. Falling back to in-memory storage.`,
+        `Failed to connect to Redis: ${this.errorMessage(error)}. Falling back to in-memory storage.`,
       );
       if (this.client) {
         this.client.removeAllListeners?.();
@@ -200,31 +200,35 @@ export class RedisService {
    * Increment counter with expiration
    */
   async incrEx(key: string, expirationSeconds: number): Promise<number> {
+    if (!Number.isInteger(expirationSeconds) || expirationSeconds < 1)
+      throw new Error('Invalid counter expiration.');
     try {
       if (this.client && this.isConnected) {
-        const ttl = await this.client.ttl(key);
-        const result = await this.client.incr(key);
-
-        // Set expiration only if this is a new key
-        if (ttl === -1) {
-          await this.client.expire(key, expirationSeconds);
-        }
-
-        return result;
+        return Number(
+          await this.client.eval(
+            `
+          local count = redis.call('INCR', KEYS[1])
+          if count == 1 or redis.call('TTL', KEYS[1]) < 0 then
+            redis.call('EXPIRE', KEYS[1], ARGV[1])
+          end
+          return count
+        `,
+            { keys: [key], arguments: [String(expirationSeconds)] },
+          ),
+        );
       }
-    } catch (error: unknown) {
-      this.logger.error(
-        `Redis INCR with expiration error for key ${key}: ${this.errorMessage(error)}`,
-      );
+    } catch (error) {
+      if (process.env.NODE_ENV === 'production') throw error;
     }
-
-    // Fallback to in-memory
-    const item = this.inMemoryStore.get(key);
-    const currentValue = item ? parseInt(item.value) : 0;
-    const newValue = currentValue + 1;
-    const expiresAt = Date.now() + expirationSeconds * 1000;
-
-    this.inMemoryStore.set(key, { value: newValue.toString(), expiresAt });
+    if (process.env.NODE_ENV === 'production') throw new Error('Rate-limit storage unavailable.');
+    const now = Date.now();
+    const stored = this.inMemoryStore.get(key);
+    const item = stored && stored.expiresAt > now ? stored : undefined;
+    const newValue = (item ? parseInt(item.value, 10) : 0) + 1;
+    this.inMemoryStore.set(key, {
+      value: String(newValue),
+      expiresAt: item?.expiresAt ?? now + expirationSeconds * 1000,
+    });
     return newValue;
   }
 

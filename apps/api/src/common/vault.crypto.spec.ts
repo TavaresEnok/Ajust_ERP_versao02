@@ -32,3 +32,31 @@ describe('Dedicated vault key', () => {
     expect(existsSync(process.env.VAULT_KEY_FILE!)).toBe(false);
   });
 });
+
+describe('Production vault key', () => {
+  it('never creates a key even with the legacy autocreate flag', () => {
+    const previous = {
+      env: process.env.NODE_ENV,
+      path: process.env.VAULT_KEY_FILE,
+      auto: process.env.VAULT_KEY_AUTOCREATE,
+    };
+    const folder = mkdtempSync(join(tmpdir(), 'vault-prod-'));
+    try {
+      process.env.NODE_ENV = 'production';
+      process.env.VAULT_KEY_FILE = join(folder, 'absent');
+      process.env.VAULT_KEY_AUTOCREATE = 'true';
+      expect(() => encryptVaultSecret('value')).toThrow('Chave do cofre ausente');
+      expect(existsSync(process.env.VAULT_KEY_FILE)).toBe(false);
+    } finally {
+      for (const [key, value] of Object.entries({
+        NODE_ENV: previous.env,
+        VAULT_KEY_FILE: previous.path,
+        VAULT_KEY_AUTOCREATE: previous.auto,
+      })) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+      rmSync(folder, { recursive: true, force: true });
+    }
+  });
+});

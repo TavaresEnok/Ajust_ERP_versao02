@@ -1,18 +1,25 @@
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { mkdirSync, realpathSync, readFileSync, writeFileSync } from 'node:fs';
+import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
 import { decryptSecret } from './secrets.crypto';
 const PREFIX = 'vault:v1:';
 function key(create: boolean) {
   const path =
     process.env.VAULT_KEY_FILE ||
     join(process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads'), '.keys', 'vault.key');
-  if (create) {
+  if (create && process.env.NODE_ENV !== 'production') {
     mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
     try {
       writeFileSync(path, randomBytes(32), { flag: 'wx', mode: 0o600 });
     } catch (e) {
       if ((e as NodeJS.ErrnoException).code !== 'EEXIST') throw e;
+    }
+  }
+  if (process.env.NODE_ENV === 'production') {
+    try {
+      readFileSync(path);
+    } catch {
+      throw new Error(`Chave do cofre ausente em ${path}. Restaure o backup seguro da chave.`);
     }
   }
   const result = readFileSync(path);
@@ -42,4 +49,22 @@ export function vaultSourceNoteText(value: string | null | undefined) {
   if (!plain.startsWith('sgp-note:v1:')) return plain;
   const record = JSON.parse(plain.slice('sgp-note:v1:'.length)) as { text: string };
   return record.text;
+}
+
+/** Production must mount the existing key separately from uploads, before API startup. */
+export function validateVaultKey() {
+  const configured = process.env.VAULT_KEY_FILE;
+  if (!configured) throw new Error('Configure VAULT_KEY_FILE fora do volume de uploads.');
+  const keyPath = realpathSync(configured);
+  const root = resolve(process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads'));
+  let uploadPath = root;
+  try {
+    uploadPath = realpathSync(root);
+  } catch {
+    /* Uploads may not exist yet. */
+  }
+  const inside = relative(uploadPath, keyPath);
+  if (!inside || (!inside.startsWith('..') && !isAbsolute(inside)))
+    throw new Error('A chave do cofre deve ficar fora do volume de uploads.');
+  key(false);
 }

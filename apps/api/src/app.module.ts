@@ -1,6 +1,6 @@
 import { AuditInterceptor } from './audit/audit.interceptor';
-import { ShiftReportsModule } from './shift-reports/shift-reports.controller';
-import { NetworkTopologiesModule } from './network-topologies/network-topologies.controller';
+import { ShiftReportsModule } from './shift-reports/shift-reports.module';
+import { NetworkTopologiesModule } from './network-topologies/network-topologies.module';
 import { Module } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
 import { AppController } from './app.controller';
@@ -33,8 +33,8 @@ import { SecretsValidationService } from './config/secrets-validation.service';
 import { ObservabilityInterceptor } from './monitoring/observability.interceptor';
 import { WebhookController } from './integrations/webhook.controller';
 import { ServiceProcessesModule } from './service-processes/service-processes.module';
-import { CustomersModule } from './customers/customers.controller';
-import { CustomerPortalModule } from './customers/customer-portal.controller';
+import { CustomersModule } from './customers/customers.module';
+import { CustomerPortalModule } from './customers/customer-portal.module';
 
 @Module({
   imports: [

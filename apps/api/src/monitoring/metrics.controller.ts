@@ -28,7 +28,7 @@ export class MetricsController {
 
   @Get('/metrics')
   async metrics(@Res() res: Response, @Req() req: Request): Promise<void> {
-    if (process.env.NODE_ENV === 'production') {
+    {
       const authHeader = req.headers?.authorization;
       if (!authHeader || !authHeader.startsWith('Bearer ')) {
         res.status(401).json({ error: 'Unauthorized' });

@@ -1,3 +1,4 @@
+import { requiresTwoFactor } from './two-factor-policy';
 import {
   CanActivate,
   ExecutionContext,
@@ -19,6 +20,15 @@ type AccessPayload = {
   role: string | null;
   typ: 'access';
 };
+
+function twoFactorSetupPath(req: { method?: string; path?: string }) {
+  const path = (req.path || '').replace(/\/+$/, '');
+  return (
+    /^\/auth\/2fa\/(setup|confirm|status)$/.test(path) ||
+    (path === '/auth/me' && req.method === 'GET') ||
+    ['/auth/logout', '/auth/logout-all'].includes(path)
+  );
+}
 
 @Injectable()
 export class AuthGuard implements CanActivate {
@@ -52,7 +62,7 @@ export class AuthGuard implements CanActivate {
       where: { id: payload.sid },
       include: {
         user: {
-          select: { id: true, status: true, deletedAt: true },
+          select: { id: true, status: true, deletedAt: true, twoFactorEnabled: true },
         },
       },
     });
@@ -101,23 +111,36 @@ export class AuthGuard implements CanActivate {
       }
 
       role = membership.role.code;
-      if (role === 'cliente' && membership.customerId) {
-        const customer = await this.prisma.customer.findFirst({
-          where: { id: membership.customerId, tenantId: session.tenantId, deletedAt: null },
-          select: { id: true },
-        });
-        if (!customer) throw new ForbiddenException('Vínculo do cliente inválido ou inativo.');
+      // Fechado por padrão (auditoria C-019): toda conta cliente, com ou sem provedor
+      // vinculado, só alcança as rotas do portal e da própria conta. As rotas gerais
+      // mostrariam atendimentos de todos os provedores do workspace.
+      if (role === 'cliente') {
+        if (membership.customerId) {
+          const customer = await this.prisma.customer.findFirst({
+            where: { id: membership.customerId, tenantId: session.tenantId, deletedAt: null },
+            select: { id: true },
+          });
+          if (!customer) throw new ForbiddenException('Vínculo do cliente inválido ou inativo.');
+          customerId = customer.id;
+        }
         if (!customerPortalRequestAllowed(req.method, req.path, session.tenantId)) {
           throw new ForbiddenException(
-            'Esta conta acessa somente os atendimentos do cliente vinculado.',
+            customerId
+              ? 'Esta conta acessa somente os atendimentos do cliente vinculado.'
+              : 'Esta conta de cliente ainda não está vinculada a um provedor. Peça à Ajust para concluir o cadastro.',
           );
         }
-        customerId = customer.id;
       }
     }
 
     if (!isActiveRole(role))
       throw new UnauthorizedException('Perfil de acesso descontinuado ou inválido.');
+    // 2FA obrigatório por perfil (C-051): sem 2FA, a conta só configura o 2FA e sai.
+    if (role && requiresTwoFactor(role) && !user.twoFactorEnabled && !twoFactorSetupPath(req)) {
+      throw new ForbiddenException(
+        'Seu perfil exige verificação em duas etapas. Ative-a em Segurança > Verificação em duas etapas para continuar.',
+      );
+    }
     req.auth = {
       userId: payload.sub,
       sessionId: payload.sid,

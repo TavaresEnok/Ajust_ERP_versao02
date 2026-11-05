@@ -4,6 +4,11 @@ const createdAt = new Date('2026-06-05T12:00:00.000Z');
 
 function makePrisma(): any {
   return {
+    archivedAuditLog: {
+      findMany: jest.fn().mockResolvedValue([]),
+      count: jest.fn().mockResolvedValue(0),
+    },
+    user: { findMany: jest.fn().mockResolvedValue([]) },
     auditLog: {
       findMany: jest.fn().mockResolvedValue([]),
       count: jest.fn().mockResolvedValue(0),
@@ -19,6 +24,25 @@ describe('AuditService', () => {
   beforeEach(() => {
     prisma = makePrisma();
     service = new AuditService(prisma);
+  });
+
+  it('reads archived records with tenant filtering and pagination even if the author was deleted', async () => {
+    prisma.archivedAuditLog.findMany.mockResolvedValue([
+      { id: 'old', tenantId: 'tenant-1', actorUserId: 'deleted', createdAt },
+    ]);
+    prisma.archivedAuditLog.count.mockResolvedValue(4);
+    const result = await service.getLogs({
+      tenantId: 'tenant-1',
+      archive: 'archived',
+      limit: 2,
+      offset: 1,
+    });
+    expect(result.logs[0]).toMatchObject({ id: 'old', archived: true, actorUser: null });
+    expect(result.total).toBe(4);
+    expect(prisma.archivedAuditLog.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: 'tenant-1' }, take: 2, skip: 1 }),
+    );
+    expect(prisma.auditLog.findMany).not.toHaveBeenCalled();
   });
 
   it('requires tenant scope for logs, metrics and exports', async () => {

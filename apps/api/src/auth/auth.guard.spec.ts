@@ -25,7 +25,7 @@ function validSession(overrides: Record<string, unknown> = {}) {
     tenantId: 'tenant-1',
     revokedAt: null,
     expiresAt: new Date(Date.now() + 60_000),
-    user: { id: 'user-1', status: 'ACTIVE', deletedAt: null },
+    user: { id: 'user-1', status: 'ACTIVE', deletedAt: null, twoFactorEnabled: true },
     ...overrides,
   };
 }
@@ -198,5 +198,82 @@ describe('AuthGuard', () => {
         } as Partial<RequestWithAuth>),
       ),
     ).rejects.toThrow('Esta conta acessa somente os atendimentos do cliente vinculado.');
+  });
+  it('fecha as rotas gerais também para cliente sem provedor vinculado (C-019)', async () => {
+    prisma.userTenant.findUnique.mockResolvedValue({
+      customerId: null,
+      role: { code: 'cliente' },
+      tenant: { status: 'ACTIVE', deletedAt: null },
+    });
+    for (const path of ['/service-orders', '/service-orders/occurrences', '/auth/socket-token']) {
+      await expect(
+        guard.canActivate(
+          makeContext({
+            headers: { authorization: 'Bearer token' },
+            method: 'GET',
+            path,
+          } as Partial<RequestWithAuth>),
+        ),
+      ).rejects.toThrow('ainda não está vinculada a um provedor');
+    }
+    const own = {
+      headers: { authorization: 'Bearer token' },
+      method: 'GET',
+      path: '/auth/me',
+    } as Partial<RequestWithAuth>;
+    await expect(guard.canActivate(makeContext(own))).resolves.toBe(true);
+    expect(own.auth?.customerId).toBeUndefined();
+  });
+  it.each(['super_admin', 'gerente'])(
+    '%s sem 2FA só acessa a configuração do 2FA (C-051)',
+    async (role) => {
+      prisma.session.findUnique.mockResolvedValue(
+        validSession({
+          user: { id: 'user-1', status: 'ACTIVE', deletedAt: null, twoFactorEnabled: false },
+        }),
+      );
+      prisma.userTenant.findUnique.mockResolvedValue({
+        role: { code: role },
+        tenant: { status: 'ACTIVE', deletedAt: null },
+      });
+      await expect(
+        guard.canActivate(
+          makeContext({
+            headers: { authorization: 'Bearer token' },
+            method: 'GET',
+            path: '/service-orders',
+          } as Partial<RequestWithAuth>),
+        ),
+      ).rejects.toThrow('exige verificação em duas etapas');
+      await expect(
+        guard.canActivate(
+          makeContext({
+            headers: { authorization: 'Bearer token' },
+            method: 'POST',
+            path: '/auth/2fa/setup',
+          } as Partial<RequestWithAuth>),
+        ),
+      ).resolves.toBe(true);
+    },
+  );
+  it('perfil fora de REQUIRE_2FA_ROLES entra sem 2FA', async () => {
+    prisma.session.findUnique.mockResolvedValue(
+      validSession({
+        user: { id: 'user-1', status: 'ACTIVE', deletedAt: null, twoFactorEnabled: false },
+      }),
+    );
+    prisma.userTenant.findUnique.mockResolvedValue({
+      role: { code: 'analista' },
+      tenant: { status: 'ACTIVE', deletedAt: null },
+    });
+    await expect(
+      guard.canActivate(
+        makeContext({
+          headers: { authorization: 'Bearer token' },
+          method: 'GET',
+          path: '/service-orders',
+        } as Partial<RequestWithAuth>),
+      ),
+    ).resolves.toBe(true);
   });
 });

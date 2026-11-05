@@ -1,3 +1,4 @@
+import { requiresTwoFactor } from './two-factor-policy';
 import {
   BadRequestException,
   ConflictException,
@@ -15,6 +16,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { EmailService } from '../common/email.service';
 import { decryptSecret } from '../common/secrets.crypto';
+import { resolveCustomerLogin } from './customer-login';
 import { TotpService } from './totp.service';
 import { BootstrapTokenService } from './bootstrap-token.service';
 import { isActiveRole } from '../common/role-utils';
@@ -23,6 +25,7 @@ type LoginInput = {
   identifier: string;
   password: string;
   bootstrapToken?: string;
+  email?: string;
   tenantId?: string;
   device?: string;
   ip?: string;
@@ -76,56 +79,19 @@ export class AuthService {
       include: { tenants: { include: { role: true, tenant: true } } },
     });
 
-    // 2) Fallback de "usuario": nome exato (case-insensitive)
-    // ou prefixo do e-mail antes do @ (ex.: "gerente" => gerente@dominio).
-    if (!user && numericId.length < 11) {
-      user = await this.prisma.user.findFirst({
-        where: {
-          OR: [
-            { name: { equals: rawId, mode: 'insensitive' } },
-            { email: { startsWith: `${lId}@`, mode: 'insensitive' } },
-          ],
-        },
-        include: { tenants: { include: { role: true, tenant: true } } },
-      });
-    }
-
     let usedCnpjFallback = false;
     let foundTenantId: string | null = null;
-
-    // 3) Fallback por CPF/CNPJ (aceita valor mascarado e somente numeros).
-    if (!user) {
-      if (numericId.length >= 11) {
-        const tenant = await this.prisma.tenant.findFirst({
-          where: {
-            status: 'ACTIVE',
-            deletedAt: null,
-            OR: [{ taxId: numericId }, { taxId: rawId }],
-          },
-          include: {
-            users: {
-              include: {
-                user: { include: { tenants: { include: { role: true, tenant: true } } } },
-                role: true,
-              },
-            },
-          },
-        });
-
-        if (tenant && tenant.users.length > 0) {
-          // Prioriza usuario cliente para fluxo de login por CNPJ.
-          const preferredClientMembership = tenant.users.find(
-            (membership) =>
-              membership.role.code === 'cliente' &&
-              membership.user.status === 'ACTIVE' &&
-              !membership.user.deletedAt,
-          );
-          if (preferredClientMembership) {
-            user = preferredClientMembership.user;
-            usedCnpjFallback = true;
-            foundTenantId = tenant.id;
-          }
-        }
+    if (!user && /^[\d./-]+$/.test(rawId) && numericId.length === 14) {
+      const membership = await resolveCustomerLogin(
+        this.prisma,
+        rawId,
+        input.email,
+        input.tenantId,
+      );
+      if (membership) {
+        user = membership.user;
+        foundTenantId = membership.tenantId;
+        usedCnpjFallback = true;
       }
     }
 
@@ -143,7 +109,9 @@ export class AuthService {
         input.ip,
         input.userAgent,
       );
-      throw new UnauthorizedException('Invalid credentials.');
+      throw new UnauthorizedException(
+        'Credenciais inválidas. Use seu e-mail completo; no primeiro acesso, informe CNPJ e e-mail.',
+      );
     }
 
     const memberships = input.tenantId
@@ -233,15 +201,16 @@ export class AuthService {
         input.ip,
         input.userAgent,
       );
-      throw new UnauthorizedException('Invalid credentials.');
+      throw new UnauthorizedException(
+        'Credenciais inválidas. Use seu e-mail completo; no primeiro acesso, informe CNPJ e e-mail.',
+      );
     }
     if (selectedMembership.tenant.status !== 'ACTIVE' || selectedMembership.tenant.deletedAt) {
       throw new ForbiddenException('Tenant is inactive or suspended.');
     }
 
-    // ✅ Check 2FA requirement for super_admin
-    if (roleCode === 'super_admin' && !user.twoFactorEnabled) {
-      // Log warning but don't block (UI will guide setup)
+    // Audit restricted setup sessions; AuthGuard allows only enrollment until 2FA is enabled.
+    if (requiresTwoFactor(roleCode) && !user.twoFactorEnabled) {
       await this.logAudit(
         selectedMembership.tenantId,
         user.id,
@@ -377,6 +346,7 @@ export class AuthService {
     );
 
     return {
+      twoFactorSetupRequired: requiresTwoFactor(roleCode) && !user.twoFactorEnabled,
       accessToken,
       refreshToken,
       sessionId,
@@ -418,6 +388,10 @@ export class AuthService {
     }
 
     if (session.refreshTokenHash !== this.hashToken(input.refreshToken)) {
+      await this.prisma.session.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
       throw new UnauthorizedException('Refresh token mismatch.');
     }
 
@@ -460,13 +434,21 @@ export class AuthService {
     });
     const nextExpiresAt = this.refreshExpiresAt();
 
-    await this.prisma.session.update({
-      where: { id: session.id },
+    const rotated = await this.prisma.session.updateMany({
+      where: { id: session.id, revokedAt: null, refreshTokenHash: session.refreshTokenHash },
       data: {
         refreshTokenHash: this.hashToken(nextRefreshToken),
         expiresAt: nextExpiresAt,
       },
     });
+
+    if (rotated.count !== 1) {
+      await this.prisma.session.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      throw new UnauthorizedException('Refresh token already used.');
+    }
 
     const accessToken = this.signAccessToken({
       sub: session.userId,
@@ -711,6 +693,7 @@ export class AuthService {
       where: { id: userId },
       select: {
         id: true,
+        email: true,
         passwordHash: true,
       },
     });
@@ -725,15 +708,18 @@ export class AuthService {
     if (nextName) patch.name = nextName;
 
     const nextEmail = input.email?.trim().toLowerCase();
-    if (nextEmail) patch.email = nextEmail;
+    const emailChanged = !!nextEmail && nextEmail !== user.email.toLowerCase();
+    if (emailChanged) patch.email = nextEmail;
 
-    if (input.newPassword) {
+    // Trocar e-mail ou senha exige a senha atual: com uma sessão roubada não dá para
+    // assumir a conta trocando o e-mail e pedindo recuperação de senha (C-048).
+    if (input.newPassword || emailChanged) {
       const validCurrentPassword = await compare(input.currentPassword || '', user.passwordHash);
       if (!validCurrentPassword) {
-        throw new UnauthorizedException('Current password is invalid.');
+        throw new UnauthorizedException('Senha atual incorreta.');
       }
-      patch.passwordHash = await hash(input.newPassword, 12);
     }
+    if (input.newPassword) patch.passwordHash = await hash(input.newPassword, 12);
 
     if (Object.keys(patch).length === 0) {
       throw new BadRequestException('No profile field was provided.');
@@ -744,7 +730,7 @@ export class AuthService {
         where: { id: user.id },
         data: patch,
       });
-      if (input.newPassword) {
+      if (input.newPassword || emailChanged) {
         await this.prisma.session.updateMany({
           where: { userId, revokedAt: null, id: { not: currentSessionId } },
           data: { revokedAt: new Date() },
@@ -971,12 +957,13 @@ export class AuthService {
       throw new ForbiddenException('Tenant is inactive or suspended.');
     }
 
-    // Decrypt secret and verify TOTP code
+    // Match the counter, then consume it atomically with the temporary session.
+    let counter: number;
     try {
       const decryptedSecret = this.decryptSecret2FA(user.twoFactorSecretEnc);
-      const isValidCode = this.totpService.verifyCode(decryptedSecret, totpCode);
+      const matched = this.totpService.matchCounter(decryptedSecret, totpCode);
 
-      if (!isValidCode) {
+      if (matched === null) {
         await this.logAudit(
           payload.tenantId,
           user.id,
@@ -989,8 +976,9 @@ export class AuthService {
           ip,
           userAgent,
         );
-        throw new UnauthorizedException('Invalid 2FA code.');
+        throw new UnauthorizedException('Código 2FA inválido.');
       }
+      counter = matched;
     } catch (error) {
       if (error instanceof UnauthorizedException) throw error;
       throw new UnauthorizedException('Failed to verify 2FA code.');
@@ -1006,34 +994,47 @@ export class AuthService {
     });
     const expiresAt = this.refreshExpiresAt();
 
-    // Delete temporary 2FA session
-    await this.prisma.session
-      .delete({
-        where: { id: payload.sid },
-      })
-      .catch(() => {}); // Ignore if not found
-
-    // Create real session
-    await this.prisma.session.create({
-      data: {
-        id: sessionId,
-        userId: user.id,
-        tenantId: payload.tenantId,
-        refreshTokenHash: this.hashToken(refreshToken),
-        ip,
-        userAgent,
-        expiresAt,
-      },
-    });
-
-    // Update last login
-    await this.prisma.user.update({
-      where: { id: user.id },
-      data: {
-        lastLoginAt: new Date(),
-        bootstrapTokenHash: null,
-        bootstrapTokenExpiresAt: null,
-      },
+    await this.prisma.$transaction(async (tx) => {
+      const consumed = await tx.user.updateMany({
+        where: {
+          id: user.id,
+          twoFactorEnabled: true,
+          twoFactorSecretEnc: user.twoFactorSecretEnc,
+          OR: [{ twoFactorLastCounter: null }, { twoFactorLastCounter: { lt: counter } }],
+        },
+        data: { twoFactorLastCounter: counter },
+      });
+      if (consumed.count !== 1)
+        throw new UnauthorizedException('Código 2FA já utilizado. Aguarde o próximo código.');
+      const pending = await tx.session.deleteMany({
+        where: {
+          id: payload.sid,
+          userId: user.id,
+          revokedAt: null,
+          refreshTokenHash: this.hashToken(temporaryToken),
+          expiresAt: { gt: new Date() },
+        },
+      });
+      if (pending.count !== 1) throw new UnauthorizedException('Sessão 2FA inválida ou expirada.');
+      await tx.session.create({
+        data: {
+          id: sessionId,
+          userId: user.id,
+          tenantId: payload.tenantId,
+          refreshTokenHash: this.hashToken(refreshToken),
+          ip,
+          userAgent,
+          expiresAt,
+        },
+      });
+      await tx.user.update({
+        where: { id: user.id },
+        data: {
+          lastLoginAt: new Date(),
+          bootstrapTokenHash: null,
+          bootstrapTokenExpiresAt: null,
+        },
+      });
     });
 
     const accessToken = this.signAccessToken({
