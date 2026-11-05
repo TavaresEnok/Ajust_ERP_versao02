@@ -23,7 +23,11 @@ import { ServiceCatalogService, ServiceCatalogWriteInput } from './service-catal
 
 const ServiceCatalogSchema = z.object({
   name: z.string().min(3).max(120),
-  workflowTemplateCode: z.string().regex(/^[A-Z0-9_]+$/).nullable().optional(),
+  workflowTemplateCode: z
+    .string()
+    .regex(/^[A-Z0-9_]+$/)
+    .nullable()
+    .optional(),
   category: z.nativeEnum(ServiceOrderType).optional(),
   description: z.string().max(500).optional(),
   estimatedMinutes: z.number().int().min(5).max(1440).optional(),

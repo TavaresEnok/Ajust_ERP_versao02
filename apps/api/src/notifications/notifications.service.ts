@@ -1,7 +1,7 @@
 import { BadRequestException, Inject, Injectable, Logger, NotFoundException } from '@nestjs/common';
 import { NotificationChannel, NotificationTrigger, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
-import { assertSafeUrl } from '../common/ssrf-guard';
+import { assertSafeUrl, safeFetch } from '../common/ssrf-guard';
 import { EmailService } from '../common/email.service';
 
 export type NotificationConfigInput = {
@@ -95,7 +95,7 @@ export class NotificationsService {
           });
           try {
             await assertSafeUrl(cfg.target);
-            const response = await fetch(cfg.target, {
+            const response = await safeFetch(cfg.target, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body,
@@ -117,12 +117,13 @@ export class NotificationsService {
         }
         if ((cfg.channel as string) === 'WHATSAPP') {
           // Despacho para Gateway WhatsApp (Evolution API / Z-API / Webhook)
-          const messageText = payload.message || 
+          const messageText =
+            payload.message ||
             `*🚨 [AJUST ERP - ${trigger}]*\n` +
-            `*Protocolo:* ${payload.protocol || '-'}\n` +
-            `*Provedor:* ${payload.provider || '-'}\n` +
-            `*Título:* ${payload.title || '-'}\n` +
-            (payload.pdfUrl ? `\n*📄 Relatório PDF:* ${payload.pdfUrl}` : '');
+              `*Protocolo:* ${payload.protocol || '-'}\n` +
+              `*Provedor:* ${payload.provider || '-'}\n` +
+              `*Título:* ${payload.title || '-'}\n` +
+              (payload.pdfUrl ? `\n*📄 Relatório PDF:* ${payload.pdfUrl}` : '');
 
           const waBody = JSON.stringify({
             number: payload.targetNumber || payload.groupJid || cfg.target,
@@ -134,7 +135,7 @@ export class NotificationsService {
 
           try {
             await assertSafeUrl(cfg.target);
-            await fetch(cfg.target, {
+            await safeFetch(cfg.target, {
               method: 'POST',
               headers: { 'content-type': 'application/json' },
               body: waBody,
@@ -165,21 +166,26 @@ export class NotificationsService {
     if (!order) throw new NotFoundException('Ordem de serviço não encontrada');
 
     const providerName = order.requester || order.occurrence?.provider || 'Provedor';
-    const baseUrl = process.env.PUBLIC_APP_URL || 'http://168.194.13.18:8070';
-    const pdfUrl = `${baseUrl}/gerencia?view=ordens&exportPdf=${order.id}`;
+    // Sem IP fixo de produção: sem URL pública configurada, a mensagem sai sem link (C-033).
+    const baseUrl = (process.env.PUBLIC_APP_URL || process.env.WEB_BASE_URL || '').replace(
+      /\/+$/,
+      '',
+    );
+    const pdfUrl = baseUrl ? `${baseUrl}/gerencia?view=ordens&exportPdf=${order.id}` : '';
+    const deadline = await this.formatInTenantZone(tenantId, order.deadlineAt);
 
     const formattedMessage =
       input.customMessage ||
       `*🚨 [AJUST NOC] ORDEM DE SERVIÇO: ${order.protocol}*\n\n` +
-      `*Provedor:* ${providerName}\n` +
-      `*Tipo:* ${order.type}\n` +
-      `*Prioridade:* ${order.priority}\n` +
-      `*Status:* ${order.status}\n` +
-      `*Responsável:* ${order.analystName || 'Equipe NOC'}\n` +
-      `*Prazo SLA:* ${new Date(order.deadlineAt).toLocaleString('pt-BR')}\n\n` +
-      `*Título:* ${order.title}\n` +
-      `*Descrição:* ${order.description.slice(0, 300)}${order.description.length > 300 ? '...' : ''}\n\n` +
-      `*📄 Relatório Técnico / PDF:* ${pdfUrl}`;
+        `*Provedor:* ${providerName}\n` +
+        `*Tipo:* ${order.type}\n` +
+        `*Prioridade:* ${order.priority}\n` +
+        `*Status:* ${order.status}\n` +
+        `*Responsável:* ${order.analystName || 'Equipe NOC'}\n` +
+        `*Prazo SLA:* ${deadline}\n\n` +
+        `*Título:* ${order.title}\n` +
+        `*Descrição:* ${order.description.slice(0, 300)}${order.description.length > 300 ? '...' : ''}\n\n` +
+        (pdfUrl ? `*📄 Relatório Técnico / PDF:* ${pdfUrl}` : '');
 
     // Dispara via canais configurados de WhatsApp ou webhook geral
     await this.dispatch(tenantId, 'ORDER_ESCALATED', {
@@ -202,6 +208,43 @@ export class NotificationsService {
     };
   }
 
+  /**
+   * Aviso de O.S. fechada no gatilho próprio ORDER_CLOSED (C-033): não usa o canal de
+   * escalonamento, não leva descrição interna e mostra o horário no fuso do tenant.
+   */
+  async notifyOrderClosed(tenantId: string, orderId: string) {
+    const order = await this.prisma.serviceOrder.findFirst({
+      where: { id: orderId, tenantId },
+      include: { occurrence: { select: { provider: true } } },
+    });
+    if (!order) return;
+    const provider = order.requester || order.occurrence?.provider || 'Provedor';
+    const closedAt = await this.formatInTenantZone(tenantId, order.closedAt ?? new Date());
+    const message =
+      `*✅ O.S. ${order.protocol} fechada*\n\n` +
+      `*Provedor:* ${provider}\n` +
+      `*Título:* ${order.title}\n` +
+      `*Responsável:* ${order.analystName || 'Equipe Ajust'}\n` +
+      `*Fechada em:* ${closedAt}`;
+    await this.dispatch(tenantId, 'ORDER_CLOSED', {
+      orderId: order.id,
+      protocol: order.protocol,
+      provider,
+      title: order.title,
+      message,
+    });
+  }
+
+  private async formatInTenantZone(tenantId: string, date: Date) {
+    const tenant = await this.prisma.tenant.findUnique({
+      where: { id: tenantId },
+      select: { timezone: true },
+    });
+    return new Date(date).toLocaleString('pt-BR', {
+      timeZone: tenant?.timezone || 'America/Fortaleza',
+    });
+  }
+
   private async validateTarget(channel: NotificationChannel, target: string): Promise<void> {
     if (channel === NotificationChannel.EMAIL) {
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(target)) {
@@ -219,4 +262,3 @@ export class NotificationsService {
     await assertSafeUrl(target);
   }
 }
-

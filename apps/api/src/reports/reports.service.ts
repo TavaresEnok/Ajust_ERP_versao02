@@ -2,6 +2,7 @@ import { BadRequestException, Inject, Injectable } from '@nestjs/common';
 import { Prisma, Priority, ServiceOrderStatus, ServiceOrderType } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { buildServiceTypeAnalytics } from './service-type-analytics';
+import { buildManagementOverview, isDemonstration, managementPeriod } from './management-overview';
 
 @Injectable()
 export class ReportsService {
@@ -55,6 +56,7 @@ export class ReportsService {
       where: whereClause,
       select: {
         id: true,
+        sourceMetadata: true,
         requester: true,
         occurrence: { select: { provider: true, customerId: true } },
         priority: true,
@@ -69,6 +71,7 @@ export class ReportsService {
     const providersData = new Map<string, any>();
 
     for (const rawOrder of orders) {
+      if (isDemonstration(rawOrder)) continue;
       const order = rawOrder;
       const p = order.occurrence?.customerId || order.occurrence?.provider?.trim() || 'Interno';
       if (!providersData.has(p)) {
@@ -123,10 +126,48 @@ export class ReportsService {
     return report.sort((a, b) => a.score - b.score);
   }
 
-  async getManagerKPIs(tenantId: string, options?: { daysBack?: number }) {
-    const days = options?.daysBack ?? 30;
+  async getManagementOverview(tenantId: string, days = 30) {
     if (!Number.isInteger(days) || days < 1 || days > 3650)
       throw new BadRequestException('daysBack deve estar entre 1 e 3650.');
+    const now = new Date();
+    const { start, end } = managementPeriod(days, now);
+    const orders = await this.prisma.serviceOrder.findMany({
+      where: {
+        tenantId,
+        deletedAt: null,
+        OR: [
+          { status: { notIn: ['FECHADA', 'RESOLVIDA', 'CANCELADA'] } },
+          { createdAt: { gte: start, lte: end } },
+          { resolvedAt: { gte: start, lte: end } },
+          { closedAt: { gte: start, lte: end } },
+        ],
+      },
+      select: {
+        id: true,
+        status: true,
+        createdAt: true,
+        assigneeUserId: true,
+        analystName: true,
+        assignee: { select: { name: true } },
+        sourceMetadata: true,
+        deadlineAt: true,
+        resolvedAt: true,
+        closedAt: true,
+        pausedAt: true,
+        scheduledAt: true,
+        scheduleStartedAt: true,
+        slaEligible: true,
+      },
+    });
+    return buildManagementOverview(orders, days, now);
+  }
+
+  async getManagerKPIs(tenantId: string, options?: { daysBack?: number }) {
+    const days = options?.daysBack ?? 30;
+    // Até um ano: a consulta traz as O.S. do período (só as colunas usadas) para calcular
+    // indicadores por responsável; 10 anos carregava o histórico inteiro na memória (C-040).
+    if (!Number.isInteger(days) || days < 1 || days > 366)
+      throw new BadRequestException('O período deve ser de 1 a 366 dias.');
     const sinceDate = new Date(Date.now() - days * 24 * 60 * 60 * 1000);
 
     const orders = await this.prisma.serviceOrder.findMany({
@@ -138,7 +179,9 @@ export class ReportsService {
       orderBy: { createdAt: 'desc' },
       select: {
         id: true,
+        sourceMetadata: true,
         analystName: true,
+        assigneeUserId: true,
         status: true,
         pausedAt: true,
         slaEligible: true,
@@ -159,15 +202,22 @@ export class ReportsService {
     let resolutionTotalMs = 0;
     let slaEvaluated = 0;
     let slaMet = 0;
+    let closedLate = 0;
+    let resolvedAwaiting = 0;
 
+    // Agrupa pelo id do responsável, não pelo nome: renomear ou trocar o nome não divide a
+    // produtividade (C-040). O nome mais recente é só para exibir.
     for (const order of orders) {
-      const analyst = order.analystName || 'Unassigned';
+      if (isDemonstration(order)) continue;
+      const analyst = order.assigneeUserId || order.analystName || 'Sem responsável';
       if (!analystKPIs.has(analyst)) {
         analystKPIs.set(analyst, {
-          name: analyst,
+          userId: order.assigneeUserId ?? null,
+          name: order.analystName || 'Sem responsável',
           open: 0,
           closed: 0,
           slaBreaches: 0,
+          closedLate: 0,
           totalResolutionTimeMs: 0,
           measuredClosed: 0,
         });
@@ -179,6 +229,7 @@ export class ReportsService {
       if (isClosed) {
         totalClosed++;
         pData.closed += 1;
+        if (order.status === 'RESOLVIDA') resolvedAwaiting++;
         // Usa a data efetiva de resolução (resolvedAt ou closedAt), evitando distorções por atualizações posteriores em updatedAt
         const effectiveResolution = order.resolvedAt || order.closedAt;
         const finished = effectiveResolution ? new Date(effectiveResolution).getTime() : NaN;
@@ -198,6 +249,11 @@ export class ReportsService {
           if (order.slaEligible !== false && Number.isFinite(deadline)) {
             slaEvaluated++;
             if (finished <= deadline) slaMet++;
+            else {
+              // Fechada fora do prazo também é violação (C-040), além das ainda abertas.
+              closedLate++;
+              pData.closedLate += 1;
+            }
           }
         }
       } else if (order.status !== 'CANCELADA') {
@@ -231,6 +287,9 @@ export class ReportsService {
         totalOpen,
         totalClosed,
         slaBreaches,
+        closedLate,
+        resolvedAwaitingClosure: resolvedAwaiting,
+        tmrBasis: 'HORAS_CORRIDAS',
         tmrHours: measuredClosed
           ? Math.round((resolutionTotalMs / measuredClosed / 3600000) * 10) / 10
           : null,
@@ -316,7 +375,6 @@ export class ReportsService {
       'EM_ANALISE',
       'AG_CAMPO',
       'AG_TERCEIROS',
-      'RESOLVIDA',
     ];
     const orderWhere: Prisma.ServiceOrderWhereInput = { tenantId, deletedAt: null };
 
@@ -369,15 +427,16 @@ export class ReportsService {
     } else if (filters.sla === 'ok') {
       orderWhere.slaEligible = true;
       orderWhere.OR = [
-        { status: { in: ['FECHADA', 'CANCELADA'] as ServiceOrderStatus[] } },
+        { status: { in: ['FECHADA', 'RESOLVIDA', 'CANCELADA'] as ServiceOrderStatus[] } },
         { deadlineAt: { gt: new Date(now.getTime() + 2 * 60 * 60 * 1000) } },
       ];
     }
 
-    const orders = await this.prisma.serviceOrder.findMany({
+    const queriedOrders = await this.prisma.serviceOrder.findMany({
       where: orderWhere,
       select: {
         id: true,
+        sourceMetadata: true,
         slaEligible: true,
         pausedAt: true,
         status: true,
@@ -394,6 +453,7 @@ export class ReportsService {
         },
       },
     });
+    const orders = queriedOrders.filter((row) => !isDemonstration(row));
 
     const orderIds = orders.map((o) => o.id);
     const orderById = new Map(orders.map((o) => [o.id, o]));

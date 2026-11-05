@@ -53,6 +53,18 @@ export class ReportsController {
     });
   }
 
+  @Get('management-overview')
+  @UseGuards(TenantRateLimitGuard)
+  @TenantRateLimit(30, 60)
+  getManagementOverview(@Req() req: RequestWithAuth, @Query('daysBack') daysBack?: string) {
+    assertManagerRole(req.auth);
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    return this.svc.getManagementOverview(
+      req.auth.tenantId,
+      daysBack === undefined ? 30 : Number(daysBack),
+    );
+  }
+
   @Get('service-types')
   @UseGuards(TenantRateLimitGuard)
   @TenantRateLimit(30, 60)

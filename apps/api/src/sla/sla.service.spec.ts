@@ -50,56 +50,69 @@ describe('SlaEngineService', () => {
   // adjustToBusinessHours (private, tested via cast)
   // ============================================================
   describe('adjustToBusinessHours', () => {
-    function adjust(date: Date): Date {
-      (service as any).adjustToBusinessHours(date);
-      return date;
+    beforeEach(() => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      mockPrisma.businessCalendar.findMany.mockResolvedValue(
+        Array.from({ length: 7 }, (_, dayOfWeek) => ({
+          dayOfWeek,
+          isWorkDay: dayOfWeek > 0 && dayOfWeek < 6,
+          startTime: '08:00',
+          endTime: '18:00',
+        })),
+      );
+    });
+
+    async function adjust(date: Date): Promise<Date> {
+      return service.calculateTargetDate(date, 0, 'tenant-1');
     }
 
-    it('mantem horario dentro do expediente em dia util', () => {
+    it('mantem horario dentro do expediente em dia util', async () => {
       const mon10am = new Date('2025-06-02T10:00:00');
-      const result = adjust(new Date(mon10am));
+      const result = await adjust(new Date(mon10am));
       expect(result).toEqual(mon10am);
     });
 
-    it('ajusta para 8h quando antes do inicio do expediente', () => {
+    it('ajusta para 8h quando antes do inicio do expediente', async () => {
       const mon7am = new Date('2025-06-02T07:00:00');
-      const result = adjust(new Date(mon7am));
+      const result = await adjust(new Date(mon7am));
       expect(result).toEqual(new Date('2025-06-02T08:00:00'));
     });
 
-    it('avanca para o proximo dia as 8h quando apos o fim do expediente', () => {
+    it('avanca para o proximo dia as 8h quando apos o fim do expediente', async () => {
       const mon7pm = new Date('2025-06-02T19:00:00');
-      const result = adjust(new Date(mon7pm));
+      const result = await adjust(new Date(mon7pm));
       expect(result).toEqual(new Date('2025-06-03T08:00:00'));
     });
 
-    it('avanca para segunda-feira quando sexta apos o expediente', () => {
+    it('avanca para segunda-feira quando sexta apos o expediente', async () => {
       const fri7pm = new Date('2025-06-06T19:00:00');
-      const result = adjust(new Date(fri7pm));
+      const result = await adjust(new Date(fri7pm));
       expect(result).toEqual(new Date('2025-06-09T08:00:00'));
     });
 
-    it('avanca para segunda-feira quando sabado', () => {
+    it('avanca para segunda-feira quando sabado', async () => {
       const sat10am = new Date('2025-06-07T10:00:00');
-      const result = adjust(new Date(sat10am));
+      const result = await adjust(new Date(sat10am));
       expect(result).toEqual(new Date('2025-06-09T08:00:00'));
     });
 
-    it('avanca para segunda-feira quando domingo', () => {
+    it('avanca para segunda-feira quando domingo', async () => {
       const sun3pm = new Date('2025-06-08T15:00:00');
-      const result = adjust(new Date(sun3pm));
+      const result = await adjust(new Date(sun3pm));
       expect(result).toEqual(new Date('2025-06-09T08:00:00'));
     });
 
-    it('exatamente as 18h considera fim do expediente e avanca', () => {
+    it('exatamente as 18h considera fim do expediente e avanca', async () => {
       const mon6pm = new Date('2025-06-02T18:00:00');
-      const result = adjust(new Date(mon6pm));
+      const result = await adjust(new Date(mon6pm));
       expect(result).toEqual(new Date('2025-06-03T08:00:00'));
     });
 
-    it('exatamente as 8h mantem o horario', () => {
+    it('exatamente as 8h mantem o horario', async () => {
       const mon8am = new Date('2025-06-02T08:00:00');
-      const result = adjust(new Date(mon8am));
+      const result = await adjust(new Date(mon8am));
       expect(result).toEqual(mon8am);
     });
   });
@@ -108,67 +121,83 @@ describe('SlaEngineService', () => {
   // calculateTargetDate
   // ============================================================
   describe('calculateTargetDate', () => {
-    it('calcula deadline no mesmo dia util', () => {
+    beforeEach(() => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      mockPrisma.businessCalendar.findMany.mockResolvedValue(
+        Array.from({ length: 7 }, (_, dayOfWeek) => ({
+          dayOfWeek,
+          isWorkDay: dayOfWeek > 0 && dayOfWeek < 6,
+          startTime: '08:00',
+          endTime: '18:00',
+        })),
+      );
+    });
+
+    it('calcula deadline no mesmo dia util', async () => {
       const start = new Date('2025-06-02T10:00:00');
-      const result = service.calculateTargetDate(start, 4);
+      const result = await service.calculateTargetDate(start, 4, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-02T14:00:00'));
     });
 
-    it('ultrapassa para o proximo dia quando SLA maior que restante do dia', () => {
+    it('ultrapassa para o proximo dia quando SLA maior que restante do dia', async () => {
       const start = new Date('2025-06-02T16:00:00');
-      const result = service.calculateTargetDate(start, 4);
+      const result = await service.calculateTargetDate(start, 4, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-03T10:00:00'));
     });
 
-    it('salta fim de semana ao calcular deadline', () => {
+    it('salta fim de semana ao calcular deadline', async () => {
       const start = new Date('2025-06-06T16:00:00');
-      const result = service.calculateTargetDate(start, 8);
+      const result = await service.calculateTargetDate(start, 8, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-09T14:00:00'));
     });
 
-    it('ajusta inicio no fim de semana para segunda-feira', () => {
+    it('ajusta inicio no fim de semana para segunda-feira', async () => {
       const start = new Date('2025-06-07T10:00:00');
-      const result = service.calculateTargetDate(start, 2);
+      const result = await service.calculateTargetDate(start, 2, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-09T10:00:00'));
     });
 
-    it('ajusta inicio apos expediente para proximo dia', () => {
+    it('ajusta inicio apos expediente para proximo dia', async () => {
       const start = new Date('2025-06-02T19:00:00');
-      const result = service.calculateTargetDate(start, 2);
+      const result = await service.calculateTargetDate(start, 2, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-03T10:00:00'));
     });
 
-    it('ajusta inicio antes do expediente para as 8h', () => {
+    it('ajusta inicio antes do expediente para as 8h', async () => {
       const start = new Date('2025-06-02T06:00:00');
-      const result = service.calculateTargetDate(start, 2);
+      const result = await service.calculateTargetDate(start, 2, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-02T10:00:00'));
     });
 
-    it('SLA longo que abrange multiplas semanas', () => {
+    it('SLA longo que abrange multiplas semanas', async () => {
       const start = new Date('2025-06-02T10:00:00');
-      const result = service.calculateTargetDate(start, 60);
+      const result = await service.calculateTargetDate(start, 60, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-10T10:00:00'));
     });
 
-    it('zero horas mantem data de inicio (apos ajuste)', () => {
+    it('zero horas mantem data de inicio (apos ajuste)', async () => {
       const start = new Date('2025-06-02T10:00:00');
-      const result = service.calculateTargetDate(start, 0);
+      const result = await service.calculateTargetDate(start, 0, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-02T10:00:00'));
     });
 
-    it('SLA exato de um dia util (10 horas)', () => {
+    it('SLA exato de um dia util (10 horas)', async () => {
       const start = new Date('2025-06-02T08:00:00');
-      const result = service.calculateTargetDate(start, 10);
+      const result = await service.calculateTargetDate(start, 10, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-02T18:00:00'));
     });
 
-    it('inicio exatamente as 18h empurra para proximo dia', () => {
+    it('inicio exatamente as 18h empurra para proximo dia', async () => {
       const start = new Date('2025-06-02T18:00:00');
-      const result = service.calculateTargetDate(start, 2);
+      const result = await service.calculateTargetDate(start, 2, 'tenant-1');
       expect(result).toEqual(new Date('2025-06-03T10:00:00'));
     });
 
     it('calcula calendário do tenant no fuso configurado, não no UTC do servidor', async () => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({ timezone: 'America/Sao_Paulo' });
+      mockPrisma.businessCalendar.findMany.mockResolvedValue([]);
       const start = new Date('2026-06-01T02:00:00Z'); // Domingo 23h no fuso local.
       const result = await service.calculateTargetDate(start, 2, 'tenant-1');
 
@@ -180,45 +209,59 @@ describe('SlaEngineService', () => {
   // calculateBusinessPauseDuration
   // ============================================================
   describe('calculateBusinessPauseDuration', () => {
-    it('calcula pausa dentro do mesmo dia util', () => {
+    beforeEach(() => {
+      mockPrisma.tenant.findUnique.mockResolvedValue({
+        timezone: Intl.DateTimeFormat().resolvedOptions().timeZone,
+      });
+      mockPrisma.businessCalendar.findMany.mockResolvedValue(
+        Array.from({ length: 7 }, (_, dayOfWeek) => ({
+          dayOfWeek,
+          isWorkDay: dayOfWeek > 0 && dayOfWeek < 6,
+          startTime: '08:00',
+          endTime: '18:00',
+        })),
+      );
+    });
+
+    it('calcula pausa dentro do mesmo dia util', async () => {
       const start = new Date('2025-06-02T10:00:00');
       const end = new Date('2025-06-02T14:00:00');
-      const result = service.calculateBusinessPauseDuration(start, end);
+      const result = await service.calculateBusinessPauseDuration(start, end, 'tenant-1');
       expect(result).toBe(240);
     });
 
-    it('calcula pausa que atravessa para o dia seguinte', () => {
+    it('calcula pausa que atravessa para o dia seguinte', async () => {
       const start = new Date('2025-06-02T16:00:00');
       const end = new Date('2025-06-03T10:00:00');
-      const result = service.calculateBusinessPauseDuration(start, end);
+      const result = await service.calculateBusinessPauseDuration(start, end, 'tenant-1');
       expect(result).toBe(240);
     });
 
-    it('calcula pausa que atravessa fim de semana', () => {
+    it('calcula pausa que atravessa fim de semana', async () => {
       const start = new Date('2025-06-06T16:00:00');
       const end = new Date('2025-06-09T10:00:00');
-      const result = service.calculateBusinessPauseDuration(start, end);
+      const result = await service.calculateBusinessPauseDuration(start, end, 'tenant-1');
       expect(result).toBe(240);
     });
 
-    it('retorna zero quando pausa ocorre apenas no fim de semana', () => {
+    it('retorna zero quando pausa ocorre apenas no fim de semana', async () => {
       const start = new Date('2025-06-07T10:00:00');
       const end = new Date('2025-06-08T14:00:00');
-      const result = service.calculateBusinessPauseDuration(start, end);
+      const result = await service.calculateBusinessPauseDuration(start, end, 'tenant-1');
       expect(result).toBe(0);
     });
 
-    it('pausa iniciada apos o expediente conta apenas proximo dia', () => {
+    it('pausa iniciada apos o expediente conta apenas proximo dia', async () => {
       const start = new Date('2025-06-02T19:00:00');
       const end = new Date('2025-06-03T09:00:00');
-      const result = service.calculateBusinessPauseDuration(start, end);
+      const result = await service.calculateBusinessPauseDuration(start, end, 'tenant-1');
       expect(result).toBe(60);
     });
 
-    it('pausa de 10 horas uteis completas (um dia inteiro)', () => {
+    it('pausa de 10 horas uteis completas (um dia inteiro)', async () => {
       const start = new Date('2025-06-02T08:00:00');
       const end = new Date('2025-06-02T18:00:00');
-      const result = service.calculateBusinessPauseDuration(start, end);
+      const result = await service.calculateBusinessPauseDuration(start, end, 'tenant-1');
       expect(result).toBe(600);
     });
   });
@@ -323,6 +366,18 @@ describe('SlaEngineService', () => {
       expect(result).toEqual(override);
     });
 
+    it('política da prioridade vale quando o tipo não tem política (C-024)', async () => {
+      const critica = makePolicy({ id: 'critica', priority: Priority.CRITICA, hours: 4 });
+      const normal = makePolicy({ id: 'normal', priority: Priority.NORMAL, hours: 24 });
+      mockPrisma.slaPolicy.findMany.mockResolvedValue([normal, critica]);
+      await expect(
+        service.findApplicablePolicy('tenant-1', Priority.CRITICA, ServiceOrderType.LENTIDAO),
+      ).resolves.toEqual(critica);
+      await expect(
+        service.findApplicablePolicy('tenant-1', Priority.BAIXA, ServiceOrderType.LENTIDAO),
+      ).resolves.toEqual(normal);
+    });
+
     it('retorna default quando prioridade nao tem nenhuma politica', async () => {
       const onlyAlta = makePolicy({ priority: Priority.ALTA, hours: 12 });
       mockPrisma.slaPolicy.findMany.mockResolvedValue([onlyAlta]);
@@ -355,11 +410,11 @@ describe('SlaEngineService', () => {
 
       expect(result).toEqual(policy);
     });
-    it('não reduz prazo genérico ao mudar a prioridade para crítica', async () => {
+    it('prioridade crítica usa a política crítica (decisão C-024 de 04/11)', async () => {
       const normal = makePolicy({ priority: Priority.NORMAL, serviceOrderType: null, hours: 48 });
       const critical = makePolicy({ priority: Priority.CRITICA, serviceOrderType: null, hours: 4 });
       mockPrisma.slaPolicy.findMany.mockResolvedValue([critical, normal]);
-      expect(await service.findApplicablePolicy('tenant-1', Priority.CRITICA)).toEqual(normal);
+      expect(await service.findApplicablePolicy('tenant-1', Priority.CRITICA)).toEqual(critical);
     });
   });
 });

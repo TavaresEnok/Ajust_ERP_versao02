@@ -11,9 +11,14 @@ function makePrisma(overrides: any = {}): any {
       delete: jest.fn().mockResolvedValue({ id: 'tpl1' }),
     },
     serviceOrder: {
-      findFirst: jest.fn().mockResolvedValue({ id: 'source', processInstanceId: null }),
-      create: jest.fn().mockResolvedValue({ id: 'o1', protocol: 'WF-abc' }),
+      findFirst: jest.fn().mockResolvedValue({ id: 'source', processInstanceId: null, tags: [] }),
+      create: jest.fn().mockResolvedValue({ id: 'o1', protocol: '2026100002' }),
+      count: jest.fn().mockResolvedValue(0),
     },
+    $queryRaw: jest.fn().mockResolvedValue([{ max: 100001 }]),
+    $transaction: jest.fn((fn: (tx: unknown) => unknown) => fn(base)),
+    serviceProcessInstance: { count: jest.fn().mockResolvedValue(0) },
+    occurrence: { updateMany: jest.fn() },
     serviceOrderOccurrence: {
       create: jest.fn().mockResolvedValue({ id: 'occ1' }),
     },
@@ -220,5 +225,43 @@ describe('OsProcessTemplateService.executeForOrder', () => {
     const svc = new OsProcessTemplateService(prisma, makeAudit());
     await svc.executeForOrder('t1', { id: 'o1', protocol: 'OS-origem', type: 'AUDITORIA' }, 'u1');
     expect(prisma.serviceOrder.create).not.toHaveBeenCalled();
+  });
+});
+
+describe('OsProcessTemplateService.executeForOrder — travas (C-034)', () => {
+  const template = {
+    id: 'tpl1',
+    name: 'Pós-instalação',
+    enabled: true,
+    triggerOsTypes: ['INSTALACAO'],
+    definition: { childOrders: [{ title: 'Vistoria', type: 'INSTALACAO', priority: 'NORMAL' }] },
+  };
+  const source = { id: 'src', protocol: 'P', type: 'INSTALACAO' as any, occurrenceId: 'occ' };
+
+  it('O.S. criada por modelo não dispara modelo de novo (sem laço)', async () => {
+    const prisma = makePrisma({ findMany: jest.fn().mockResolvedValue([template]) });
+    prisma.serviceOrder.findFirst.mockResolvedValue({
+      id: 'src',
+      processInstanceId: null,
+      parentOrderId: 'avó',
+      tags: ['template:tpl1'],
+    });
+    await new OsProcessTemplateService(prisma, makeAudit()).executeForOrder('t1', source, 'u1');
+    expect(prisma.serviceOrder.create).not.toHaveBeenCalled();
+  });
+
+  it('não cria segunda leva para a mesma origem e cria filha vinculada com protocolo normal', async () => {
+    const prisma = makePrisma({ findMany: jest.fn().mockResolvedValue([template]) });
+    prisma.serviceOrder.count.mockResolvedValueOnce(1);
+    const service = new OsProcessTemplateService(prisma, makeAudit());
+    await service.executeForOrder('t1', source, 'u1');
+    expect(prisma.serviceOrder.create).not.toHaveBeenCalled();
+
+    prisma.serviceOrder.count.mockResolvedValueOnce(0);
+    await service.executeForOrder('t1', source, 'u1');
+    const data = prisma.serviceOrder.create.mock.calls[0][0].data;
+    expect(data).toMatchObject({ parentOrderId: 'src', rootOrderId: 'src' });
+    expect(data.protocol).toMatch(/^\d{10}$/);
+    expect(prisma.occurrence.updateMany).toHaveBeenCalled();
   });
 });

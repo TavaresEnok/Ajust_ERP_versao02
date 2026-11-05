@@ -278,7 +278,7 @@ describe('ReportsService', () => {
       expect(carlos!.tmrHours).toBe(2);
     });
 
-    it('agrupa ordens por analista, incluindo Unassigned', async () => {
+    it('agrupa ordens por responsável, incluindo as sem responsável', async () => {
       const orders = [
         {
           id: '1',
@@ -302,8 +302,62 @@ describe('ReportsService', () => {
       svc = new ReportsService(makePrismaWithOrders(orders));
       const result = await svc.getManagerKPIs('tenant-1');
       expect(result.performanceByAnalyst).toHaveLength(2);
-      expect(result.performanceByAnalyst.find((a) => a.name === 'Unassigned')).toBeDefined();
+      expect(result.performanceByAnalyst.find((a) => a.name === 'Sem responsável')).toBeDefined();
       expect(result.performanceByAnalyst.find((a) => a.name === 'Bob')).toBeDefined();
+    });
+  });
+
+  describe('getManagerKPIs — agrupamento por id (C-040)', () => {
+    const base = {
+      status: 'FECHADA',
+      priority: 'NORMAL',
+      slaEligible: true,
+      createdAt: new Date('2026-10-01T00:00:00Z'),
+      deadlineAt: new Date('2026-10-02T00:00:00Z'),
+      updatedAt: new Date(),
+    };
+    it('o mesmo responsável com nomes diferentes vira uma linha só', async () => {
+      const svc = new ReportsService(
+        makePrismaWithOrders([
+          {
+            ...base,
+            id: '1',
+            assigneeUserId: 'u1',
+            analystName: 'Ana',
+            resolvedAt: new Date('2026-10-01T10:00:00Z'),
+          },
+          {
+            ...base,
+            id: '2',
+            assigneeUserId: 'u1',
+            analystName: 'Ana Souza',
+            resolvedAt: new Date('2026-10-03T10:00:00Z'),
+          },
+        ]),
+      );
+      const result = await svc.getManagerKPIs('tenant-1');
+      expect(result.performanceByAnalyst).toHaveLength(1);
+      expect(result.performanceByAnalyst[0]).toMatchObject({
+        userId: 'u1',
+        closed: 2,
+        closedLate: 1,
+      });
+      expect(result.overview).toMatchObject({ closedLate: 1, tmrBasis: 'HORAS_CORRIDAS' });
+    });
+    it('separa resolvidas aguardando fechamento das fechadas', async () => {
+      const svc = new ReportsService(
+        makePrismaWithOrders([
+          {
+            ...base,
+            id: '1',
+            status: 'RESOLVIDA',
+            assigneeUserId: 'u1',
+            analystName: 'Ana',
+            resolvedAt: new Date('2026-10-01T10:00:00Z'),
+          },
+        ]),
+      );
+      expect((await svc.getManagerKPIs('tenant-1')).overview.resolvedAwaitingClosure).toBe(1);
     });
   });
 

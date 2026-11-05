@@ -46,6 +46,8 @@ export interface WorkflowContext {
     ruleName: string;
   };
   event: { type: string; timestamp: string };
+  /** Chave do evento de origem; com ela, uma nova tentativa pula regras já concluídas. */
+  eventKey?: string;
 }
 
 @Injectable()
@@ -112,8 +114,10 @@ export class WorkflowsService {
     },
   ) {
     const current = await this.findOne(tenantId, id);
-    if (data.definition !== undefined) {
-      this.validateDefinition(data.definition);
+    if (data.definition !== undefined || data.enabled === true) {
+      this.validateDefinition(
+        data.definition ?? (current.definition as unknown as WorkflowDefinition),
+      );
     }
     const nextDefinition =
       data.definition !== undefined
@@ -151,6 +155,7 @@ export class WorkflowsService {
 
   async toggle(tenantId: string, actorUserId: string, id: string) {
     const rule = await this.findOne(tenantId, id);
+    if (!rule.enabled) this.validateDefinition(rule.definition as unknown as WorkflowDefinition);
     const toggled = await this.prisma.workflowRule.update({
       where: { id },
       data: { enabled: !rule.enabled },
@@ -171,6 +176,7 @@ export class WorkflowsService {
       throw new BadRequestException(`Version ${version} not found for workflow ${id}.`);
     }
 
+    this.validateDefinition(selected.definition);
     const restored = this.withVersionHistory(
       current,
       {
@@ -213,6 +219,7 @@ export class WorkflowsService {
       type: 'order_created' | 'order_updated' | 'order_closed' | 'sla_breach';
       order?: Record<string, any>;
     },
+    options: { eventKey?: string } = {},
   ): Promise<string[]> {
     if (!this.isExecutionEnabled()) {
       this.logger.warn(
@@ -239,6 +246,7 @@ export class WorkflowsService {
       if (!triggerNode) continue;
 
       if (!this.evaluateTrigger(triggerNode, event)) continue;
+      if (!this.triggerMatchesOrder(triggerNode, event.order || {})) continue;
       const governanceReason = await this.getGovernanceBlockReason(
         tenantId,
         rule.id,
@@ -250,6 +258,20 @@ export class WorkflowsService {
         continue;
       }
 
+      // Nova tentativa do mesmo evento: regra que já terminou sem falha não roda de novo (C-038).
+      if (
+        options.eventKey &&
+        (await this.prisma.workflowExecutionLog.count({
+          where: {
+            tenantId,
+            ruleId: rule.id,
+            nodeId: '__done__',
+            context: { path: ['eventKey'], equals: options.eventKey },
+          },
+        }))
+      )
+        continue;
+
       const ctx: WorkflowContext = {
         tenantId,
         order: event.order || {},
@@ -258,6 +280,7 @@ export class WorkflowsService {
           ruleName: rule.name,
         },
         event: { type: event.type, timestamp: new Date().toISOString() },
+        ...(options.eventKey ? { eventKey: options.eventKey } : {}),
       };
 
       await this.prisma.workflowExecutionLog
@@ -315,6 +338,23 @@ export class WorkflowsService {
         }
       }
 
+      if (options.eventKey && failureCount === 0)
+        await this.prisma.workflowExecutionLog
+          .create({
+            data: {
+              tenantId,
+              ruleId: rule.id,
+              ruleName: rule.name,
+              nodeId: '__done__',
+              nodeType: 'workflow',
+              nodeSubtype: event.type,
+              context: ctx as any,
+              result: { status: 'COMPLETED' },
+              status: 'SUCCESS',
+            },
+          })
+          .catch(() => this.logger.warn(`Failed to log workflow completion for rule ${rule.id}`));
+
       if (def.governance?.stopOnFailure && failureCount > 0) {
         this.logger.warn(`Workflow ${rule.name} stopped due to failure (stopOnFailure=true)`);
       }
@@ -353,6 +393,12 @@ export class WorkflowsService {
       }
     }
     return null;
+  }
+
+  /** Gatilhos que dependem do conteúdo da O.S., não só do tipo de evento (C-036). */
+  private triggerMatchesOrder(node: WorkflowNode, order: Record<string, any>): boolean {
+    if (node.subtype === 'os_critica') return order.priority === 'CRITICA';
+    return true;
   }
 
   private evaluateTrigger(node: WorkflowNode, event: { type: string }): boolean {
@@ -490,6 +536,15 @@ export class WorkflowsService {
     }
 
     const actions = nodes.filter((n) => n.type === 'action');
+    if (
+      actions.some(
+        (n) => !['action_notify_slack', 'action_webhook', 'action_csat'].includes(n.subtype),
+      )
+    ) {
+      throw new BadRequestException(
+        'Use processos operacionais para criar, atribuir, escalar ou fechar O.S. Workflows aceitam notificações, webhooks e CSAT.',
+      );
+    }
     if (actions.length === 0) {
       throw new BadRequestException('Workflow must contain at least one action node.');
     }

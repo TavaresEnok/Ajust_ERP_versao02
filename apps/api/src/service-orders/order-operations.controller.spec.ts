@@ -35,6 +35,33 @@ describe('OrderOperationsController: início sem justificativa', () => {
     });
     expect(service.run).toHaveBeenCalled();
   });
+  it('preserva evidências separadas e rejeita campos vazios', async () => {
+    await controller.run(request, 'order', {
+      action: 'finish',
+      expectedVersion: 1,
+      reason: 'Registro da etapa',
+      evidence: { Diagnóstico: ' Falha DNS ', Testes: 'Consulta corrigida' },
+    });
+    expect(service.run).toHaveBeenLastCalledWith(
+      'ajust',
+      'analyst',
+      'analista',
+      'order',
+      expect.objectContaining({
+        evidence: { Diagnóstico: 'Falha DNS', Testes: 'Consulta corrigida' },
+      }),
+    );
+    service.run.mockClear();
+    expect(() =>
+      controller.run(request, 'order', {
+        action: 'finish',
+        expectedVersion: 1,
+        reason: 'Registro da etapa',
+        evidence: { Diagnóstico: ' ' },
+      }),
+    ).toThrow();
+    expect(service.run).not.toHaveBeenCalled();
+  });
   it('não permite iniciar sem versão nem com perfil de cliente', () => {
     expect(() => controller.run(request, 'order', { action: 'start' })).toThrow();
     expect(() =>

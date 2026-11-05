@@ -31,6 +31,7 @@ describe('Occurrence intake with first order', () => {
       userTenant: {
         findMany: jest.fn().mockResolvedValue([
           { userId: 'owner', user: { name: 'Abertura' } },
+          { userId: 'actor', user: { name: 'Autor autenticado' } },
           { userId: 'analyst', user: { name: 'Analista' } },
         ]),
       },
@@ -63,13 +64,13 @@ describe('Occurrence intake with first order', () => {
     expect(tx.occurrence.create.mock.calls[0][0].data).toMatchObject({
       customerId: 'customer',
       provider: 'MEGANET',
-      openedByName: 'Abertura',
+      openedByName: 'Autor autenticado',
       analystResponsible: 'Analista',
     });
     expect(tx.serviceOrder.create.mock.calls[0][0].data).toMatchObject({
       occurrenceId: 'occ',
-      ownerUserId: 'owner',
-      ownerName: 'Abertura',
+      ownerUserId: 'actor',
+      ownerName: 'Autor autenticado',
       assigneeUserId: 'analyst',
       analystName: 'Analista',
       requester: 'MEGANET',

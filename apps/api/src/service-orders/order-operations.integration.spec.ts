@@ -142,7 +142,23 @@ dbDescribe('Atendimento Ajust: operações integradas com rollback', () => {
               reason: 'Versão antiga',
             }),
           ).rejects.toThrow();
-          await call('finish');
+          const activeStep = await tx.serviceProcessStep.findFirstOrThrow({
+            where: { instanceId: order.processInstanceId!, orderId: order.id, status: 'ACTIVE' },
+          });
+          const activeNode = def.nodes.find((node) => node.id === activeStep.nodeId)!;
+          const evidence = Object.fromEntries(
+            activeNode.requiredFields.map((field, index) => [
+              field,
+              `Evidência específica ${index + 1}: ${field}`,
+            ]),
+          );
+          expect(activeNode.requiredFields.length).toBeGreaterThan(0);
+          await expect(call('finish', { evidence: {} })).rejects.toThrow('Evidência obrigatória');
+          await call('finish', { evidence });
+          expect(
+            (await tx.serviceProcessStep.findUniqueOrThrow({ where: { id: activeStep.id } }))
+              .evidence,
+          ).toEqual(evidence);
           expect(order.status).toBe('FECHADA');
           let children = await tx.serviceOrder.findMany({ where: { parentOrderId: order.id } });
           expect(children).toHaveLength(3);
@@ -182,6 +198,18 @@ dbDescribe('Atendimento Ajust: operações integradas com rollback', () => {
             (await tx.occurrence.findUniqueOrThrow({ where: { id: occurrence.id } })).status,
           ).toBe('ENCERRADA');
           expect(await tx.slaAuditEvent.count({ where: { orderId: order.id } })).toBe(2);
+          const simple = ajustFlow('AJUST_SIMPLES');
+          await tx.serviceProcessTemplate.upsert({
+            where: { tenantId_code: { tenantId, code: simple.code } },
+            create: {
+              tenantId,
+              code: simple.code,
+              definition: simple,
+              version: 1,
+              publishedAt: new Date(),
+            },
+            update: { definition: simple, publishedAt: new Date() },
+          });
           const intake = new ServiceOrdersService(
             client as never,
             { emitTenantEvent: () => undefined } as never,
@@ -244,4 +272,99 @@ dbDescribe('Atendimento Ajust: operações integradas com rollback', () => {
       if (e !== rollback) throw e;
     }
   }, 70000);
+  it('desfaz a primeira conclusão se a segunda ordem apresentar conflito, sem efeitos externos', async () => {
+    const rollback = new Error('ROLLBACK_ATOMIC_BULK');
+    try {
+      await prisma.$transaction(
+        async (tx) => {
+          const member = await tx.userTenant.findFirstOrThrow();
+          const occurrence = await tx.occurrence.create({
+            data: {
+              tenantId: member.tenantId,
+              number: randomUUID(),
+              provider: 'Test',
+              type: 'Test',
+              sector: 'NOC',
+              origin: 'Test',
+              openedByName: 'Test',
+              analystResponsible: 'Test',
+              description: 'Atomic bulk test',
+            },
+          });
+          const orders = [];
+          for (let i = 0; i < 2; i++)
+            orders.push(
+              await tx.serviceOrder.create({
+                data: {
+                  tenantId: member.tenantId,
+                  occurrenceId: occurrence.id,
+                  protocol: randomUUID(),
+                  type: 'DNS',
+                  priority: 'NORMAL',
+                  title: 'Test',
+                  description: 'Test',
+                  deadlineAt: new Date(Date.now() + 86400000),
+                },
+              }),
+            );
+          let writes = 0;
+          const client = {
+            ...tx,
+            $transaction: async (callback: (client: unknown) => Promise<unknown>) => {
+              await tx.$executeRawUnsafe('SAVEPOINT bulk_failure');
+              try {
+                return await callback({
+                  ...tx,
+                  serviceOrder: new Proxy(tx.serviceOrder, {
+                    get(target, key) {
+                      if (key === 'updateMany')
+                        return async (args: Parameters<typeof target.updateMany>[0]) => {
+                          if (++writes === 2) return { count: 0 };
+                          return target.updateMany(args);
+                        };
+                      return Reflect.get(target, key);
+                    },
+                  }),
+                });
+              } catch (error) {
+                await tx.$executeRawUnsafe('ROLLBACK TO SAVEPOINT bulk_failure');
+                throw error;
+              }
+            },
+          };
+          const lifecycle = { afterStatusChange: jest.fn() };
+          const processes = new OperationalProcessesService(client as never, {} as never);
+          const operations = new OrderOperationsService(
+            client as never,
+            {} as never,
+            processes,
+            lifecycle as never,
+          );
+          await expect(
+            operations.closeOccurrence(member.tenantId, member.userId, 'analista', occurrence.id, {
+              reason: 'Validation',
+              orders: orders.map((o) => ({ id: o.id, version: o.version })),
+            }),
+          ).rejects.toThrow('alterou');
+          expect(writes).toBe(2);
+          for (const order of orders) {
+            const actual = await tx.serviceOrder.findUniqueOrThrow({ where: { id: order.id } });
+            expect(actual.status).toBe('ABERTA');
+            expect(actual.version).toBe(order.version);
+            expect(
+              await tx.serviceOrderStatusEvent.count({ where: { serviceOrderId: order.id } }),
+            ).toBe(0);
+          }
+          expect(lifecycle.afterStatusChange).not.toHaveBeenCalled();
+          expect(
+            (await tx.occurrence.findUniqueOrThrow({ where: { id: occurrence.id } })).status,
+          ).toBe(occurrence.status);
+          throw rollback;
+        },
+        { timeout: 30000 },
+      );
+    } catch (error) {
+      if (error !== rollback) throw error;
+    }
+  });
 });
