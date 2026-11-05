@@ -4,6 +4,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { AuditAction } from '@prisma/client';
 
 interface AuditFilter {
+  archive?: 'active' | 'archived';
   tenantId: string | null;
   userId?: string;
   action?: AuditAction;
@@ -69,6 +70,35 @@ export class AuditService {
       startDate,
       endDate,
     });
+
+    if (filters.archive === 'archived') {
+      const [records, total] = await Promise.all([
+        this.prisma.archivedAuditLog.findMany({
+          where: where as Prisma.ArchivedAuditLogWhereInput,
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+          take: limit,
+          skip: offset,
+        }),
+        this.prisma.archivedAuditLog.count({ where: where as Prisma.ArchivedAuditLogWhereInput }),
+      ]);
+      const users = await this.prisma.user.findMany({
+        where: { id: { in: records.flatMap((row) => (row.actorUserId ? [row.actorUserId] : [])) } },
+        select: { id: true, email: true },
+      });
+      const byId = new Map(users.map((user) => [user.id, user]));
+      return {
+        logs: records.map((row) => ({
+          ...row,
+          archived: true,
+          actorUser: row.actorUserId ? byId.get(row.actorUserId) || null : null,
+          tenant: { id: tenantId },
+        })),
+        total,
+        limit,
+        offset,
+        hasMore: offset + limit < total,
+      };
+    }
 
     const [logs, total] = await Promise.all([
       this.prisma.auditLog.findMany({

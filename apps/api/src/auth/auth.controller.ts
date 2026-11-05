@@ -27,6 +27,7 @@ const LoginSchema = z.object({
   identifier: z.string().min(3),
   password: z.string().min(4),
   bootstrapToken: z.string().min(32).optional(),
+  email: z.string().trim().email().optional(),
   tenantId: z.string().uuid().optional(),
   device: z.string().optional(),
 });
@@ -49,8 +50,10 @@ const UpdateMeSchema = z
   .refine((data) => data.name || data.email || data.newPassword, {
     message: 'No profile field was provided.',
   })
+  // A tela pode reenviar o e-mail atual sem mudança; a exigência para troca de e-mail
+  // é feita no serviço, que compara com o e-mail gravado.
   .refine((data) => !data.newPassword || !!data.currentPassword, {
-    message: 'currentPassword is required when changing password.',
+    message: 'Informe a senha atual para trocar a senha.',
     path: ['currentPassword'],
   });
 

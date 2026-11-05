@@ -80,7 +80,9 @@ describe('AuditInterceptor', () => {
     ['DELETE', '/iam/users/user-1', 'DELETE_USER'],
     ['POST', '/iam/tenants', 'CREATE_TENANT'],
     ['PATCH', '/iam/tenants/tenant-1', 'UPDATE_TENANT'],
-    ['POST', '/knowledge/credentials', 'CREDENTIAL_ACCESS'],
+    ['POST', '/knowledge/credentials', 'RESOURCE_CREATE'],
+    ['POST', '/knowledge/credentials/id/reveal', 'CREDENTIAL_ACCESS'],
+    ['DELETE', '/service-catalog/id', 'RESOURCE_DELETE'],
     ['POST', '/auth/login', 'LOGIN'],
     ['POST', '/auth/logout', 'LOGOUT'],
   ])('maps %s %s to %s', async (method, url, expectedAction) => {

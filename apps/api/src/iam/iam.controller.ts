@@ -68,6 +68,7 @@ const CreateUserSchema = z.object({
   tenantId: z.string().uuid(),
   roleCode: z.enum(ACTIVE_ROLES),
   sector: UserSectorSchema.optional(),
+  customerId: z.string().uuid().optional(),
 });
 
 const UpdateTenantSchema = z
@@ -232,7 +233,10 @@ export class IamController {
     const input = CreateUserSchema.parse(body);
     this.assertTenantScope(req, input.tenantId);
     this.assertRoleAssignment(req.auth?.role || '', input.roleCode);
-    return this.iamService.createUser(req.auth!.userId, input);
+    return this.iamService.createUser(req.auth!.userId, {
+      ...input,
+      actorRole: req.auth?.role || '',
+    });
   }
 
   @Get('users')
@@ -273,6 +277,7 @@ export class IamController {
       status: patch.status,
       roleCode: patch.roleCode,
       sector: patch.sector,
+      actorRole: req.auth.role || '',
     });
   }
 
@@ -291,7 +296,12 @@ export class IamController {
     if (req.auth.userId === userId) {
       throw new BadRequestException('You cannot remove your own active account.');
     }
-    return this.iamService.removeUserFromTenant(req.auth.userId, tenantId, userId);
+    return this.iamService.removeUserFromTenant(
+      req.auth.userId,
+      tenantId,
+      userId,
+      req.auth.role || '',
+    );
   }
 
   @Get('tenants/:tenantId/logo')
@@ -421,8 +431,8 @@ export class IamController {
 
   private assertTenantScope(req: RequestWithAuth, targetTenantId: string) {
     const role = req.auth?.role;
-    // super_admin, gerente and analista from Consultoria have cross-tenant access
-    if (role === 'super_admin' || role === 'gerente' || role === 'analista') return;
+    // Só o super admin atua em outro tenant (C-021). Gerente e analista ficam no próprio.
+    if (role === 'super_admin') return;
     if (!req.auth?.tenantId || req.auth.tenantId !== targetTenantId) {
       throw new ForbiddenException('This action is outside of your tenant scope.');
     }

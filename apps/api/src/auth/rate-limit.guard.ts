@@ -12,6 +12,8 @@ import { RedisService } from '../common/redis.service';
 const WINDOW_SECONDS = 15 * 60;
 const LIMIT = 5;
 const LOCKOUT_SECONDS = 15 * 60;
+// Limiar para atraso progressivo por conta; bloqueio continua restrito ao IP + conta.
+const ACCOUNT_LIMIT = 20;
 
 @Injectable()
 export class RateLimitGuard implements CanActivate {
@@ -24,6 +26,7 @@ export class RateLimitGuard implements CanActivate {
       .toLowerCase();
     // A successful password validation is not a failed attempt. Do not remove active lockouts.
     await this.redis.del(`rate-limit:login:${this.getClientIp(request)}:${identifier}`);
+    await this.redis.del(`rate-limit:login:account:${identifier}`);
   }
 
   async canActivate(context: ExecutionContext): Promise<boolean> {
@@ -51,6 +54,10 @@ export class RateLimitGuard implements CanActivate {
       }
 
       const attempts = await this.redis.incrEx(key, WINDOW_SECONDS);
+      const accountAttempts = await this.redis.incrEx(
+        `rate-limit:login:account:${identifier}`,
+        WINDOW_SECONDS,
+      );
 
       if (attempts > LIMIT) {
         await this.redis.set(lockoutKey, '1', LOCKOUT_SECONDS);
@@ -64,6 +71,12 @@ export class RateLimitGuard implements CanActivate {
         );
       }
 
+      // A distributed attack may slow an account, but must not lock out its owner on another IP.
+      if (accountAttempts > ACCOUNT_LIMIT) {
+        await new Promise((resolve) =>
+          setTimeout(resolve, Math.min(1500, (accountAttempts - ACCOUNT_LIMIT) * 100)),
+        );
+      }
       return true;
     } catch (error) {
       if (error instanceof HttpException) throw error;

@@ -7,7 +7,7 @@ import {
   WebSocketGateway,
   WebSocketServer,
 } from '@nestjs/websockets';
-import { Inject } from '@nestjs/common';
+import { Inject, OnModuleDestroy } from '@nestjs/common';
 import { Socket, Server } from 'socket.io';
 import { verify } from 'jsonwebtoken';
 import { PrismaService } from './prisma/prisma.service';
@@ -35,9 +35,10 @@ function getCorsOrigin() {
 @WebSocketGateway({
   cors: { origin: getCorsOrigin(), credentials: true },
 })
-export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
+export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, OnModuleDestroy {
   @WebSocketServer()
   server!: Server;
+  private readonly checks = new Map<string, ReturnType<typeof setInterval>>();
 
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
@@ -58,13 +59,28 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
     }
 
     client.auth = payload;
+    client.data.auth = payload;
+    const timer = setInterval(() => {
+      void this.validateSession(payload).then((valid) => {
+        if (!valid) client.disconnect(true);
+      });
+    }, 30_000);
+    timer.unref();
+    this.checks.set(client.id, timer);
 
     if (payload.tenantId) {
       client.join(`tenant:${payload.tenantId}`);
     }
   }
 
-  handleDisconnect(_client: Socket) {}
+  handleDisconnect(client: Socket) {
+    clearInterval(this.checks.get(client.id));
+    this.checks.delete(client.id);
+  }
+  onModuleDestroy() {
+    for (const timer of this.checks.values()) clearInterval(timer);
+    this.checks.clear();
+  }
 
   @SubscribeMessage('ping')
   handlePing(@MessageBody() payload: Record<string, unknown>) {
@@ -78,12 +94,12 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   @SubscribeMessage('subscribe_tenant')
-  subscribeTenant(
+  async subscribeTenant(
     @ConnectedSocket() client: AuthenticatedSocket,
     @MessageBody() _payload: { tenantId?: string },
   ) {
     const auth = client.auth;
-    if (!auth?.tenantId) {
+    if (!auth?.tenantId || !(await this.validateSession(auth))) {
       return { ok: false, reason: 'not_authenticated' };
     }
     const room = `tenant:${auth.tenantId}`;
@@ -106,11 +122,36 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
   }
 
   emitDomainEvent(event: string, data: unknown) {
-    this.server.emit(event, data);
+    return this.emitValidated(undefined, event, data);
   }
 
   emitTenantEvent(tenantId: string, event: string, data: unknown) {
-    this.server.to(`tenant:${tenantId}`).emit(event, data);
+    return this.emitValidated(tenantId, event, data);
+  }
+
+  private async emitValidated(tenantId: string | undefined, event: string, data: unknown) {
+    if (!this.server) return;
+    try {
+      const clients = await (
+        tenantId ? this.server.in(`tenant:${tenantId}`) : this.server
+      ).fetchSockets();
+      await Promise.all(
+        clients.map(async (client) => {
+          const auth = client.data.auth as AccessPayload | undefined;
+          if (
+            !auth ||
+            (tenantId && auth.tenantId !== tenantId) ||
+            !(await this.validateSession(auth))
+          ) {
+            client.disconnect(true);
+            return;
+          }
+          client.emit(event, data);
+        }),
+      );
+    } catch {
+      /* Fail closed: never broadcast if validation or the adapter is unavailable. */
+    }
   }
 
   disconnectTenant(tenantId: string) {
@@ -166,7 +207,9 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect {
         ) {
           return false;
         }
-        payload.role = membership.role.code;
+        if (payload.role !== membership.role.code) return false;
+        // A sala do tenant recebe eventos de todos os provedores; contas cliente ficam fora (C-019/C-053).
+        if (payload.role === 'cliente') return false;
       }
 
       return true;

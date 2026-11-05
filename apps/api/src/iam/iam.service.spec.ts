@@ -91,3 +91,125 @@ describe('IamService.saveSlaPolicy', () => {
     });
   });
 });
+
+describe('IamService — contas e vínculos (C-019, C-020, C-021)', () => {
+  const role = { id: 'role-1', code: 'analista' };
+  function prismaFor(overrides: Record<string, unknown> = {}) {
+    const tx: any = {
+      user: { update: jest.fn() },
+      userTenant: {
+        create: jest.fn(),
+        findUnique: jest.fn().mockResolvedValue({ id: 'm-1' }),
+        update: jest.fn(),
+        delete: jest.fn(),
+        count: jest.fn().mockResolvedValue(1),
+      },
+      session: { updateMany: jest.fn() },
+    };
+    const prisma: any = {
+      role: { findUnique: jest.fn().mockResolvedValue(role) },
+      tenant: { findUnique: jest.fn().mockResolvedValue({ id: 'tenant-1' }) },
+      customer: { findFirst: jest.fn().mockResolvedValue({ id: 'customer-1' }) },
+      user: {
+        findUnique: jest
+          .fn()
+          .mockResolvedValue({ id: 'user-9', status: 'ACTIVE', deletedAt: null }),
+        create: jest.fn().mockResolvedValue({ id: 'user-new' }),
+      },
+      userTenant: {
+        findUnique: jest.fn().mockResolvedValue(null),
+        count: jest.fn().mockResolvedValue(0),
+      },
+      $transaction: jest.fn((fn: (t: unknown) => unknown) => fn(tx)),
+      ...overrides,
+    };
+    return { prisma, tx };
+  }
+  const base = {
+    name: 'Fulano',
+    email: 'existente@ajust.com',
+    password: 'senha-escolhida-por-terceiro',
+    tenantId: 'tenant-1',
+    roleCode: 'analista',
+  };
+
+  it('vincula e-mail existente sem trocar nome, senha ou situação da conta', async () => {
+    const { prisma, tx } = prismaFor();
+    await makeService(prisma).createUser('actor', { ...base, actorRole: 'gerente' });
+    expect(tx.user.update).not.toHaveBeenCalled();
+    expect(tx.userTenant.create).toHaveBeenCalledWith({
+      data: { userId: 'user-9', tenantId: 'tenant-1', roleId: 'role-1' },
+    });
+  });
+
+  it('não reativa conta excluída pelo cadastro', async () => {
+    const { prisma } = prismaFor();
+    prisma.user.findUnique.mockResolvedValue({
+      id: 'user-9',
+      status: 'INACTIVE',
+      deletedAt: new Date(),
+    });
+    await expect(makeService(prisma).createUser('actor', base)).rejects.toThrow(
+      'inativa ou excluída',
+    );
+  });
+
+  it('exige provedor válido para usuário cliente', async () => {
+    const { prisma } = prismaFor();
+    prisma.user.findUnique.mockResolvedValue(null);
+    await expect(
+      makeService(prisma).createUser('actor', { ...base, roleCode: 'cliente' }),
+    ).rejects.toThrow('Selecione o provedor');
+    prisma.customer.findFirst.mockResolvedValue(null);
+    await expect(
+      makeService(prisma).createUser('actor', { ...base, roleCode: 'cliente', customerId: 'x' }),
+    ).rejects.toThrow('Provedor não encontrado');
+  });
+
+  it('grava o vínculo do cliente com o provedor', async () => {
+    const { prisma } = prismaFor();
+    prisma.user.findUnique.mockResolvedValue(null);
+    prisma.userTenant.findUnique.mockResolvedValue({ id: 'm-1' });
+    await makeService(prisma).createUser('actor', {
+      ...base,
+      roleCode: 'cliente',
+      customerId: 'customer-1',
+    });
+    expect(prisma.user.create.mock.calls[0][0].data.tenants.create).toMatchObject({
+      customerId: 'customer-1',
+    });
+  });
+
+  it('gerente não altera nem remove super admin', async () => {
+    const { prisma } = prismaFor();
+    prisma.userTenant.findUnique.mockResolvedValue({ id: 'm-1', role: { code: 'super_admin' } });
+    prisma.userTenant.count.mockResolvedValue(1);
+    const service = makeService(prisma);
+    await expect(
+      service.updateUserInTenant('actor', {
+        userId: 'root',
+        tenantId: 'tenant-1',
+        password: 'nova-senha-123',
+        actorRole: 'gerente',
+      }),
+    ).rejects.toThrow('Somente um super admin');
+    await expect(
+      service.removeUserFromTenant('actor', 'tenant-1', 'root', 'gerente'),
+    ).rejects.toThrow('Somente um super admin');
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+  });
+
+  it('trocar e-mail de outra pessoa revoga as sessões dela', async () => {
+    const { prisma, tx } = prismaFor();
+    prisma.userTenant.findUnique.mockResolvedValue({ id: 'm-1', role: { code: 'analista' } });
+    await makeService(prisma).updateUserInTenant('actor', {
+      userId: 'user-2',
+      tenantId: 'tenant-1',
+      email: 'novo@ajust.com',
+      actorRole: 'gerente',
+    });
+    expect(tx.session.updateMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { userId: 'user-2', revokedAt: null } }),
+    );
+  });
+});

@@ -1,5 +1,8 @@
 import { BadRequestException } from '@nestjs/common';
 import { lookup } from 'dns/promises';
+import { request as httpRequest } from 'node:http';
+import { request as httpsRequest } from 'node:https';
+import { isIP } from 'node:net';
 
 // RFC 1918 private ranges + loopback + link-local + metadata endpoints
 const BLOCKED_CIDRS: Array<{ start: bigint; end: bigint; label: string }> = [
@@ -15,6 +18,9 @@ const BLOCKED_CIDRS: Array<{ start: bigint; end: bigint; label: string }> = [
   cidr('100.64.0.0', 10, 'shared-address'),
   // IPv6 loopback resolved to IPv4
   cidr('0.0.0.0', 8, 'unspecified'),
+  cidr('224.0.0.0', 4, 'multicast'),
+  cidr('240.0.0.0', 4, 'reserved'),
+  cidr('198.18.0.0', 15, 'benchmark'),
 ];
 
 function ipToBigInt(ip: string): bigint {
@@ -28,9 +34,7 @@ function cidr(base: string, prefix: number, label: string) {
 }
 
 function isPrivateIp(ip: string): boolean {
-  if (ip === '::1' || ip.startsWith('::ffff:')) {
-    ip = ip.replace('::ffff:', '');
-  }
+  if (isIP(ip) !== 4) return true;
   if (!ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) return true;
   try {
     const n = ipToBigInt(ip);
@@ -45,7 +49,7 @@ function isPrivateIp(ip: string): boolean {
  * Throws BadRequestException if the URL is private/internal.
  * Call this before any outbound HTTP request with user-supplied URLs.
  */
-export async function assertSafeUrl(rawUrl: string): Promise<void> {
+async function resolveSafeUrl(rawUrl: string): Promise<{ address: string; family: number }> {
   let parsed: URL;
   try {
     parsed = new URL(rawUrl);
@@ -57,14 +61,17 @@ export async function assertSafeUrl(rawUrl: string): Promise<void> {
     throw new BadRequestException(`URL protocol not allowed: ${parsed.protocol}`);
   }
 
+  if (parsed.username || parsed.password)
+    throw new BadRequestException('Credenciais na URL não são permitidas.');
   const hostname = parsed.hostname;
+  if (hostname.includes(':')) throw new BadRequestException('Endereços IPv6 não são permitidos.');
 
   // Block direct IP access to private ranges without DNS resolution
   if (/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(hostname)) {
     if (isPrivateIp(hostname)) {
       throw new BadRequestException(`URL resolves to a private/internal address: ${hostname}`);
     }
-    return;
+    return { address: hostname, family: 4 };
   }
 
   // Block localhost variants
@@ -75,6 +82,7 @@ export async function assertSafeUrl(rawUrl: string): Promise<void> {
   // DNS resolution check — prevent DNS rebinding
   try {
     const addresses = await lookup(hostname, { all: true });
+    if (!addresses.length) throw new BadRequestException('Endereço sem resultado DNS.');
     for (const { address } of addresses) {
       if (isPrivateIp(address)) {
         throw new BadRequestException(
@@ -82,9 +90,84 @@ export async function assertSafeUrl(rawUrl: string): Promise<void> {
         );
       }
     }
+    return addresses[0];
   } catch (err) {
     if (err instanceof BadRequestException) throw err;
     // DNS lookup failure — block by default to be safe
     throw new BadRequestException(`Could not resolve hostname: ${hostname}`);
   }
+}
+
+export async function assertSafeUrl(rawUrl: string): Promise<void> {
+  await resolveSafeUrl(rawUrl);
+}
+
+/** Resolve once and pin the connection. Native HTTP never follows redirects. */
+export async function safeFetch(
+  rawUrl: string,
+  init: {
+    method?: string;
+    headers?: Record<string, string>;
+    body?: string;
+    signal?: AbortSignal;
+    redirect?: 'manual';
+  } = {},
+): Promise<Response> {
+  const destination = await resolveSafeUrl(rawUrl);
+  const url = new URL(rawUrl);
+  return new Promise((resolve, reject) => {
+    const request = (url.protocol === 'https:' ? httpsRequest : httpRequest)(
+      url,
+      {
+        method: init.method || 'GET',
+        headers: init.headers,
+        signal: init.signal,
+        agent: false,
+        // Preserve the hostname for Host and TLS certificate checks, but never resolve it again.
+        lookup: (_hostname, options, callback) => {
+          if (options.all) callback(null, [destination]);
+          else callback(null, destination.address, destination.family);
+        },
+      },
+      (response) => {
+        const status = response.statusCode || 502;
+        if (status >= 300 && status < 400) {
+          response.resume();
+          reject(new BadRequestException('Redirecionamento externo não permitido.'));
+          return;
+        }
+        const chunks: Buffer[] = [];
+        let bytes = 0;
+        response.on('data', (chunk: Buffer) => {
+          bytes += chunk.length;
+          if (bytes > 10 * 1024 * 1024) {
+            response.destroy(new Error('Resposta externa excede 10 MB.'));
+            return;
+          }
+          chunks.push(chunk);
+        });
+        response.on('error', reject);
+        response.on('end', () => {
+          const headers = new Headers();
+          for (const [name, value] of Object.entries(response.headers)) {
+            if (value !== undefined)
+              headers.set(name, Array.isArray(value) ? value.join(', ') : value);
+          }
+          resolve(
+            new Response(
+              [204, 205, 304].includes(status) || init.method === 'HEAD'
+                ? null
+                : Buffer.concat(chunks),
+              { status, headers },
+            ),
+          );
+        });
+      },
+    );
+    request.on('error', reject);
+    request.setTimeout(10_000, () =>
+      request.destroy(new Error('Tempo limite da conexão externa.')),
+    );
+    request.end(init.body);
+  });
 }

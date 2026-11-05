@@ -10,6 +10,7 @@ import { RequestWithAuth } from '../common/request-with-auth';
 import { assertManagerRole } from '../common/role-utils';
 
 const LogsQuerySchema = z.object({
+  archive: z.enum(['active', 'archived']).default('active'),
   userId: z.string().uuid().optional(),
   action: z.nativeEnum(AuditAction).optional(),
   resourceType: z.string().min(1).max(80).optional(),
@@ -50,6 +51,7 @@ export class AuditController {
       resourceId: parsed.resourceId,
       startDate: parsed.startDate ? new Date(parsed.startDate) : undefined,
       endDate: parsed.endDate ? new Date(parsed.endDate) : undefined,
+      archive: parsed.archive,
       limit: parsed.limit,
       offset: parsed.offset,
     });

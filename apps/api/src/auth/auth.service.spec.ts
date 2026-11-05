@@ -132,6 +132,7 @@ describe('AuthService', () => {
       },
       userTenant: {
         findUnique: jest.fn(),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       tenant: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -157,6 +158,26 @@ describe('AuthService', () => {
   // ──────────────────────────────────────────────────
 
   describe('login', () => {
+    it('does not resolve display names or email prefixes to another account', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      await expect(service.login({ identifier: 'joao', password: 'password' })).rejects.toThrow(
+        UnauthorizedException,
+      );
+      expect(mockPrisma.user.findFirst).not.toHaveBeenCalled();
+      expect(mockPrisma.tenant.findFirst).not.toHaveBeenCalled();
+    });
+    it('rejects ambiguous CNPJ memberships instead of picking the first account', async () => {
+      mockPrisma.user.findUnique.mockResolvedValue(null);
+      mockPrisma.userTenant.findMany.mockResolvedValue([
+        { user: makeUser() },
+        { user: makeUser({ id: 'other' }) },
+      ]);
+      await expect(
+        service.login({ identifier: '12345678000199', password: 'password' }),
+      ).rejects.toThrow(UnauthorizedException);
+      expect(mockPrisma.session.create).not.toHaveBeenCalled();
+    });
+
     const loginInput = {
       identifier: 'test@example.com',
       password: 'mypassword',
@@ -173,6 +194,7 @@ describe('AuthService', () => {
 
       const result = await service.login(loginInput);
 
+      expect(result.twoFactorSetupRequired).toBe(true);
       expect(result.accessToken).toBe('access-token-value');
       expect(result.refreshToken).toBe('refresh-token-value');
       expect(result.sessionId).toBe('session-1');
@@ -202,7 +224,7 @@ describe('AuthService', () => {
       });
       mockPrisma.user.findUnique.mockResolvedValue(customer);
       mockCompare.mockResolvedValue(false);
-      await expect(service.login(loginInput)).rejects.toThrow('Invalid credentials.');
+      await expect(service.login(loginInput)).rejects.toThrow('Credenciais inválidas.');
       expect(mockPrisma.session.create).not.toHaveBeenCalled();
       mockCompare.mockResolvedValue(true);
       mockSign.mockReturnValue('token');
@@ -229,10 +251,13 @@ describe('AuthService', () => {
         ],
       });
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.tenant.findFirst.mockResolvedValue({
-        id: 'tenant-1',
-        users: [{ role: { code: 'cliente' }, user: client }],
-      });
+      mockPrisma.userTenant.findMany.mockResolvedValue([
+        {
+          tenantId: 'tenant-1',
+          customer: { tenantId: 'tenant-1' },
+          user: client,
+        },
+      ]);
 
       await expect(
         service.login({ identifier: '12345678000199', password: 'NewPassword@123' }),
@@ -253,10 +278,13 @@ describe('AuthService', () => {
         ],
       });
       mockPrisma.user.findUnique.mockResolvedValue(null);
-      mockPrisma.tenant.findFirst.mockResolvedValue({
-        id: 'tenant-1',
-        users: [{ role: { code: 'cliente' }, user: client }],
-      });
+      mockPrisma.userTenant.findMany.mockResolvedValue([
+        {
+          tenantId: 'tenant-1',
+          customer: { tenantId: 'tenant-1' },
+          user: client,
+        },
+      ]);
       mockCompare.mockResolvedValue(true);
       mockSign.mockReturnValueOnce('refresh-token').mockReturnValueOnce('access-token');
 
@@ -291,6 +319,39 @@ describe('AuthService', () => {
       jti: 'jti-1',
       typ: 'refresh',
     };
+
+    it('revokes the session when a correctly signed old refresh token is reused', async () => {
+      mockVerify.mockReturnValue(refreshPayload);
+      mockPrisma.session.findUnique.mockResolvedValue(
+        makeSession({ refreshTokenHash: 'rotated-hash' }),
+      );
+      await expect(service.refresh({ refreshToken: 'old-token' })).rejects.toThrow('mismatch');
+      expect(mockPrisma.session.updateMany).toHaveBeenCalledWith({
+        where: { id: 'session-1', revokedAt: null },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+    it('does not issue access tokens after losing the atomic rotation race', async () => {
+      mockVerify.mockReturnValue(refreshPayload);
+      mockPrisma.session.findUnique.mockResolvedValue(makeSession());
+      mockPrisma.userTenant.findUnique.mockResolvedValue({
+        role: { code: 'gerente' },
+        tenant: { status: 'ACTIVE', deletedAt: null },
+      });
+      mockPrisma.session.updateMany
+        .mockResolvedValueOnce({ count: 0 })
+        .mockResolvedValueOnce({ count: 1 });
+      mockSign.mockReturnValue('next-refresh');
+      await expect(service.refresh({ refreshToken: 'valid-refresh' })).rejects.toThrow(
+        'already used',
+      );
+      expect(mockPrisma.session.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { id: 'session-1', revokedAt: null, refreshTokenHash: 'hashed-refresh-token' },
+        }),
+      );
+      expect(mockSign).toHaveBeenCalledTimes(1);
+    });
 
     it('Refresh with valid refresh token returns new tokens', async () => {
       mockVerify.mockReturnValue(refreshPayload);
@@ -613,6 +674,53 @@ describe('AuthService', () => {
       await expect(
         service.revokeSession('sess-target', 'attacker-user', 'analista', 'tenant-1'),
       ).rejects.toThrow(ForbiddenException);
+    });
+  });
+
+  describe('updateMe (C-048)', () => {
+    beforeEach(() => {
+      mockPrisma.user.findUnique.mockResolvedValue({
+        id: 'user-1',
+        email: 'atual@ajust.com',
+        passwordHash: 'hash',
+      });
+      jest.spyOn(service, 'me').mockResolvedValue({} as never);
+    });
+
+    it('recusa trocar o e-mail sem a senha atual correta', async () => {
+      mockCompare.mockResolvedValue(false);
+      await expect(
+        service.updateMe('user-1', 'tenant-1', 'sess-1', { email: 'novo@ajust.com' }),
+      ).rejects.toThrow('Senha atual incorreta.');
+      expect(mockPrisma.user.update).not.toHaveBeenCalled();
+    });
+
+    it('troca o e-mail com a senha atual e revoga as outras sessões', async () => {
+      mockCompare.mockResolvedValue(true);
+      await service.updateMe('user-1', 'tenant-1', 'sess-1', {
+        email: 'novo@ajust.com',
+        currentPassword: 'certa',
+      });
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { email: 'novo@ajust.com' },
+      });
+      expect(mockPrisma.session.updateMany).toHaveBeenCalledWith({
+        where: { userId: 'user-1', revokedAt: null, id: { not: 'sess-1' } },
+        data: { revokedAt: expect.any(Date) },
+      });
+    });
+
+    it('reenviar o mesmo e-mail com o nome não exige senha', async () => {
+      await service.updateMe('user-1', 'tenant-1', 'sess-1', {
+        name: 'Nome Novo',
+        email: 'ATUAL@ajust.com',
+      });
+      expect(mockCompare).not.toHaveBeenCalled();
+      expect(mockPrisma.user.update).toHaveBeenCalledWith({
+        where: { id: 'user-1' },
+        data: { name: 'Nome Novo' },
+      });
     });
   });
 });

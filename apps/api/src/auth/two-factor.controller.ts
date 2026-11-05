@@ -93,8 +93,8 @@ export class TwoFactorController {
       throw new BadRequestException('Disable the current 2FA configuration before replacing it.');
     }
 
-    const isValid = this.totpService.verifyCode(input.secret, input.code);
-    if (!isValid) {
+    const counter = this.totpService.matchCounter(input.secret, input.code);
+    if (counter === null) {
       throw new BadRequestException('Invalid verification code');
     }
 
@@ -102,14 +102,16 @@ export class TwoFactorController {
     const encryptedSecret = encryptSecret(input.secret);
 
     // Update user
-    await this.prisma.user.update({
-      where: { id: req.auth.userId },
+    const enabled = await this.prisma.user.updateMany({
+      where: { id: req.auth.userId, twoFactorEnabled: false },
       data: {
+        twoFactorLastCounter: counter,
         twoFactorEnabled: true,
         twoFactorSecretEnc: encryptedSecret,
       },
     });
 
+    if (enabled.count !== 1) throw new BadRequestException('A configuração 2FA já foi alterada.');
     return {
       success: true,
       message: '2FA has been enabled successfully',
@@ -148,6 +150,7 @@ export class TwoFactorController {
       data: {
         twoFactorEnabled: false,
         twoFactorSecretEnc: null,
+        twoFactorLastCounter: null,
       },
     });
 

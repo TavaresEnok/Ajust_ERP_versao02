@@ -12,7 +12,11 @@ import { NextFunction, Request, Response, json as expressJson } from 'express';
 import { CsrfMiddleware } from './common/csrf.middleware';
 import { randomUUID } from 'crypto';
 import { RequestContext } from './common/request-context';
+import { auditDeniedResponse } from './audit/audit-denied-response';
+import { PrismaService } from './prisma/prisma.service';
+import { validateVaultKey } from './common/vault.crypto';
 import { RequestWithAuth } from './common/request-with-auth';
+import { translateErrorMessage, translateZodIssue } from './common/error-messages-pt';
 
 // ─── Variáveis inseguras detectadas em ambientes não-dev ────────────────────
 const INSECURE_DEFAULTS = new Set([
@@ -67,7 +71,7 @@ class GlobalExceptionFilter implements ExceptionFilter {
         error: 'Validation Error',
         issues: exception.issues.map((issue) => ({
           path: issue.path.join('.'),
-          message: issue.message,
+          message: translateZodIssue(issue),
         })),
       });
     }
@@ -75,29 +79,44 @@ class GlobalExceptionFilter implements ExceptionFilter {
     if (exception instanceof HttpException) {
       const status = exception.getStatus();
       const exceptionResponse = exception.getResponse();
-      return response
-        .status(status)
-        .json(
-          typeof exceptionResponse === 'string'
-            ? { statusCode: status, message: exceptionResponse }
-            : exceptionResponse,
+      const body =
+        typeof exceptionResponse === 'string'
+          ? { statusCode: status, message: exceptionResponse }
+          : (exceptionResponse as Record<string, unknown>);
+      // Mensagens em português para o usuário final (C-080).
+      if (typeof body.message === 'string') body.message = translateErrorMessage(body.message);
+      else if (Array.isArray(body.message))
+        body.message = body.message.map((m) =>
+          typeof m === 'string' ? translateErrorMessage(m) : m,
         );
+      return response.status(status).json(body);
     }
 
     console.error('[api] Unhandled error:', exception);
     response.status(HttpStatus.INTERNAL_SERVER_ERROR).json({
       statusCode: 500,
-      message: 'Internal server error',
+      message: translateErrorMessage('Internal server error'),
     });
   }
 }
 
 async function bootstrap() {
   validateEnv();
+  if (process.env.NODE_ENV === 'production') validateVaultKey();
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  // Confia só nos proxies da rede interna (contêiner web/BFF, Caddy no host): request.ip passa a
+  // ser o IP real do usuário, e não o do contêiner web (auditoria C-049).
+  app.getHttpAdapter().getInstance().set('trust proxy', 'loopback, linklocal, uniquelocal');
   const port = Number(process.env.PORT || 3001);
   const requestContext = app.get(RequestContext);
+  const auditPrisma = app.get(PrismaService);
+  app.use((req: RequestWithAuth, res: Response, next: NextFunction) => {
+    res.once('finish', () => {
+      void auditDeniedResponse(auditPrisma, req, res.statusCode);
+    });
+    next();
+  });
 
   const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
 

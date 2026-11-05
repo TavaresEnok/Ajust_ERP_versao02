@@ -32,20 +32,25 @@ export class TotpService {
    * Allows for time window drift (±1 window = ±30 seconds)
    */
   verifyCode(secret: string, code: string): boolean {
+    return this.matchCounter(secret, code) !== null;
+  }
+
+  matchCounter(secret: string, code: string): number | null {
+    if (!/^\d{6}$/.test(code)) return null;
     const now = Math.floor(Date.now() / 1000);
     const timeCounter = Math.floor(now / this.WINDOW);
 
     // Check current window and ±1 for drift tolerance
-    for (let i = -1; i <= 1; i++) {
+    for (let i = 1; i >= -1; i--) {
       const expectedCode = this.generateCode(secret, timeCounter + i);
       const expected = Buffer.from(expectedCode, 'utf8');
       const received = Buffer.from(code, 'utf8');
       if (expected.length === received.length && timingSafeEqual(expected, received)) {
-        return true;
+        return timeCounter + i;
       }
     }
 
-    return false;
+    return null;
   }
 
   /**

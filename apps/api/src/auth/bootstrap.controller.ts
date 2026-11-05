@@ -18,6 +18,7 @@ import {
 import { z } from 'zod';
 import { BootstrapOtpService } from './bootstrap-otp.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { resolveCustomerLogin } from './customer-login';
 import { RateLimitGuard } from './rate-limit.guard';
 
 const RequestOtpSchema = z.object({
@@ -53,40 +54,13 @@ export class BootstrapController {
   async requestOtp(@Body() input: unknown) {
     const data = RequestOtpSchema.parse(input);
 
-    // Busca tenant pelo CNPJ
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { taxId: data.cnpj },
-      include: {
-        users: {
-          include: {
-            user: {
-              include: {
-                tenants: { include: { role: true } },
-              },
-            },
-            role: true,
-          },
-        },
-      },
-    });
-
-    const clientMembership = tenant?.users.find(
-      (membership) =>
-        tenant.status === 'ACTIVE' &&
-        !tenant.deletedAt &&
-        membership.role.code === 'cliente' &&
-        membership.user.status === 'ACTIVE' &&
-        !membership.user.deletedAt &&
-        !membership.user.lastLoginAt &&
-        membership.user.email.toLowerCase() === data.email.toLowerCase(),
-    );
-
-    if (tenant && clientMembership) {
+    const clientMembership = await resolveCustomerLogin(this.prisma, data.cnpj, data.email);
+    if (clientMembership && !clientMembership.user.lastLoginAt) {
       try {
         await this.bootstrapOtpService.generateAndSendOtp(
           clientMembership.user.id,
           clientMembership.user.email,
-          tenant.tradeName,
+          clientMembership.customer!.tradeName,
         );
       } catch (error) {
         this.logger.error(`Failed to send first-access OTP: ${(error as Error).message}`);
@@ -111,28 +85,8 @@ export class BootstrapController {
   async validateOtp(@Body() input: unknown) {
     const data = ValidateOtpSchema.parse(input);
 
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { taxId: data.cnpj },
-      include: {
-        users: {
-          include: {
-            user: true,
-            role: true,
-          },
-        },
-      },
-    });
-    const clientMembership = tenant?.users.find(
-      (membership) =>
-        tenant.status === 'ACTIVE' &&
-        !tenant.deletedAt &&
-        membership.role.code === 'cliente' &&
-        membership.user.status === 'ACTIVE' &&
-        !membership.user.deletedAt &&
-        !membership.user.lastLoginAt &&
-        membership.user.email.toLowerCase() === data.email.toLowerCase(),
-    );
-    if (!clientMembership) {
+    const clientMembership = await resolveCustomerLogin(this.prisma, data.cnpj, data.email);
+    if (!clientMembership || clientMembership.user.lastLoginAt) {
       throw new BadRequestException('Código inválido ou expirado.');
     }
 

@@ -23,6 +23,18 @@ export class AuditService {
     metadata: Record<string, unknown>,
     extra?: { ip?: string; userAgent?: string },
   ): Promise<void> {
+    if (
+      action === 'OS_UPDATE' &&
+      !['service_order', 'service_orders', 'occurrence'].includes(resourceType)
+    ) {
+      const operation = String(metadata.op || 'update');
+      action = ['remove', 'delete'].includes(operation)
+        ? 'RESOURCE_DELETE'
+        : operation === 'create'
+          ? 'RESOURCE_CREATE'
+          : 'RESOURCE_UPDATE';
+      if (resourceType === 'user' && operation === 'remove') action = 'DELETE_USER';
+    }
     await this.prisma.auditLog.create({
       data: {
         tenantId,
