@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { PrismaClient } from '@prisma/client';
 import { importSgpRegistry } from '../apps/api/src/customers/import-sgp-registry';
 const prisma = new PrismaClient();

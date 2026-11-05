@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 
 const fs = require('node:fs');
 const path = require('node:path');

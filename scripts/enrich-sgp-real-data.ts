@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { PrismaClient, Prisma } from '@prisma/client';
 import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';

@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { PrismaClient } from '@prisma/client';
 import { encryptVaultSecret } from '../apps/api/src/common/vault.crypto';
 import { readSgp } from '../apps/api/src/service-processes/sgp-reader';

@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 import { PrismaService } from '../apps/api/src/prisma/prisma.service';
 import { SlaEngineService } from '../apps/api/src/sla/sla-engine.service';
 import { OperationalProcessesService } from '../apps/api/src/service-processes/operational-processes.service';

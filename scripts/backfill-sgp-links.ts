@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { PrismaClient } from '@prisma/client';
 const db = new PrismaClient();
 async function main() {

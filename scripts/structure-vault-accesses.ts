@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import {PrismaClient} from '@prisma/client';
 import {encryptVaultSecret,decryptVaultSecret,vaultSourceNoteText} from '../apps/api/src/common/vault.crypto';
 import {packVaultContent,unpackVaultContent,VaultAccessSchema,type VaultAccess} from '../apps/api/src/common/vault-content';

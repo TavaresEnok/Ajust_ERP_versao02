@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { PrismaClient } from '@prisma/client';
 import { readSgp } from '../apps/api/src/service-processes/sgp-reader';
 import { parseAccessNote } from '../apps/api/src/customers/sgp-credential-parser';

@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 /** Corrects the one-time timestamp-unit error in provider-volume-120d-v1. */
 import { PrismaClient, Priority } from '@prisma/client';
 
