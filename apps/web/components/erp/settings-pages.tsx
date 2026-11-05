@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useState } from 'react';
+import { useSyncExternalStore, useState } from 'react';
 import Link from 'next/link';
 import {
   Bell,
@@ -26,6 +26,7 @@ import { QueryState, ErpEmpty } from './contract-form';
 import { useAppTheme } from '@/components/theme-provider';
 import { cn } from '@/lib/utils';
 import { canAccessCompanySettings } from '@/lib/erp/access';
+const subscribeMounted = () => () => {};
 const settings = [
   { slug: 'geral', name: 'Geral', icon: SlidersHorizontal },
   { slug: 'perfil', name: 'Meu perfil', icon: UserRound },
@@ -43,8 +44,11 @@ export function SettingsPage({ section: requested = 'geral' }: { section?: strin
   const { dark, ready, toggle } = useAppTheme();
   const [compact, setCompact] = useState(false);
   // O tema só é conhecido no navegador; o trecho suspenso hidrata depois do ThemeProvider.
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
+  const mounted = useSyncExternalStore(
+    subscribeMounted,
+    () => true,
+    () => false,
+  );
   const selected = visibleSettings.find((item) => item.slug === section);
   if (!selected)
     return (
@@ -56,6 +60,46 @@ export function SettingsPage({ section: requested = 'geral' }: { section?: strin
   return (
     <>
       <PageHeading title="Configurações" description="Cada detalhe a favor da sua operação." />
+      {!!scope && ['super_admin', 'gerente'].includes(scope.role) && (
+        <section className="panel mb-5 p-5">
+          <h2 className="section-title">Administração da empresa</h2>
+          <p className="section-subtitle">
+            Cadastros e ferramentas administrativas reunidos para consulta quando necessário.
+          </p>
+          <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+            {[
+              [
+                'empresa',
+                'Empresa, setores e funções',
+                'Identidade da empresa e organização da equipe.',
+              ],
+              ['usuarios', 'Usuários e acessos', 'Contas, vínculos e permissões.'],
+              ['empresas', 'Ambientes da empresa', 'Administração dos ambientes cadastrados.'],
+              ['saude', 'Saúde do sistema', 'Diagnóstico do banco de dados, cache e sessões.'],
+              [
+                'eventos-tempo-real',
+                'Diagnóstico em tempo real',
+                'Eventos técnicos autorizados da empresa.',
+              ],
+              [
+                'configuracoes-ativos',
+                'Configurações e snapshots',
+                'Histórico e comparação de configurações.',
+              ],
+              ['ixc', 'Integração IXC', 'Conciliação e configuração da integração.'],
+            ].map(([path, title, description]) => (
+              <Link
+                key={path}
+                href={`${base}/${path}`}
+                className="rounded-lg border border-border p-3"
+              >
+                <strong className="text-sm">{title}</strong>
+                <p className="mt-1 text-xs text-muted-foreground">{description}</p>
+              </Link>
+            ))}
+          </div>
+        </section>
+      )}
       <div className="grid gap-5 lg:grid-cols-[200px_1fr]">
         <nav
           aria-label="Seções das configurações"

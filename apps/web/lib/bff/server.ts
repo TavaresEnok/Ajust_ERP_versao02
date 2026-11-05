@@ -15,6 +15,7 @@ export type ApiUser = {
 };
 
 export type LoginApiResponse = {
+  twoFactorSetupRequired?: boolean;
   accessToken: string;
   refreshToken: string;
   sessionId: string;

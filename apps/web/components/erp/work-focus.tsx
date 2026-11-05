@@ -9,6 +9,8 @@ import { Button } from '@/components/ui/button';
 import { PageHeading, StatusBadge } from './primitives';
 import { QueryState } from './contract-form';
 import { OrderForm } from './order-form';
+import { isActiveOrder } from '@/lib/erp/analyst-workspace';
+import { isDemonstration } from '@/lib/erp/management';
 
 const date = (v: unknown) =>
   v
@@ -19,7 +21,7 @@ export function WorkFocus({ analyst = false }: { analyst?: boolean }) {
   const base = useRouteBase();
   const [filter, setFilter] = useState('active');
   const [page, setPage] = useState(0);
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(() => Date.now());
   const [open, setOpen] = useState(false);
   useEffect(() => {
     const timer = setInterval(() => setNow(Date.now()), 60000);
@@ -41,7 +43,7 @@ export function WorkFocus({ analyst = false }: { analyst?: boolean }) {
     { refreshInterval: 60000 },
   );
   const rows = [...new Map((query.data?.rows || []).map((o) => [o.id, o])).values()];
-  const active = rows.filter((o) => !['FECHADA', 'CANCELADA'].includes(String(o.status)));
+  const active = rows.filter((o) => isActiveOrder(o) && !isDemonstration(o));
   const late = (o: ErpRecord) =>
     !o.pausedAt &&
     o.slaEligible !== false &&

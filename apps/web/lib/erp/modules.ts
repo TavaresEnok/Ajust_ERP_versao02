@@ -62,7 +62,11 @@ export const orderFields: FieldSpec[] = [
   },
   { name: 'ownerUserId', label: 'Aberto por', type: 'uuid', required: true },
   { name: 'assigneeUserId', label: 'Analista responsável', type: 'uuid', required: true },
-  { name: 'deadlineAt', label: 'Prazo excepcional (opcional; padrão pelo serviço)', type: 'datetime-local' },
+  {
+    name: 'deadlineAt',
+    label: 'Prazo excepcional (opcional; padrão pelo serviço)',
+    type: 'datetime-local',
+  },
   { name: 'internalNotes', label: 'Notas internas', type: 'textarea' },
 ];
 export const modules: Record<string, ResourceDefinition> = {
@@ -207,6 +211,7 @@ export const modules: Record<string, ResourceDefinition> = {
     title: 'Registro de trabalho',
     description: 'Tempo dedicado às ordens, com período, descrição e classificação faturável.',
     endpoint: '/time-entries',
+    pagination: true,
     createLabel: 'Registrar trabalho',
     createRoles: [...operators],
     remove: true,
@@ -262,6 +267,13 @@ export const modules: Record<string, ResourceDefinition> = {
           cliente: 'Cliente',
         },
         required: true,
+      },
+      {
+        name: 'customerId',
+        label: 'Provedor (obrigatório para Cliente)',
+        type: 'uuid',
+        reference: { resource: 'customers' },
+        hint: 'Contas de cliente só veem os atendimentos deste provedor.',
       },
       { name: 'sector', label: 'Setor', min: 2, max: 64 },
     ],
@@ -337,6 +349,11 @@ export const modules: Record<string, ResourceDefinition> = {
       { key: 'ip', label: 'IP' },
     ],
     filters: [
+      {
+        name: 'archive',
+        label: 'Histórico',
+        options: { active: 'Recentes', archived: 'Arquivados' },
+      },
       { name: 'userId', label: 'UUID do usuário', type: 'uuid' },
       { name: 'resourceType', label: 'Tipo de recurso' },
       { name: 'resourceId', label: 'ID do recurso' },

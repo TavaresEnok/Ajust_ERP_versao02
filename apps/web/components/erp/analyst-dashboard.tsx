@@ -409,8 +409,11 @@ function AnalystHistory() {
                 <KeyRound className="size-4" />
                 Acessar cofre dos provedores
               </Link>
-              <Link className="text-link block py-2" href={`${base}/sla`}>
-                Monitor de SLA da operação →
+              <Link
+                className="text-link block py-2"
+                href={`${base}/ordens?scope=${view}&deadline=overdue`}
+              >
+                Ver O.S. atrasadas →
               </Link>
             </div>
           </div>

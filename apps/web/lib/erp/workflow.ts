@@ -16,13 +16,9 @@ export const workflowSubtypes = {
     gateway_parallel_join: 'Junção paralela',
   },
   action: {
-    action_assign: 'Atribuir analista',
-    action_escalate: 'Escalonar',
     action_notify_slack: 'Notificar Slack',
     action_webhook: 'Chamar webhook',
     action_csat: 'Solicitar CSAT',
-    task_service: 'Criar tarefa de serviço',
-    action_close_order: 'Fechar ordem',
   },
 };
 export function workflowWarnings(definition: WorkflowDefinition) {

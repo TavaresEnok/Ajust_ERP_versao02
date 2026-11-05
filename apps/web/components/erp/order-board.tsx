@@ -1,6 +1,6 @@
 'use client';
 import Link from 'next/link';
-import { orderStatuses, priorities, type ErpRecord } from '@/lib/erp/contracts';
+import { nextStatusOptions, orderStatuses, priorities, type ErpRecord } from '@/lib/erp/contracts';
 import { StatusBadge } from './primitives';
 import { OperationControl } from './operation-controls';
 import { displayValue } from './resource-page';
@@ -78,9 +78,7 @@ export function OrderBoard({
                         {
                           name: 'toStatus',
                           label: 'Etapa de destino',
-                          options: Object.fromEntries(
-                            Object.entries(orderStatuses).filter(([code]) => code !== row.status),
-                          ),
+                          options: nextStatusOptions(row.status),
                           required: true,
                         },
                         {

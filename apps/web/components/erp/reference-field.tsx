@@ -98,18 +98,34 @@ export function ReferenceField({
     const record = row as Record<string, unknown>;
     if (
       reference.resource === 'users' &&
-      ['ownerUserId', 'assigneeUserId'].includes(field.name) &&
+      [
+        'ownerUserId',
+        'assigneeUserId',
+        'ownerName',
+        'analystName',
+        'analystResponsible',
+        'openedByName',
+      ].includes(field.name) &&
       !['analista', 'gerente', 'super_admin'].includes(String(record.role).toLowerCase())
     )
       return [];
     if (typeof record.id !== 'string') return [];
+    if (reference.hideClosed && record.status === 'ENCERRADA') return [];
     const label =
       [
         record.protocol || record.number,
         reference.resource === 'occurrences' ? record.provider : undefined,
         reference.resource === 'occurrences' ? record.type : undefined,
         record.title || record.tradeName || record.legalName || record.name,
-        reference.resource === 'users' && ['ownerUserId', 'assigneeUserId'].includes(field.name)
+        reference.resource === 'users' &&
+        [
+          'ownerUserId',
+          'assigneeUserId',
+          'ownerName',
+          'analystName',
+          'analystResponsible',
+          'openedByName',
+        ].includes(field.name)
           ? undefined
           : record.email,
       ]

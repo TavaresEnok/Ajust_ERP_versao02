@@ -94,7 +94,7 @@ export const navigation: NavGroup[] = [
         description: 'Pessoas, disponibilidade e desempenho da sua equipe.',
       },
       {
-        title: 'Monitor de SLA',
+        title: 'Prazos da equipe',
         path: '/gerencia/sla',
         icon: Timer,
         description: 'Antecipe riscos e mantenha seus compromissos no prazo.',
@@ -106,7 +106,7 @@ export const navigation: NavGroup[] = [
         description: 'A saúde da operação, com os indicadores que importam.',
       },
       {
-        title: 'Plantão NOC',
+        title: 'Escala de plantão',
         path: '/gerencia/plantao',
         icon: Radio,
         description: 'Escalas e cobertura para uma operação sempre disponível.',
@@ -307,7 +307,7 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
     const groups = [
       {
         label: 'Meu trabalho',
-        sections: ['', 'ordens', 'provedores', 'agenda', 'plantao', 'sla', 'relatorios-turno'],
+        sections: ['', 'ordens', 'provedores', 'agenda', 'plantao', 'relatorios-turno'],
       },
       { label: 'Conhecimento', sections: ['ajustpedia', 'credenciais', 'notas'] },
       {
@@ -348,6 +348,55 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
         }),
       }),
     );
+  }
+  if (!customer) {
+    const groups = [
+      { label: 'Operação', sections: ['', 'ordens', 'ocorrencias', 'agenda', 'sla', 'processos'] },
+      { label: 'Equipe', sections: ['tecnicos', 'plantao', 'relatorios-turno'] },
+      { label: 'Provedores e resultados', sections: ['provedores', 'relatorios'] },
+      {
+        label: 'Conhecimento',
+        sections: ['ajustpedia', 'credenciais', 'notas'],
+        collapsible: true,
+      },
+      {
+        label: 'Recursos da operação',
+        sections: ['ativos', 'mudancas', 'apontamentos', 'trilha-os'],
+        collapsible: true,
+      },
+      {
+        label: 'Fluxos e regras',
+        sections: ['workflows', 'servicos', 'politicas-sla', 'calendario-sla'],
+        collapsible: true,
+      },
+      {
+        label: 'Administração',
+        sections: ['configuracoes', 'seguranca', 'integracoes', 'notificacoes', 'auditoria'],
+        collapsible: true,
+      },
+    ];
+    return groups
+      .map(
+        ({ label, sections, collapsible }): NavGroup => ({
+          label,
+          collapsible,
+          items: sections.flatMap((section) => {
+            const item = allNavigation.find(
+              (entry) => (entry.path.split('/')[2] || '') === section,
+            );
+            if (!item || (role && !canAccessSection(role, section))) return [];
+            return [
+              {
+                ...item,
+                title: section === '' ? 'Painel da gerência' : item.title,
+                path: item.path.replace(/^\/(gerencia|analista|cliente)/, portal),
+                count: undefined,
+              },
+            ];
+          }),
+        }),
+      )
+      .filter((group) => group.items.length);
   }
   const customerSections = new Set([
     'ordens',

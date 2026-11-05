@@ -1,7 +1,7 @@
 'use client';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { useRouter, useSearchParams, usePathname } from 'next/navigation';
+import { useSearchParams, usePathname } from 'next/navigation';
 import {
   ArrowLeft,
   ArrowDownToLine,
@@ -39,7 +39,13 @@ import {
 import { OrderForm } from './order-form';
 import { useVisualSource, useRouteBase } from '@/lib/erp/visual-data';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
-import { orderStatuses, orderTypes, priorities, queryPath } from '@/lib/erp/contracts';
+import {
+  nextStatusOptions,
+  orderStatuses,
+  orderTypes,
+  priorities,
+  queryPath,
+} from '@/lib/erp/contracts';
 const statuses = Object.values(orderStatuses);
 import { RecordWorkspace } from './record-workspace';
 import { OperationControl } from './operation-controls';
@@ -47,13 +53,36 @@ import { QueryState } from './contract-form';
 import { QuickDispatchDialog } from './quick-dispatch-dialog';
 import { downloadOrderPdf } from '@/lib/erp/order-pdf';
 import { AnalystOrderWork } from './analyst-order-work';
+import { deadlineSituation } from '@/lib/erp/analyst-workspace';
+
+const deadlineFilters = {
+  overdue: 'Atrasadas',
+  today: 'Vencem hoje',
+  soon: 'Vencem em até 2h',
+  paused: 'Pausadas',
+  without: 'Sem prazo de SLA',
+};
+function filterDate(value: string) {
+  if (!value) return undefined;
+  const parsed = new Date(
+    /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/.test(value) ? `${value}:00-03:00` : value,
+  );
+  return Number.isFinite(parsed.getTime()) ? parsed.toISOString() : undefined;
+}
+const orderSorts = {
+  recent: { label: 'Mais recentes', orderBy: 'createdAt', orderDir: 'desc' },
+  deadline: { label: 'Menor prazo primeiro', orderBy: 'deadlineAt', orderDir: 'asc' },
+  priority: { label: 'Maior prioridade primeiro', orderBy: 'priority', orderDir: 'desc' },
+} as const;
 export function OrdersTable({
   orders,
   compact = false,
   attention,
+  listQuery,
 }: {
   orders: Order[];
   compact?: boolean;
+  listQuery?: string;
   attention?: Record<string, { label: string; tone: string }>;
 }) {
   const pathname = usePathname();
@@ -62,21 +91,18 @@ export function OrdersTable({
     : pathname.startsWith('/cliente') || pathname.startsWith('/portal')
       ? '/cliente'
       : '/gerencia';
+  const detailHref = (id: string) =>
+    `${orderBase}/ordens/${id}${listQuery ? `?list=${encodeURIComponent(listQuery)}` : ''}`;
   return (
     <div className="table-wrap relative">
       <table className="data-table">
         <thead>
           <tr>
-            {!compact && (
-              <th>
-                <span className="sr-only">Selecionar</span>
-              </th>
-            )}
             <th>Ordem de serviço</th>
             <th>Provedor</th>
             <th>Status</th>
             <th>Prioridade</th>
-            {attention && <th>O que precisa de atenção</th>}
+            {attention && compact && <th>O que precisa de atenção</th>}
             {!compact && (
               <>
                 <th>Responsável</th>
@@ -91,13 +117,8 @@ export function OrdersTable({
         <tbody>
           {orders.map((o) => (
             <tr key={o.id}>
-              {!compact && (
-                <td>
-                  <input type="checkbox" aria-label={'Selecionar ' + o.id} />
-                </td>
-              )}
               <td>
-                <Link href={orderBase + '/ordens/' + o.id} className="block">
+                <Link href={detailHref(o.id)} className="block">
                   <span className="mb-1 block text-[9px] text-muted-foreground">
                     #{o.protocol || o.id}
                   </span>
@@ -127,7 +148,7 @@ export function OrdersTable({
               <td>
                 <Priority value={o.priority} />
               </td>
-              {attention && (
+              {attention && compact && (
                 <td>
                   <span
                     className={cn(
@@ -151,12 +172,28 @@ export function OrdersTable({
                       {o.analyst}
                     </span>
                   </td>
-                  <td className="text-muted-foreground">{o.deadline}</td>
+                  <td className="text-muted-foreground">
+                    <span className="text-xs">{o.deadline}</span>
+                    {attention?.[o.id] && (
+                      <span
+                        className={cn(
+                          'mt-1 block text-[11px]',
+                          attention[o.id].tone === 'danger'
+                            ? 'text-rose-600 dark:text-rose-400'
+                            : attention[o.id].tone === 'warning'
+                              ? 'text-amber-600 dark:text-amber-400'
+                              : 'text-muted-foreground',
+                        )}
+                      >
+                        {attention[o.id].label}
+                      </span>
+                    )}
+                  </td>
                 </>
               )}
               <td>
                 <Link
-                  href={orderBase + '/ordens/' + o.id}
+                  href={detailHref(o.id)}
                   className="text-muted-foreground hover:text-primary"
                   aria-label={'Ver ' + o.id}
                 >
@@ -184,34 +221,130 @@ export function OrdersPage({
     !customer && !analyst && (!scope || ['super_admin', 'gerente'].includes(scope.role));
   const [quickDispatchOpen, setQuickDispatchOpen] = useState(false);
   const params = useSearchParams();
-  const [orderScope, setOrderScope] = useState(
-    params.get('scope') === 'operation' ? 'operation' : 'mine',
-  );
-  const [search, setSearch] = useState('');
-  const [status, setStatus] = useState(params.get('status') || 'Todos');
-  const [provider, setProvider] = useState('Todos');
-  const [priority, setPriority] = useState('Todas');
+  const orderScope = params.get('scope') === 'operation' ? 'operation' : 'mine';
+  function replaceFilters(changes: Record<string, string | null>, resetPage = true) {
+    const next = new URLSearchParams(window.location.search);
+    for (const [key, value] of Object.entries(changes)) {
+      if (value) next.set(key, value);
+      else next.delete(key);
+    }
+    if (resetPage) next.delete('page');
+    window.history.replaceState(null, '', `${orderBase}/ordens${next.size ? `?${next}` : ''}`);
+  }
+  const setOrderScope = (value: string) => replaceFilters({ scope: value });
+  const search = params.get('search') || '';
+  const setSearch = (value: string) => replaceFilters({ search: value });
+  const [searchQuery, setSearchQuery] = useState(search);
+  useEffect(() => {
+    const timer = setTimeout(() => setSearchQuery(search), 250);
+    return () => clearTimeout(timer);
+  }, [search]);
+  const situation = params.get('situation') || 'all';
+  const sortKey = Object.hasOwn(orderSorts, params.get('sort') || '')
+    ? (params.get('sort') as keyof typeof orderSorts)
+    : params.get('deadline')
+      ? 'deadline'
+      : 'recent';
+  const sort = orderSorts[sortKey];
+  const deadline = Object.hasOwn(deadlineFilters, params.get('deadline') || '')
+    ? params.get('deadline')!
+    : '';
+  const setDeadline = (value: string) =>
+    replaceFilters({ deadline: value, status: null, situation: 'all' });
+  const [now, setNow] = useState(() => new Date());
+  const statusParam = params.get('status') || '';
+  const status: string =
+    orderStatuses[statusParam as keyof typeof orderStatuses] || statusParam || 'Todos';
+  const setStatus = (value: string) =>
+    replaceFilters({ status: value === 'Todos' ? null : value, situation: 'all' });
+  const provider = params.get('provider') || 'Todos';
+  const setProvider = (value: string) =>
+    replaceFilters({ customerId: null, provider: value === 'Todos' ? null : value });
+  const priorityParam = params.get('priority') || '';
+  const priority: string =
+    priorities[priorityParam as keyof typeof priorities] || priorityParam || 'Todas';
+  const setPriority = (value: string) =>
+    replaceFilters({ priority: value === 'Todas' ? null : value });
   const [filters, setFilters] = useState(false);
   const [view, setView] = useState('list');
-  const [page, setPage] = useState(1);
-  const [type, setType] = useState('');
-  const [from, setFrom] = useState('');
-  const [to, setTo] = useState('');
-  const endpoint = queryPath('/service-orders', {
+  const parsedPage = Number(params.get('page') || 1);
+  const page = Number.isSafeInteger(parsedPage) && parsedPage > 0 ? parsedPage : 1;
+  const setPage = (value: number) =>
+    replaceFilters({ page: value === 1 ? null : String(value) }, false);
+  const type = params.get('type') || '';
+  const setType = (value: string) => replaceFilters({ type: value });
+  const from = params.get('from') || '';
+  const to = params.get('to') || '';
+  const setFrom = (value: string) => replaceFilters({ from: value });
+  const setTo = (value: string) => replaceFilters({ to: value });
+  const invalidRange = Boolean(from && to && new Date(from).getTime() > new Date(to).getTime());
+  function clearFilters() {
+    window.history.replaceState(
+      null,
+      '',
+      `${orderBase}/ordens${analyst ? `?scope=${orderScope}` : ''}`,
+    );
+  }
+  const filterValues = {
+    situation: !customer && ['active', 'completed'].includes(situation) ? situation : undefined,
     scope: analyst ? orderScope : undefined,
+    deadline: !customer && deadline ? deadline : undefined,
+    orderBy: analyst || deadline ? sort.orderBy : undefined,
+    orderDir: analyst || deadline ? sort.orderDir : undefined,
+    customerId: params.get('customerId') || undefined,
     provider: provider === 'Todos' ? undefined : provider,
     // O controller aceita `search` (mínimo de 2 caracteres) e paginação por offset.
-    search: search.trim().length >= 2 ? search.trim() : undefined,
+    search: searchQuery.trim().length >= 2 ? searchQuery.trim() : undefined,
     status: Object.entries(orderStatuses).find(([, label]) => label === status)?.[0],
     priority: Object.entries(priorities).find(([, label]) => label === priority)?.[0],
     type: type || undefined,
-    from: from ? new Date(from).toISOString() : undefined,
-    to: to ? new Date(to).toISOString() : undefined,
+    from: !invalidRange ? filterDate(from) : undefined,
+    to: !invalidRange ? filterDate(to) : undefined,
+  };
+  const endpoint = queryPath('/service-orders', {
+    ...filterValues,
     offset: (page - 1) * 8,
     limit: 8,
   });
   const { orders } = useOrders(endpoint);
   const source = useVisualSource('orders', endpoint);
+  const summary = useErpQuery<{
+    total: number;
+    active: number;
+    closed: number;
+    byPriority: Record<string, number>;
+  }>(!customer ? queryPath('/service-orders/summary', filterValues) : null);
+  const refreshSummary = summary.mutate;
+  const refreshOrders = source.mutate;
+  useEffect(() => {
+    if (customer) return;
+    const timer = setInterval(() => {
+      setNow(new Date());
+      void refreshOrders();
+      void refreshSummary();
+    }, 60_000);
+    return () => clearInterval(timer);
+  }, [customer, refreshOrders, refreshSummary]);
+  const attention = Object.fromEntries(
+    source.raw.map((row) => {
+      const label = deadlineSituation(row, now);
+      return [
+        row.id,
+        {
+          label:
+            row.status === 'CANCELADA'
+              ? 'Cancelada'
+              : row.scheduledAt &&
+                  !row.scheduleStartedAt &&
+                  !row.pausedAt &&
+                  !['FECHADA', 'RESOLVIDA'].includes(String(row.status))
+                ? `${label} · agendada para ${new Date(String(row.scheduledAt)).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza', day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`
+                : label,
+          tone: label === 'Atrasada' ? 'danger' : label === 'Vence em até 2h' ? 'warning' : 'muted',
+        },
+      ];
+    }),
+  );
   const customers = useErpQuery<{ tradeName: string; legalName: string }[]>(
     !customer ? '/customers' : null,
   );
@@ -229,12 +362,12 @@ export function OrdersPage({
     }));
   const scoped = orders;
   const filtered = scoped;
-  const total =
-    source.data && typeof source.data === 'object' && 'total' in source.data
+  const total = !customer
+    ? summary.data?.total
+    : source.data && typeof source.data === 'object' && 'total' in source.data
       ? Number(source.data.total)
       : undefined;
-  const pages =
-    total !== undefined ? Math.max(1, Math.ceil(total / 8)) : page + (orders.length === 8 ? 1 : 0);
+  const pages = total !== undefined ? Math.max(1, Math.ceil(total / 8)) : page;
   const current = page;
   function download() {
     exportCsv(
@@ -257,7 +390,9 @@ export function OrdersPage({
         description={
           customer
             ? 'Acompanhe suas solicitações e o andamento de cada atendimento.'
-            : 'Cada atendimento no lugar certo. Sua operação em movimento.'
+            : analyst
+              ? 'Encontre o atendimento, confira a etapa atual e registre o trabalho seguindo o fluxo da gestão.'
+              : 'Cada atendimento no lugar certo. Sua operação em movimento.'
         }
       >
         <Link
@@ -307,40 +442,92 @@ export function OrdersPage({
       <div className="mb-5 grid grid-cols-4 gap-4 metrics-grid">
         {[
           {
-            label: 'Ordens nesta página',
-            value: scoped.length,
+            label: customer ? 'Ordens nesta página' : 'Ordens encontradas',
+            value: customer ? scoped.length : summary.data?.total,
             icon: ClipboardList,
           },
           {
-            label: 'Em andamento',
-            value: scoped.filter(
-              (o) => !['Concluída', 'Fechada', 'Resolvida', 'Cancelada'].includes(o.status),
-            ).length,
+            label: 'Pendentes',
+            value: !customer
+              ? summary.data?.active
+              : scoped.filter(
+                  (o) => !['Concluída', 'Fechada', 'Resolvida', 'Cancelada'].includes(o.status),
+                ).length,
             icon: Clock3,
           },
           {
             label: 'Concluídas',
-            value: scoped.filter((o) => ['Concluída', 'Fechada', 'Resolvida'].includes(o.status))
-              .length,
+            value: !customer
+              ? summary.data?.closed
+              : scoped.filter((o) => ['Concluída', 'Fechada', 'Resolvida'].includes(o.status))
+                  .length,
             icon: CheckCircle2,
           },
           {
             label: 'Prioridade crítica',
-            value: scoped.filter((o) => o.priority === 'Crítica').length,
+            value: !customer
+              ? summary.data?.byPriority.CRITICA
+              : scoped.filter((o) => o.priority === 'Crítica').length,
             icon: SlidersHorizontal,
           },
         ].map((m) => (
           <Metric
             key={m.label}
             label={m.label}
-            value={String(m.value).padStart(2, '0')}
+            value={m.value === undefined || invalidRange ? '—' : String(m.value).padStart(2, '0')}
             icon={m.icon}
-            change="Consulta atual"
-            foot="registros retornados pelo ERP"
+            change="Conforme os filtros"
+            foot={customer ? 'registros desta página' : 'todas as páginas do resultado'}
           />
         ))}
       </div>
+      {summary.error && <QueryState error={summary.error} onRetry={() => void summary.mutate()} />}
       <section className="panel">
+        {!customer && (
+          <div
+            className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3"
+            aria-label="Situação das ordens"
+          >
+            {Object.entries({
+              active: 'Pendentes',
+              completed: 'Concluídas',
+              all: 'Todas as ordens',
+            }).map(([key, label]) => (
+              <Button
+                key={key}
+                size="sm"
+                variant={situation === key ? 'secondary' : 'ghost'}
+                aria-pressed={situation === key}
+                onClick={() => replaceFilters({ situation: key, deadline: null, status: null })}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        )}
+        {!customer && (
+          <div
+            className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3"
+            aria-label="Filtrar ordens por prazo"
+          >
+            <span className="mr-1 text-xs text-muted-foreground">Prazo</span>
+            {Object.entries({ '': 'Todas', ...deadlineFilters }).map(([key, label]) => (
+              <Button
+                key={key}
+                size="sm"
+                variant={deadline === key ? 'secondary' : 'ghost'}
+                aria-pressed={deadline === key}
+                onClick={() => {
+                  setDeadline(key);
+                  setStatus('Todos');
+                  setPage(1);
+                }}
+              >
+                {label}
+              </Button>
+            ))}
+          </div>
+        )}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
           <div className="flex flex-wrap items-center gap-3">
             <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
@@ -374,24 +561,47 @@ export function OrdersPage({
               <SlidersHorizontal data-icon="inline-start" />
               Filtros
             </Button>
+            {analyst && (
+              <label className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                Ordenar por
+                <select
+                  className="native-select"
+                  aria-label="Ordenar ordens"
+                  value={sortKey}
+                  onChange={(event) => {
+                    replaceFilters({ sort: event.target.value, scope: orderScope });
+                  }}
+                >
+                  {Object.entries(orderSorts).map(([key, value]) => (
+                    <option key={key} value={key}>
+                      {value.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            )}
           </div>
           <div className="flex items-center gap-1">
-            <Button
-              variant={view === 'list' ? 'secondary' : 'ghost'}
-              size="icon"
-              aria-label="Visualização em lista"
-              onClick={() => setView('list')}
-            >
-              <List />
-            </Button>
-            <Button
-              variant={view === 'board' ? 'secondary' : 'ghost'}
-              size="icon"
-              aria-label="Visualização Kanban"
-              onClick={() => setView('board')}
-            >
-              <LayoutGrid />
-            </Button>
+            {!analyst && (
+              <>
+                <Button
+                  variant={view === 'list' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  aria-label="Visualização em lista"
+                  onClick={() => setView('list')}
+                >
+                  <List />
+                </Button>
+                <Button
+                  variant={view === 'board' ? 'secondary' : 'ghost'}
+                  size="icon"
+                  aria-label="Visualização Kanban"
+                  onClick={() => setView('board')}
+                >
+                  <LayoutGrid />
+                </Button>
+              </>
+            )}
           </div>
         </div>
         {filters && (
@@ -464,19 +674,7 @@ export function OrdersPage({
                 }}
               />
             </label>
-            <Button
-              variant="ghost"
-              onClick={() => {
-                setPage(1);
-                setType('');
-                setFrom('');
-                setTo('');
-                setStatus('Todos');
-                setProvider('Todos');
-                setPriority('Todas');
-                setSearch('');
-              }}
-            >
+            <Button variant="ghost" onClick={clearFilters}>
               Limpar filtros
             </Button>
           </div>
@@ -486,8 +684,38 @@ export function OrdersPage({
           error={source.error}
           onRetry={() => void source.mutate()}
         />
-        {view === 'list' ? (
-          <OrdersTable orders={filtered} />
+        {(provider !== 'Todos' ||
+          deadline ||
+          situation !== 'all' ||
+          search ||
+          status !== 'Todos' ||
+          priority !== 'Todas' ||
+          type ||
+          from ||
+          to) && (
+          <div className="flex flex-wrap items-center gap-3 border-b px-5 py-3 text-xs text-muted-foreground">
+            <span>{provider !== 'Todos' ? `Provedor: ${provider} · ` : ''}Filtros aplicados</span>
+            <Button variant="ghost" size="sm" onClick={clearFilters}>
+              Limpar todos
+            </Button>
+          </div>
+        )}
+        {invalidRange && (
+          <p role="alert" className="px-5 py-3 text-sm text-danger">
+            A data final precisa ser igual ou posterior à data inicial.
+          </p>
+        )}
+        {search.trim().length === 1 && (
+          <p className="px-5 py-2 text-xs text-muted-foreground">
+            Digite pelo menos dois caracteres para buscar.
+          </p>
+        )}
+        {source.isLoading || source.error || invalidRange ? null : view === 'list' || analyst ? (
+          <OrdersTable
+            orders={filtered}
+            attention={!customer ? attention : undefined}
+            listQuery={analyst ? params.toString() : undefined}
+          />
         ) : (
           <div className="grid auto-cols-[240px] grid-flow-col gap-4 overflow-x-auto p-5">
             {statuses.map((s) => (
@@ -528,8 +756,10 @@ export function OrdersPage({
             <Button
               variant="outline"
               size="icon-sm"
-              disabled={current === 1}
-              onClick={() => setPage(current - 1)}
+              disabled={current === 1 || source.isLoading}
+              onClick={() =>
+                setPage(Number(new URLSearchParams(window.location.search).get('page') || 1) - 1)
+              }
               aria-label="Página anterior"
             >
               <ChevronLeft />
@@ -538,8 +768,10 @@ export function OrdersPage({
             <Button
               variant="outline"
               size="icon-sm"
-              disabled={current === pages}
-              onClick={() => setPage(current + 1)}
+              disabled={current >= pages || summary.isLoading || source.isLoading || invalidRange}
+              onClick={() =>
+                setPage(Number(new URLSearchParams(window.location.search).get('page') || 1) + 1)
+              }
               aria-label="Próxima página"
             >
               <ChevronRight />
@@ -563,6 +795,8 @@ export function OrderDetail({
   const source = useVisualSource('orders');
   const { scope } = useErp();
   const base = useRouteBase();
+  const detailParams = useSearchParams();
+  const returnHref = `${base}/ordens${detailParams.get('list') ? `?${new URLSearchParams(detailParams.get('list')!).toString()}` : ''}`;
   const [tab, setTab] = useState(
     scope?.role === 'analista' &&
       !['Encerramento', 'Anotações', 'Editar', 'Anexos', 'Histórico'].includes(initialTab)
@@ -572,6 +806,7 @@ export function OrderDetail({
   const [exporting, setExporting] = useState(false);
   const order = source.rows.find((row) => row.id === id);
   const raw = source.raw.find((row) => row.id === id);
+  if (source.isLoading) return <QueryState loading />;
   if (!order)
     return (
       <>
@@ -585,11 +820,11 @@ export function OrderDetail({
   return (
     <>
       <Link
-        href={`${base}/ordens`}
+        href={returnHref}
         className="mb-4 inline-flex items-center gap-2 text-xs text-muted-foreground"
       >
         <ArrowLeft className="size-3" />
-        Todas as ordens
+        {scope?.role === 'analista' ? 'Minhas ordens' : 'Todas as ordens'}
       </Link>
       {raw?.occurrenceId ? (
         <nav aria-label="Contexto da O.S." className="mb-5 text-xs text-muted-foreground">
@@ -600,9 +835,7 @@ export function OrderDetail({
           </Link>
         </nav>
       ) : (
-        <p className="mb-5 text-xs text-muted-foreground">
-          O.S. avulsa · sem ocorrência vinculada. Registro preservado.
-        </p>
+        <p className="mb-5 text-xs text-muted-foreground">O.S. sem ocorrência vinculada.</p>
       )}
       <PageHeading
         title={String(order.title)}
@@ -633,77 +866,37 @@ export function OrderDetail({
           <section className="panel">
             <PanelHeading title="Sobre esta solicitação" />
             <div className="px-6 pb-6">
-              <p className="whitespace-pre-wrap text-xs leading-7 text-muted-foreground">
+              <p className="max-h-48 overflow-y-auto whitespace-pre-wrap break-words text-sm leading-7 text-muted-foreground">
                 {String(order.description)}
               </p>
               <div className="mt-5 flex gap-2">
                 <span className="rounded-md bg-muted px-2 py-1 text-[10px]">
                   {String(order.type)}
                 </span>
-                <span className="rounded-md bg-secondary px-2 py-1 text-[10px] text-primary">
-                  Atendimento técnico
-                </span>
               </div>
             </div>
           </section>
-          {scope?.role !== 'cliente' && raw && tab === 'Encerramento' && (
-            <AnalystOrderWork order={raw} refresh={source.mutate} />
-          )}
-          <section className="panel">
-            <div className="flex gap-5 overflow-x-auto border-b border-border px-6">
-              {[
-                'Encerramento',
-                'Anotações',
-                'Editar',
-                'Resumo',
-                'Transição',
-                'Aprovações',
-                'Trabalho',
-                'SLA',
-                'Anexos',
-                'Histórico',
-              ]
-                .filter((t) =>
-                  scope?.role === 'analista'
-                    ? ['Anotações', 'Encerramento', 'Editar', 'Anexos', 'Histórico'].includes(t)
-                    : scope?.role === 'cliente'
-                      ? ['Resumo', 'Histórico', 'Anotações', 'Encerramento', 'Anexos'].includes(t)
-                      : true,
-                )
-                .map((t) => (
-                  <button
-                    key={t}
-                    onClick={() => setTab(t)}
-                    className={cn(
-                      'whitespace-nowrap border-b-2 py-4 text-xs',
-                      tab === t
-                        ? 'border-primary font-medium text-primary'
-                        : 'border-transparent text-muted-foreground',
-                    )}
-                  >
-                    {t}
-                  </button>
-                ))}
-            </div>
-            <div className="p-6">
-              <RecordWorkspace
-                key={`${id}-${tab}`}
-                kind="orders"
-                id={id}
-                base={base}
-                embedded
-                initialTab={tab}
-              />
-            </div>
+          <section className="panel min-w-0 overflow-hidden">
+            <RecordWorkspace
+              key={id}
+              kind="orders"
+              id={id}
+              base={base}
+              embedded
+              showTabs
+              activeTab={tab}
+              onTabChange={setTab}
+              workControls={
+                scope?.role !== 'cliente' && raw ? (
+                  <AnalystOrderWork order={raw} refresh={source.mutate} compact />
+                ) : undefined
+              }
+            />
           </section>
         </div>
         <aside className="panel h-fit">
           <PanelHeading title="Detalhes do atendimento" />
           <div className="flex flex-col gap-5 px-6 pb-6">
-            <div>
-              <p className="mini-label mb-2">Status da ordem</p>
-              <StatusBadge status={String(order.status)} />
-            </div>
             <div>
               <p className="mini-label mb-2">Prioridade</p>
               <Priority value={String(order.priority)} />
@@ -720,7 +913,7 @@ export function OrderDetail({
                     {
                       name: 'toStatus',
                       label: 'Próximo status',
-                      options: orderStatuses,
+                      options: nextStatusOptions(raw?.status),
                       required: true,
                     },
                     {
@@ -746,7 +939,24 @@ export function OrderDetail({
               ))}
             <div>
               <p className="mini-label mb-2">Provedor</p>
-              <span className="text-xs">{String(order.provider)}</span>
+              {scope?.role === 'cliente' ? (
+                <span className="text-xs">{String(order.provider)}</span>
+              ) : (
+                <Link
+                  className="text-link text-xs"
+                  href={`${base}/provedores${(raw?.occurrence as { customerId?: string } | undefined)?.customerId ? `/${(raw!.occurrence as { customerId: string }).customerId}` : `?search=${encodeURIComponent(String(order.provider))}`}`}
+                >
+                  {String(order.provider)}
+                </Link>
+              )}
+              {scope?.role !== 'cliente' && (
+                <Link
+                  className="text-link mt-2 block text-xs"
+                  href={`${base}/credenciais?provider=${encodeURIComponent(String(order.provider))}`}
+                >
+                  Acessos e orientações técnicas →
+                </Link>
+              )}
             </div>
             <div>
               <p className="mini-label mb-2">Responsável</p>
@@ -756,12 +966,38 @@ export function OrderDetail({
               </span>
             </div>
             <div>
-              <p className="mini-label mb-2">
-                {raw?.slaEligible === false ? 'Prazo' : 'Prazo SLA'}
-              </p>
+              <p className="mini-label mb-2">Prazo de conclusão</p>
               <p className="flex items-center gap-2 text-xs">
                 <Clock3 className="size-3.5 text-warning" />
                 {String(order.deadline)}
+              </p>
+            </div>
+            {Boolean(raw?.scheduledAt) && (
+              <div>
+                <p className="mini-label mb-2">Execução agendada</p>
+                {scope?.role !== 'cliente' && (
+                  <Link
+                    className="text-link text-xs"
+                    href={`${base}/agenda?date=${new Intl.DateTimeFormat('en-CA', { timeZone: 'America/Fortaleza', year: 'numeric', month: '2-digit', day: '2-digit' }).format(new Date(String(raw?.scheduledAt)))}`}
+                  >
+                    Ver na agenda →
+                  </Link>
+                )}
+                <p className="text-xs">
+                  {new Date(String(raw?.scheduledAt)).toLocaleString('pt-BR', {
+                    timeZone: 'America/Fortaleza',
+                  })}
+                </p>
+              </div>
+            )}
+            <div>
+              <p className="mini-label mb-2">Aberto por</p>
+              <p className="text-xs">
+                {String(
+                  (raw?.owner as { name?: string } | undefined)?.name ||
+                    raw?.ownerName ||
+                    'Não informado',
+                )}
               </p>
             </div>
             {scope?.role !== 'analista' && !raw?.processInstanceId && (

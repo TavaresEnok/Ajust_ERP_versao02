@@ -1,27 +1,47 @@
 'use client';
-import { useState, type ComponentProps } from 'react';
+import { useRef, useState, type ComponentProps } from 'react';
+import { Sparkles, Undo2 } from 'lucide-react';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
 import { orderTypes, priorities } from '@/lib/erp/contracts';
 import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
-import { Button } from '@/components/ui/button';
-import {
-  Dialog,
-  DialogContent,
-  DialogHeader,
-  DialogTitle,
-  DialogDescription,
-} from '@/components/ui/dialog';
 import { ContractForm, QueryState } from './contract-form';
+
+type CatalogService = Record<string, unknown> & { id: string; name: string };
+type Draft = Record<string, unknown>;
+
+/** Campos que um serviço do catálogo preenche no rascunho. */
+function serviceValues(service: CatalogService | undefined): Draft {
+  if (!service) return {};
+  return {
+    title: service.name,
+    ...(typeof service.description === 'string' ? { description: service.description } : {}),
+    ...(typeof service.category === 'string' && service.category in orderTypes
+      ? { type: service.category }
+      : {}),
+    ...(typeof service.defaultPriority === 'string' && service.defaultPriority in priorities
+      ? { priority: service.defaultPriority }
+      : {}),
+  };
+}
+
+const isBlank = (value: unknown) =>
+  value === undefined || value === null || String(value).trim() === '';
+const same = (a: unknown, b: unknown) => String(a ?? '').trim() === String(b ?? '').trim();
 
 export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
   const { scope } = useErp();
   const allowed = !scope || ['super_admin', 'gerente', 'analista', 'cliente'].includes(scope.role);
   const catalog = useErpQuery<unknown>(allowed ? '/service-catalog?activeOnly=true' : null);
+  const wrapper = useRef<HTMLDivElement>(null);
   const [selected, setSelected] = useState('');
-  const [pendingSelection, setPendingSelection] = useState<string | null>(null);
+  // Valores atuais do rascunho; null enquanto nenhum serviço foi escolhido.
+  const [draft, setDraft] = useState<Draft | null>(null);
+  const [formKey, setFormKey] = useState(0);
+  const [kept, setKept] = useState<string[]>([]);
+  const [undo, setUndo] = useState<{ selected: string; draft: Draft | null } | null>(null);
   const services = Array.isArray(catalog.data)
     ? catalog.data.filter(
-        (row): row is Record<string, unknown> & { id: string; name: string } =>
+        (row): row is CatalogService =>
           !!row &&
           typeof row === 'object' &&
           typeof row.id === 'string' &&
@@ -29,47 +49,106 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
       )
     : [];
   const service = services.find((row) => row.id === selected);
-  const values = {
-    ...props.values,
-    ...(service
-      ? {
-          title: service.name,
-          description: typeof service.description === 'string' ? service.description : undefined,
-          ...(typeof service.category === 'string' && service.category in orderTypes
-            ? { type: service.category }
-            : {}),
-          ...(typeof service.defaultPriority === 'string' && service.defaultPriority in priorities
-            ? { priority: service.defaultPriority }
-            : {}),
-        }
-      : {}),
-  };
+  const values = draft ?? props.values;
+
+  /** Lê o que está digitado agora no formulário, sem perder nada. */
+  function currentDraft(): Draft {
+    const form = wrapper.current?.querySelector('form');
+    const base: Draft = { ...(values || {}) };
+    if (!form) return base;
+    const data = new FormData(form);
+    for (const field of props.fields) {
+      if (field.type === 'password') continue;
+      if (field.type === 'checkbox') base[field.name] = data.has(field.name);
+      else if (data.has(field.name)) base[field.name] = data.get(field.name);
+    }
+    return base;
+  }
+
+  function choose(nextId: string) {
+    if (nextId === selected) return;
+    const current = currentDraft();
+    const previous = serviceValues(service);
+    const next = serviceValues(services.find((row) => row.id === nextId));
+    const merged: Draft = { ...current };
+    const preserved: string[] = [];
+    // Campos do serviço anterior que o usuário não alterou voltam ao valor inicial.
+    for (const [name, value] of Object.entries(previous)) {
+      if (same(current[name], value)) merged[name] = props.values?.[name];
+    }
+    // O novo serviço só preenche o que está vazio ou ainda veio do catálogo.
+    for (const [name, value] of Object.entries(next)) {
+      const typed = current[name];
+      if (isBlank(typed) || same(typed, previous[name]) || same(typed, value)) merged[name] = value;
+      else preserved.push(name);
+    }
+    setUndo({ selected, draft: current });
+    setKept(preserved);
+    setDraft(merged);
+    setSelected(nextId);
+    setFormKey((key) => key + 1);
+  }
+
+  function revert() {
+    if (!undo) return;
+    setSelected(undo.selected);
+    setDraft(undo.draft);
+    setKept([]);
+    setUndo(null);
+    setFormKey((key) => key + 1);
+  }
+
+  const keptLabels = kept
+    .map((name) => props.fields.find((field) => field.name === name)?.label || name)
+    .join(', ');
+
   return (
-    <div className="flex flex-col gap-5">
+    <div ref={wrapper} className="flex flex-col gap-5">
       {allowed && (
         <Field>
-          <FieldLabel htmlFor="order-catalog">Começar pelo catálogo de serviços</FieldLabel>
+          <FieldLabel htmlFor="order-catalog">Serviço do catálogo (opcional)</FieldLabel>
           <select
             id="order-catalog"
             className="native-select w-full"
             value={selected}
             disabled={!catalog.connected || catalog.isLoading}
-            onChange={(event) => {
-              if (selected !== event.target.value) setPendingSelection(event.target.value);
-            }}
+            onChange={(event) => choose(event.target.value)}
           >
-            <option value="">Preenchimento manual</option>
+            <option value="">Sem serviço · preencher manualmente</option>
             {services.map((row) => (
               <option key={row.id} value={row.id}>
                 {row.name}
               </option>
             ))}
           </select>
-          <FieldDescription>
-            {catalog.connected
-              ? 'Escolha um serviço para preencher os dados iniciais ou descreva o atendimento manualmente.'
-              : 'Os serviços da empresa aparecerão após conectar o ERP. O preenchimento manual permanece disponível.'}
-          </FieldDescription>
+          {undo ? (
+            <p
+              role="status"
+              className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground"
+            >
+              <Sparkles className="size-3.5 text-primary" aria-hidden />
+              <span>
+                {service
+                  ? `Sugestões de “${service.name}” aplicadas.`
+                  : 'Sugestões do catálogo removidas.'}
+                {keptLabels && ` Mantivemos o que você digitou em ${keptLabels}.`}
+              </span>
+              <button
+                type="button"
+                className="inline-flex items-center gap-1 font-medium text-primary hover:underline"
+                onClick={revert}
+              >
+                <Undo2 className="size-3" aria-hidden />
+                Desfazer
+              </button>
+            </p>
+          ) : (
+            <FieldDescription>
+              {catalog.connected
+                ? 'Escolher um serviço sugere título, tipo e prioridade. Você pode editar tudo depois.'
+                : 'Os serviços aparecerão após conectar o ERP. O preenchimento manual continua disponível.'}
+            </FieldDescription>
+          )}
         </Field>
       )}
       <QueryState
@@ -77,31 +156,29 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
         error={catalog.error}
         onRetry={() => void catalog.mutate()}
       />
-      {service && (
-        <div className="rounded-lg border border-border p-4">
-          <p className="text-xs text-muted-foreground">
-            Tempo estimado de trabalho:{' '}
-            {typeof service.estimatedMinutes === 'number'
-              ? `${service.estimatedMinutes} min`
-              : 'não informada'}
-          </p>
-          {Array.isArray(service.checklist) && (
-            <>
-              <h3 className="section-title mt-3 mb-2">Checklist de referência</h3>
-              <ul className="flex flex-col gap-1 text-xs">
+      {service &&
+        (typeof service.estimatedMinutes === 'number' ||
+          (Array.isArray(service.checklist) && service.checklist.length > 0)) && (
+          <details className="rounded-lg border border-border px-4 py-3 text-xs">
+            <summary className="cursor-pointer text-muted-foreground">
+              Referência do serviço
+              {typeof service.estimatedMinutes === 'number' &&
+                ` · tempo estimado ${service.estimatedMinutes} min`}
+            </summary>
+            {Array.isArray(service.checklist) && (
+              <ul className="mt-2 flex list-disc flex-col gap-1 pl-4">
                 {service.checklist
                   .filter((item): item is string => typeof item === 'string')
                   .map((item, index) => (
                     <li key={index}>{item}</li>
                   ))}
               </ul>
-            </>
-          )}
-        </div>
-      )}
+            )}
+          </details>
+        )}
       <ContractForm
         {...props}
-        key={selected || 'manual'}
+        key={formKey}
         values={values}
         onSubmit={(data) =>
           props.onSubmit({
@@ -112,34 +189,6 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
           })
         }
       />
-      <Dialog
-        open={pendingSelection !== null}
-        onOpenChange={(open) => !open && setPendingSelection(null)}
-      >
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Aplicar serviço ao rascunho?</DialogTitle>
-            <DialogDescription>
-              Trocar o serviço reinicia os campos deste rascunho com os valores do catálogo. Nada
-              será enviado ao ERP nesta etapa.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="flex justify-end gap-3">
-            <Button type="button" variant="outline" onClick={() => setPendingSelection(null)}>
-              Manter preenchimento
-            </Button>
-            <Button
-              type="button"
-              onClick={() => {
-                setSelected(pendingSelection || '');
-                setPendingSelection(null);
-              }}
-            >
-              Reiniciar com este serviço
-            </Button>
-          </div>
-        </DialogContent>
-      </Dialog>
     </div>
   );
 }

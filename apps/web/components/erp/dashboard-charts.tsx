@@ -3,13 +3,17 @@ import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Pie, PieChart, Cell } fro
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
 import { buildAnalystOverview, ANALYST_TIMEZONE } from '@/lib/erp/analyst-workspace';
-import { orderStatuses } from '@/lib/erp/contracts';
-export function useStatusData() {
+import { orderStatuses, type ErpRecord } from '@/lib/erp/contracts';
+import { isDemonstration } from '@/lib/erp/management';
+export function useStatusData(rows?: ErpRecord[]) {
   const query = useOperationalOrders('operation');
   return Object.entries(orderStatuses)
     .map(([status, name], index) => ({
       name,
-      value: (query.data || []).filter((row) => row.status === status).length,
+      status,
+      value: (rows || query.data || []).filter(
+        (row) => !isDemonstration(row) && row.status === status,
+      ).length,
       color: `var(--chart-${(index % 5) + 1})`,
     }))
     .filter((row) => row.value > 0);
@@ -17,12 +21,16 @@ export function useStatusData() {
 export function VolumeChart({
   period = 'month',
   tenantId,
+  rows: suppliedRows,
 }: {
   period?: string;
   tenantId?: string;
+  rows?: ErpRecord[];
 }) {
   const query = useOperationalOrders('operation');
-  const rows = (query.data || []).filter((row) => !tenantId || row.tenantId === tenantId);
+  const rows = (suppliedRows || query.data || []).filter(
+    (row) => !isDemonstration(row) && (!tenantId || row.tenantId === tenantId),
+  );
   const data = buildAnalystOverview(
     rows,
     period === 'week' ? 7 : period === 'quarter' ? 90 : 30,
@@ -90,8 +98,14 @@ export function VolumeChart({
     </ChartContainer>
   );
 }
-export function StatusChart() {
-  const statusData = useStatusData();
+export function StatusChart({
+  rows,
+  caption = 'ordens consultadas',
+}: {
+  rows?: ErpRecord[];
+  caption?: string;
+}) {
+  const statusData = useStatusData(rows);
   const total = statusData.reduce((sum, row) => sum + row.value, 0);
   return (
     <div className="relative mx-auto w-[190px]">
@@ -120,8 +134,8 @@ export function StatusChart() {
         </PieChart>
       </ChartContainer>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
-        <strong className="text-[29px] font-semibold tracking-tight">{total || '—'}</strong>
-        <span className="text-[10px] text-muted-foreground">ordens consultadas</span>
+        <strong className="text-[29px] font-semibold tracking-tight">{total}</strong>
+        <span className="text-[10px] text-muted-foreground">{caption}</span>
       </div>
     </div>
   );

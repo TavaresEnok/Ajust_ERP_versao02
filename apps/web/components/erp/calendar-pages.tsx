@@ -3,13 +3,13 @@ import { useRouteBase } from '@/lib/erp/visual-data';
 import { OrderForm } from './order-form';
 import { OccurrenceAttendance } from './occurrence-attendance';
 import { ScheduleWorkspace } from './schedule-workspace';
-import { OperationControl } from './operation-controls';
-import { useErp } from '@/lib/erp/gateway';
+import { RosterCoverage } from './team-roster';
+import { useErp, useErpQuery } from '@/lib/erp/gateway';
 import { queryPath } from '@/lib/erp/contracts';
-import { modules } from '@/lib/erp/modules';
 import { useVisualSource } from '@/lib/erp/visual-data';
 import { QueryState } from './contract-form';
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import {
   CalendarDays,
@@ -24,172 +24,186 @@ import {
 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { PageHeading, PanelHeading, StatusBadge, Avatar, Metric } from './primitives';
-import { RecordDialog } from './record-dialog';
+import { AgendaEventDialog } from './agenda-event-dialog';
+import { agendaDay, agendaTime, agendaEventOnDay } from '@/lib/erp/agenda';
+import type { ErpRecord } from '@/lib/erp/contracts';
 import { cn } from '@/lib/utils';
 import { OrdersTable } from './orders';
 import { useOrders, useDemoCollection } from '@/lib/demo-store';
-const initialEvents = [
-  {
-    id: 1,
-    name: 'Alinhamento da operação',
-    date: '2026-10-16',
-    time: '10:00',
-    end: '10:30',
-    type: 'Reunião de equipe',
-  },
-  {
-    id: 2,
-    name: 'Manutenção programada',
-    date: '2026-10-16',
-    time: '14:00',
-    end: '15:00',
-    type: 'Conecta Telecom',
-  },
-  {
-    id: 3,
-    name: 'Revisão de indicadores',
-    date: '2026-10-16',
-    time: '16:30',
-    end: '17:00',
-    type: 'Gestão e performance',
-  },
-  {
-    id: 4,
-    name: 'Instalação empresarial',
-    date: '2026-10-19',
-    time: '09:00',
-    end: '11:00',
-    type: 'Veloz Fibra',
-  },
-  {
-    id: 5,
-    name: 'Treinamento BGP',
-    date: '2026-10-21',
-    time: '14:00',
-    end: '16:00',
-    type: 'Capacitação',
-  },
-  {
-    id: 6,
-    name: 'Revisão dos SLAs',
-    date: '2026-10-23',
-    time: '10:00',
-    end: '11:00',
-    type: 'Gestão',
-  },
-];
+const eventTypes: Record<string, string> = {
+  LEMBRETE: 'Lembrete',
+  REUNIAO: 'Reunião',
+  REUNIAO_ONLINE: 'Reunião online',
+  PLANTAO: 'Plantão',
+  FERIADO: 'Feriado',
+  OUTRO: 'Outro compromisso',
+};
 export function CalendarPage() {
   const portalBase = useRouteBase();
   const { scope } = useErp();
-  const [month, setMonth] = useState(() => new Date().getMonth());
-  const [year, setYear] = useState(() => new Date().getFullYear());
-  const [view, setView] = useState(() =>
-    ['super_admin', 'gerente'].includes(scope?.role || '') ? 'Equipe' : 'Mês',
+  const params = useSearchParams();
+  const today = agendaDay(new Date());
+  const requestedDate = params.get('date') || '';
+  const [day, setDay] = useState(
+    /^\d{4}-\d{2}-\d{2}$/.test(requestedDate) &&
+      Number.isFinite(new Date(`${requestedDate}T12:00:00-03:00`).getTime())
+      ? requestedDate
+      : today,
   );
-  const [selected, setSelected] = useState(() => new Date().getDate());
-  const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
-  const appointmentFields = manager
-    ? undefined
-    : modules.calendar.fields
-        .filter((field) =>
-          [
-            'title',
-            'description',
-            'type',
-            'startAt',
-            'endAt',
-            'allDay',
-            'assigneeId',
-            'meetingLink',
-            'location',
-            'serviceOrderId',
-          ].includes(field.name),
-        )
-        .map((field) => ({
-          ...field,
-          label:
-            (
-              { assigneeId: 'Responsável', serviceOrderId: 'Ordem de serviço vinculada' } as Record<
-                string,
-                string
-              >
-            )[field.name] || field.label,
-        }));
+  const year = Number(day.slice(0, 4)),
+    month = Number(day.slice(5, 7)) - 1;
+  const selected = Number(day.slice(8, 10));
+  const manager = !!scope && ['super_admin', 'gerente'].includes(scope.role);
+  const [view, setView] = useState(manager ? 'Equipe' : 'Lista');
+  const [agendaScope, setAgendaScope] = useState(manager ? 'team' : 'mine');
+  const [search, setSearch] = useState('');
+  const [kind, setKind] = useState('all');
+  const [assignee, setAssignee] = useState('');
+  const [showPast, setShowPast] = useState(false);
+  const [newAppointment, setNewAppointment] = useState(false);
+  const [detail, setDetail] = useState<string | null>(null);
   const endpoint = queryPath(
-    view === 'Equipe' && manager ? '/calendar/events/all' : '/calendar/events',
+    manager && agendaScope === 'team' ? '/calendar/events/all' : '/calendar/events',
     {
-      from: new Date(year, month, 1).toISOString(),
-      to: new Date(year, month + 1, 1).toISOString(),
+      from: `${year}-${String(month + 1).padStart(2, '0')}-01T03:00:00.000Z`,
+      to: new Date(Date.UTC(year, month + 1, 1, 3)).toISOString(),
+      assigneeId: manager && agendaScope === 'team' ? assignee || undefined : undefined,
     },
   );
-  const [events, setEvents] = useDemoCollection('events', initialEvents, endpoint);
   const source = useVisualSource('events', endpoint);
-  const [detail, setDetail] = useState<(typeof initialEvents)[number] | null>(null);
-  const detailRecord = source.raw.find((row) => row.id === String(detail?.id));
-  const canEditDetail =
-    manager ||
-    (!!detailRecord && !detailRecord.isGlobal && detailRecord.createdById === scope?.userId);
-  const monthName = new Date(year, month).toLocaleDateString('pt-BR', {
-    month: 'long',
-    year: 'numeric',
-  });
+  const users = useErpQuery<{ id: string; name: string }[]>(manager ? '/calendar/users' : null);
+  const refresh = source.mutate;
+  useEffect(() => {
+    const timer = setInterval(() => void refresh(), 60000);
+    return () => clearInterval(timer);
+  }, [refresh]);
+  const normalize = (value: string) =>
+    value
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLocaleLowerCase('pt-BR');
+  const events = source.raw.filter(
+    (event) =>
+      (kind === 'all' ||
+        (kind === 'orders'
+          ? !!event.serviceOrderId
+          : kind === 'global'
+            ? !!event.isGlobal
+            : !event.isGlobal && !event.serviceOrderId)) &&
+      normalize(
+        `${event.title || ''} ${event.description || ''} ${event.location || ''} ${(event.assignee as { name?: string } | undefined)?.name || ''} ${(event.createdBy as { name?: string } | undefined)?.name || ''}`,
+      ).includes(normalize(search.trim())),
+  );
   const count = new Date(year, month + 1, 0).getDate();
   const start = new Date(year, month, 1).getDay();
-  const dateKey = (day: number) =>
-    year + '-' + String(month + 1).padStart(2, '0') + '-' + String(day).padStart(2, '0');
-  const selectedEvents = events.filter((e) => e.date === dateKey(selected));
+  const dateKey = (number: number) =>
+    `${year}-${String(month + 1).padStart(2, '0')}-${String(number).padStart(2, '0')}`;
+  const onDay = (event: ErpRecord, target: string) =>
+    agendaEventOnDay(
+      { startAt: String(event.startAt), endAt: event.endAt ? String(event.endAt) : null },
+      target,
+    );
+  const selectedEvents = events.filter((event) => onDay(event, day));
+  const listed =
+    view === 'Dia'
+      ? selectedEvents
+      : events.filter(
+          (event) =>
+            showPast ||
+            dateKey(count) < today ||
+            (event.endAt
+              ? agendaDay(new Date(new Date(String(event.endAt)).getTime() - 1))
+              : agendaDay(String(event.startAt))) >= today,
+        );
+  const detailRecord = source.raw.find((event) => event.id === detail);
+  function selectDay(value: string) {
+    if (
+      !/^\d{4}-\d{2}-\d{2}$/.test(value) ||
+      !Number.isFinite(new Date(`${value}T12:00:00-03:00`).getTime())
+    )
+      return;
+    setDay(value);
+    const next = new URLSearchParams(window.location.search);
+    next.set('date', value);
+    window.history.replaceState(null, '', `${portalBase}/agenda?${next}`);
+  }
   function move(diff: number) {
-    const d = new Date(year, month + diff, 1);
-    setMonth(d.getMonth());
-    setYear(d.getFullYear());
-    setSelected(1);
+    const target = new Date(Date.UTC(year, month + diff, 1, 12));
+    selectDay(target.toISOString().slice(0, 10));
+  }
+  async function appointmentSaved(record?: ErpRecord) {
+    await source.mutate();
+    if (record?.startAt) {
+      const target = agendaDay(String(record.startAt));
+      selectDay(target);
+      setSearch('');
+      setKind('all');
+      if (target < today) setShowPast(true);
+      if (assignee && record.assigneeId !== assignee) setAssignee('');
+      if (view === 'Conflitos') setView('Dia');
+    }
+  }
+  const timeLabel = (event: ErpRecord) =>
+    event.allDay
+      ? 'Dia inteiro'
+      : `${agendaTime(String(event.startAt))}${event.endAt ? ` – ${agendaDay(String(event.endAt)) !== agendaDay(String(event.startAt)) ? agendaDay(String(event.endAt)).split('-').reverse().join('/') + ' ' : ''}${agendaTime(String(event.endAt))}` : ''}`;
+  const personLabel = (event: ErpRecord) =>
+    String(
+      (event.assignee as { name?: string } | undefined)?.name ||
+        (event.createdBy as { name?: string } | undefined)?.name ||
+        '',
+    );
+  function eventButton(event: ErpRecord) {
+    return (
+      <button
+        key={event.id}
+        className="flex w-full flex-wrap items-start gap-3 border-b border-border py-4 text-left"
+        onClick={() => setDetail(event.id)}
+      >
+        <CalendarDays className="mt-1 size-4 shrink-0 text-primary" />
+        <span className="min-w-0 flex-1 space-y-1">
+          <span className="block text-xs text-muted-foreground">
+            {agendaDay(String(event.startAt)).split('-').reverse().join('/')} · {timeLabel(event)}
+          </span>
+          <span className="block break-words text-sm font-medium">{String(event.title)}</span>
+          <span className="block text-xs text-muted-foreground">
+            {eventTypes[String(event.type)] || String(event.type)}
+            {personLabel(event) ? ` · ${personLabel(event)}` : ''}
+          </span>
+        </span>
+        {Boolean(event.serviceOrderId) && (
+          <span className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary">
+            O.S. vinculada
+          </span>
+        )}
+        {Boolean(event.isGlobal) && (
+          <span className="rounded bg-secondary px-2 py-1 text-[10px]">Toda a equipe</span>
+        )}
+        <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
+      </button>
+    );
   }
   return (
     <>
       <PageHeading
         title="Agenda"
-        description="Clareza para o seu dia. Organização para toda a equipe."
+        description="Compromissos e execuções de O.S. Horários de Fortaleza."
       >
-        <RecordDialog
-          title="Novo compromisso"
-          contractFields={appointmentFields}
-          fields={[
-            { name: 'name', label: 'Título do compromisso' },
-            { name: 'date', label: 'Data', type: 'date', value: '2026-10-16' },
-            {
-              name: 'time',
-              label: 'Horário de início',
-              type: 'time',
-              value: '09:00',
-            },
-            {
-              name: 'end',
-              label: 'Horário de término',
-              type: 'time',
-              value: '10:00',
-            },
-            { name: 'type', label: 'Equipe ou provedor' },
-          ]}
-          onSave={(v) =>
-            setEvents((e) => [
-              ...e,
-              {
-                id: Date.now(),
-                name: v.name,
-                date: v.date,
-                time: v.time,
-                end: v.end,
-                type: v.type,
-              },
-            ])
-          }
-        />
+        <Button onClick={() => setNewAppointment(true)}>Novo compromisso</Button>
+        <Link className="text-link" href={`${portalBase}/ordens`}>
+          Escolher O.S. para agendar →
+        </Link>
       </PageHeading>
-      <div className="grid gap-5 xl:grid-cols-[1fr_260px]">
+      <div className="grid gap-5 xl:grid-cols-[1fr_280px]">
         <section className="panel min-w-0">
-          <div className="panel-head">
-            <div className="flex items-center gap-3">
-              <h2 className="section-title capitalize">{monthName}</h2>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-5">
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="section-title capitalize">
+                {new Date(year, month, 1).toLocaleDateString('pt-BR', {
+                  month: 'long',
+                  year: 'numeric',
+                })}
+              </h2>
               <Button
                 variant="ghost"
                 size="icon-sm"
@@ -207,178 +221,222 @@ export function CalendarPage() {
                 <ChevronRight />
               </Button>
             </div>
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const today = new Date();
-                  setMonth(today.getMonth());
-                  setYear(today.getFullYear());
-                  setSelected(today.getDate());
-                }}
-              >
+            <div className="flex flex-wrap gap-2">
+              <Button variant="outline" onClick={() => selectDay(today)}>
                 Hoje
               </Button>
               <select
                 className="native-select"
                 aria-label="Visualização da agenda"
                 value={view}
-                onChange={(e) => setView(e.target.value)}
+                onChange={(event) => {
+                  setView(event.target.value);
+                  if (event.target.value === 'Equipe') setAgendaScope('team');
+                }}
               >
                 <option>Mês</option>
                 <option>Lista</option>
+                <option>Dia</option>
                 {manager && <option>Equipe</option>}
-                <option>Conflitos</option>
+                {manager && <option>Conflitos</option>}
               </select>
             </div>
+          </div>
+          <div className="flex flex-wrap gap-3 border-b border-border p-5">
+            <input
+              className="native-select min-w-0 flex-1"
+              type="search"
+              aria-label="Buscar compromissos"
+              placeholder="Compromisso, descrição ou responsável"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+            />
+            <select
+              className="native-select"
+              aria-label="Filtrar compromissos"
+              value={kind}
+              onChange={(event) => setKind(event.target.value)}
+            >
+              <option value="all">Todos os compromissos</option>
+              <option value="orders">O.S. vinculadas</option>
+              <option value="personal">Compromissos pessoais</option>
+              <option value="global">Toda a equipe</option>
+            </select>
+            {manager && (
+              <select
+                className="native-select"
+                aria-label="Escopo da agenda"
+                value={agendaScope}
+                onChange={(event) => setAgendaScope(event.target.value)}
+              >
+                <option value="mine">Minha agenda</option>
+                <option value="team">Agenda da equipe</option>
+              </select>
+            )}
+            {manager && agendaScope === 'team' && (
+              <select
+                className="native-select"
+                aria-label="Filtrar responsável da agenda"
+                value={assignee}
+                onChange={(event) => setAssignee(event.target.value)}
+              >
+                <option value="">Toda a equipe</option>
+                {users.data?.map((user) => (
+                  <option key={user.id} value={user.id}>
+                    {user.name}
+                  </option>
+                ))}
+              </select>
+            )}
           </div>
           <QueryState
             loading={source.isLoading}
             error={source.error}
             onRetry={() => void source.mutate()}
           />
-          {view === 'Conflitos' ? (
-            <ScheduleWorkspace initialTab="conflicts" />
-          ) : view === 'Mês' ? (
-            <div className="overflow-auto">
-              <div className="calendar-grid border-t border-border">
-                {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((d) => (
-                  <div
-                    className="border-b border-border py-3 text-center text-[10px] text-muted-foreground"
-                    key={d}
-                  >
-                    {d}
-                  </div>
-                ))}
-                {Array.from({ length: Math.ceil((count + start) / 7) * 7 }, (_, i) => {
-                  const d = i - start + 1;
-                  const valid = d > 0 && d <= count;
-                  return (
+          {!source.isLoading &&
+            !source.error &&
+            (view === 'Conflitos' ? (
+              <ScheduleWorkspace initialTab="conflicts" />
+            ) : view === 'Mês' ? (
+              <div className="overflow-x-auto">
+                <div className="calendar-grid border-t border-border">
+                  {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((label) => (
                     <div
-                      key={i}
-                      className={cn(
-                        'calendar-cell',
-                        !valid && 'bg-muted/40',
-                        valid && d === selected && 'bg-secondary/35',
-                      )}
+                      className="border-b border-border py-3 text-center text-[10px] text-muted-foreground"
+                      key={label}
                     >
-                      <button
-                        onClick={() => setSelected(d)}
-                        disabled={!valid}
-                        className={cn(
-                          'flex size-6 items-center justify-center rounded-full text-[11px]',
-                          d === new Date().getDate() &&
-                            month === new Date().getMonth() &&
-                            year === new Date().getFullYear()
-                            ? 'bg-primary text-primary-foreground'
-                            : 'text-muted-foreground',
-                        )}
-                        aria-label={valid ? 'Selecionar dia ' + d : 'Fora do mês'}
-                      >
-                        {valid ? d : ''}
-                      </button>
-                      {valid &&
-                        events
-                          .filter((e) => e.date === dateKey(d))
-                          .map((e) => (
-                            <button
-                              key={e.id}
-                              className="calendar-event block w-full text-left"
-                              onClick={() => {
-                                setSelected(d);
-                                setDetail(e);
-                              }}
-                            >
-                              <span className="block opacity-70">{e.time}</span>
-                              <span className="line-clamp-2">{e.name}</span>
-                            </button>
-                          ))}
+                      {label}
                     </div>
-                  );
-                })}
+                  ))}
+                  {Array.from({ length: Math.ceil((count + start) / 7) * 7 }, (_, index) => {
+                    const number = index - start + 1,
+                      valid = number > 0 && number <= count;
+                    const dayEvents = valid
+                      ? events.filter((event) => onDay(event, dateKey(number)))
+                      : [];
+                    return (
+                      <div
+                        key={index}
+                        className={cn(
+                          'calendar-cell',
+                          !valid && 'bg-muted/40',
+                          valid && number === selected && 'bg-secondary/35',
+                        )}
+                      >
+                        <button
+                          disabled={!valid}
+                          aria-pressed={valid && number === selected}
+                          aria-label={valid ? `Selecionar dia ${number}` : 'Fora do mês'}
+                          className={cn(
+                            'flex size-6 items-center justify-center rounded-full text-[11px]',
+                            valid && dateKey(number) === today
+                              ? 'bg-primary text-primary-foreground'
+                              : 'text-muted-foreground',
+                          )}
+                          onClick={() => selectDay(dateKey(number))}
+                        >
+                          {valid ? number : ''}
+                        </button>
+                        {dayEvents.slice(0, 3).map((event) => (
+                          <button
+                            key={event.id}
+                            className="calendar-event block w-full text-left"
+                            onClick={() => {
+                              selectDay(dateKey(number));
+                              setDetail(event.id);
+                            }}
+                          >
+                            <span className="block opacity-70">
+                              {event.allDay ? 'Dia inteiro' : agendaTime(String(event.startAt))}
+                            </span>
+                            <span className="line-clamp-2">{String(event.title)}</span>
+                          </button>
+                        ))}
+                        {dayEvents.length > 3 && (
+                          <button
+                            className="text-link text-xs"
+                            onClick={() => {
+                              selectDay(dateKey(number));
+                              setView('Dia');
+                            }}
+                          >
+                            Mais {dayEvents.length - 3} compromissos
+                          </button>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
               </div>
-            </div>
-          ) : (
-            <div className="px-6 pb-6">
-              {events
-                .filter((e) => e.date.startsWith(year + '-' + String(month + 1).padStart(2, '0')))
-                .sort((a, b) => a.date.localeCompare(b.date) || a.time.localeCompare(b.time))
-                .map((e) => (
-                  <button
-                    key={e.id}
-                    className="flex w-full items-center gap-5 border-b border-border py-4 text-left"
-                    onClick={() => setDetail(e)}
-                  >
-                    <CalendarDays className="size-4 text-primary" />
-                    <span className="text-xs text-muted-foreground">
-                      {e.date.split('-').reverse().join('/')} · {e.time}
-                    </span>
-                    <span className="text-xs font-medium">{e.name}</span>
-                    <ChevronRight className="ml-auto size-4 text-muted-foreground" />
-                  </button>
-                ))}
-            </div>
-          )}
-        </section>
-        <section className="panel h-fit">
-          <PanelHeading title={'Dia ' + selected} description="Compromissos programados" />
-          <div className="flex flex-col gap-4 px-5 pb-5">
-            {selectedEvents.length ? (
-              selectedEvents.map((e) => (
-                <button
-                  key={e.id}
-                  onClick={() => setDetail(e)}
-                  className="rounded-lg border-l-2 border-primary bg-secondary/45 p-3 text-left"
-                >
-                  <p className="text-[10px] text-primary">
-                    {e.time} – {e.end}
-                  </p>
-                  <h3 className="mt-2 text-xs font-medium">{e.name}</h3>
-                  <p className="mt-2 text-[10px] text-muted-foreground">{e.type}</p>
-                </button>
-              ))
             ) : (
-              <p className="py-8 text-center text-xs text-muted-foreground">
-                Seu dia está livre de compromissos.
-              </p>
-            )}
+              <div className="px-5 pb-5">
+                {view !== 'Dia' && (
+                  <label className="my-4 flex items-center gap-2 text-xs text-muted-foreground">
+                    <input
+                      type="checkbox"
+                      checked={showPast}
+                      onChange={(event) => setShowPast(event.target.checked)}
+                    />
+                    Mostrar compromissos anteriores deste mês
+                  </label>
+                )}
+                <p className="my-3 text-xs text-muted-foreground">
+                  {listed.length} compromissos
+                  {view === 'Dia' ? ` em ${day.split('-').reverse().join('/')}` : ' neste período'}
+                </p>
+                {listed.length ? (
+                  listed.map(eventButton)
+                ) : (
+                  <p role="status" className="py-8 text-sm text-muted-foreground">
+                    Nenhum compromisso encontrado neste período.
+                  </p>
+                )}
+              </div>
+            ))}
+        </section>
+        <section className="panel h-fit min-w-0">
+          <PanelHeading
+            title={`Dia ${selected}`}
+            description={day.split('-').reverse().join('/')}
+          />
+          <div className="space-y-4 px-5 pb-5">
+            <label className="block text-xs text-muted-foreground">
+              Ir para a data
+              <input
+                className="native-select mt-2 w-full"
+                type="date"
+                aria-label="Ir para a data"
+                value={day}
+                onChange={(event) => selectDay(event.target.value)}
+              />
+            </label>
+            {!source.isLoading && !source.error && selectedEvents.map(eventButton)}
+            <p className="text-xs text-muted-foreground">
+              {source.isLoading
+                ? 'Carregando compromissos…'
+                : source.error
+                  ? 'Não foi possível consultar os compromissos.'
+                  : `${selectedEvents.length} compromissos nesta data.`}
+            </p>
+            <Button className="w-full" variant="outline" onClick={() => setNewAppointment(true)}>
+              Agendar neste dia
+            </Button>
           </div>
+          <RosterCoverage date={day} />
         </section>
       </div>
-      {detail && (
-        <RecordDialog
-          title="Detalhes do compromisso"
-          readOnly={!canEditDetail}
-          contractFields={appointmentFields}
-          moduleKey="calendar"
-          recordId={String(detail.id)}
-          record={detailRecord}
-          footer={
-            canEditDetail ? (
-              <OperationControl
-                title="Remover compromisso"
-                description="Confirme a remoção deste compromisso da agenda."
-                path={`/calendar/events/${encodeURIComponent(String(detail.id))}`}
-                method="DELETE"
-                after={async () => {
-                  await source.mutate();
-                  setDetail(null);
-                }}
-              />
-            ) : undefined
-          }
-          open={!!detail}
-          onOpenChange={(o) => !o && setDetail(null)}
-          fields={[
-            { name: 'name', label: 'Título', value: detail.name },
-            { name: 'date', label: 'Data', type: 'date', value: detail.date },
-            { name: 'time', label: 'Início', type: 'time', value: detail.time },
-            { name: 'end', label: 'Término', type: 'time', value: detail.end },
-            { name: 'type', label: 'Equipe ou provedor', value: detail.type },
-          ]}
-          onSave={(v) =>
-            setEvents((items) => items.map((e) => (e.id === detail.id ? { ...e, ...v } : e)))
-          }
+      {(newAppointment || detailRecord) && (
+        <AgendaEventDialog
+          key={detailRecord?.id || 'new'}
+          event={detailRecord}
+          date={day}
+          base={portalBase}
+          onClose={() => {
+            setNewAppointment(false);
+            setDetail(null);
+          }}
+          onSaved={appointmentSaved}
         />
       )}
     </>

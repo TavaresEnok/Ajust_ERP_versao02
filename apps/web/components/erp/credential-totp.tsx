@@ -1,4 +1,5 @@
 'use client';
+import { useVaultConfirmation } from './vault-confirmation';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { Copy, ShieldCheck } from 'lucide-react';
 import { useErp } from '@/lib/erp/gateway';
@@ -8,6 +9,7 @@ import { errorMessage } from '@/lib/erp/contracts';
 import { toast } from 'sonner';
 type Code = { code: string; validUntil: number; serverTime: number; period: number };
 export function CredentialTotp({ id, configured }: { id: string; configured: boolean }) {
+  const confirmation = useVaultConfirmation();
   const { transport } = useErp();
   const [pending, setPending] = useState(false);
   const [value, setValue] = useState<Code | null>(null),
@@ -18,14 +20,17 @@ export function CredentialTotp({ id, configured }: { id: string; configured: boo
     version.current++;
     setValue(null);
   }, []);
-  const load = useCallback(async () => {
+  const load = async () => {
     if (!transport) return;
+    const body = await confirmation.request();
+    if (!body) return;
     setPending(true);
     const generation = ++version.current;
     try {
       const response = await transport.request<Code>({
         path: `/knowledge/credentials/${id}/totp`,
         method: 'POST',
+        body,
       });
       if (generation !== version.current) return;
       offset.current = response.serverTime - Date.now();
@@ -39,7 +44,7 @@ export function CredentialTotp({ id, configured }: { id: string; configured: boo
     } finally {
       setPending(false);
     }
-  }, [transport, id]);
+  };
   useEffect(() => {
     if (!value) return;
     const tick = setInterval(
@@ -48,25 +53,27 @@ export function CredentialTotp({ id, configured }: { id: string; configured: boo
       1000,
     );
     const refresh = setTimeout(
-      () => void load(),
+      hide,
       Math.max(100, value.validUntil - Date.now() - offset.current + 100),
     );
     return () => {
       clearInterval(tick);
       clearTimeout(refresh);
     };
-  }, [value, load]);
+  }, [value, hide]);
   const active = !!value;
   useEffect(() => {
     if (!active) return;
     const timeout = setTimeout(hide, 120000);
-    const visibility=()=>{if(document.hidden)hide();};
+    const visibility = () => {
+      if (document.hidden) hide();
+    };
     window.addEventListener('blur', hide);
-    document.addEventListener('visibilitychange',visibility);
+    document.addEventListener('visibilitychange', visibility);
     return () => {
       clearTimeout(timeout);
       window.removeEventListener('blur', hide);
-      document.removeEventListener('visibilitychange',visibility);
+      document.removeEventListener('visibilitychange', visibility);
     };
   }, [active, hide]);
   useEffect(
@@ -77,12 +84,13 @@ export function CredentialTotp({ id, configured }: { id: string; configured: boo
   );
   return (
     <div className="border-t border-border pt-4">
+      {confirmation.dialog}
       <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
         <span className="flex items-center gap-1">
           <ShieldCheck className="size-3" />
           Token 2FA / TOTP {configured ? 'ativo' : ''}
         </span>
-        {value && <span className="font-mono text-primary">Renova em {seconds}s</span>}
+        {value && <span className="font-mono text-primary">Expira em {seconds}s</span>}
       </div>
       {configured ? (
         <div className="flex gap-2">

@@ -141,8 +141,13 @@ export function ReportsWorkspace() {
             ]}
             metrics={[
               { key: 'overview.totalOpen', label: 'Abertas' },
-              { key: 'overview.totalClosed', label: 'Resolvidas / fechadas' },
-              { key: 'overview.slaBreaches', label: 'Violações de SLA' },
+              { key: 'overview.totalClosed', label: 'Resolvidas + fechadas' },
+              {
+                key: 'overview.resolvedAwaitingClosure',
+                label: 'Resolvidas aguardando fechamento',
+              },
+              { key: 'overview.slaBreaches', label: 'Vencidas em aberto' },
+              { key: 'overview.closedLate', label: 'Fechadas fora do prazo' },
             ]}
             charts={[
               {
@@ -164,7 +169,8 @@ export function ReportsWorkspace() {
                   { key: 'open', label: 'Abertas' },
                   { key: 'closed', label: 'Encerradas' },
                   { key: 'slaBreaches', label: 'Violações' },
-                  { key: 'tmrHours', label: 'Resolução média (h)' },
+                  { key: 'tmrHours', label: 'Resolução média (h corridas)' },
+                  { key: 'closedLate', label: 'Fora do prazo' },
                 ],
               },
             ]}

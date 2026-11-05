@@ -1,5 +1,6 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useVaultConfirmation, type VaultConfirmation } from './vault-confirmation';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { toast } from 'sonner';
 import { ShieldCheck } from 'lucide-react';
 import { Button } from '@/components/ui/button';
@@ -29,20 +30,24 @@ export function SecretReveal({
   initialValue?: string;
   onDismiss?: () => void;
 }) {
+  const confirmation = useVaultConfirmation();
   const { scope } = useErp();
   const action = useErpAction();
   const [open, setOpen] = useState(Boolean(initialValue));
   const [secret, setSecret] = useState(initialValue || '');
   const requestVersion = useRef(0);
   const sessionKey = scope ? `${scope.sessionKey}:${scope.tenantId}:${scope.role}` : 'disconnected';
-  function dismiss() {
+  const dismiss = useCallback(() => {
     requestVersion.current++;
     setSecret('');
     setOpen(false);
     onDismiss?.();
-  }
+  }, [onDismiss]);
   useEffect(() => {
     if (!open) return;
+    const invalidate = () => {
+      requestVersion.current++;
+    };
     const timer = setTimeout(dismiss, 30000);
     const hide = () => {
       if (document.hidden) dismiss();
@@ -51,11 +56,11 @@ export function SecretReveal({
     document.addEventListener('visibilitychange', hide);
     return () => {
       clearTimeout(timer);
-      requestVersion.current++;
+      invalidate();
       window.removeEventListener('blur', dismiss);
       document.removeEventListener('visibilitychange', hide);
     };
-  }, [open, sessionKey]);
+  }, [open, sessionKey, dismiss]);
   useEffect(
     () => () => {
       requestVersion.current++;
@@ -63,11 +68,20 @@ export function SecretReveal({
     [],
   );
   async function reveal() {
+    let body: VaultConfirmation | undefined;
+    if (path?.startsWith('/knowledge/credentials/')) {
+      setOpen(false);
+      const confirmed = await confirmation.request();
+      if (!confirmed) return;
+      body = confirmed;
+      setOpen(true);
+    }
     const version = ++requestVersion.current;
     try {
       const response = await action.execute<Record<string, unknown>>({
         path: path!,
         method: 'POST',
+        body,
       });
       if (version !== requestVersion.current) return;
       if (typeof response[field] !== 'string')
@@ -79,6 +93,7 @@ export function SecretReveal({
   }
   return (
     <>
+      {confirmation.dialog}
       {path && (
         <Button
           variant="outline"
