@@ -63,6 +63,8 @@ CMD ["node", "apps/worker/dist/main.js"]
 FROM node:20-alpine AS web
 WORKDIR /app
 ENV NODE_ENV=production
+# Next standalone escuta em $HOSTNAME: 0.0.0.0 atende a rede e o healthcheck local.
+ENV HOSTNAME=0.0.0.0
 # Next.js standalone folder contem o node_modules otimizado necessário para a web
 COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
 EXPOSE 3000

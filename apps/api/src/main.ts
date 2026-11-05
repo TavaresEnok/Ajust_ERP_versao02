@@ -40,9 +40,12 @@ function validateEnv() {
   ];
 
   const insecure = criticalVars.filter((v) => !v.value || INSECURE_DEFAULTS.has(v.value));
-  const missingOperationalVars = ['SMTP_HOST', 'SMTP_USER', 'SMTP_PASS', 'WEB_BASE_URL'].filter(
-    (name) => !process.env[name],
-  );
+  // E-mail é opcional: sem SMTP a API só não envia e-mail. Exigir SMTP derrubaria a API em
+  // produção, como aconteceu com o worker (C-086). Só é validado quando configurado.
+  const missingOperationalVars = [
+    'WEB_BASE_URL',
+    ...(process.env.SMTP_HOST ? ['SMTP_USER', 'SMTP_PASS'] : []),
+  ].filter((name) => !process.env[name]);
 
   if (insecure.length > 0 || missingOperationalVars.length > 0) {
     const names = [...insecure.map((variable) => variable.name), ...missingOperationalVars].join(
