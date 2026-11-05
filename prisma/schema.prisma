@@ -83,6 +83,11 @@ enum SyncStatus {
 }
 
 enum AuditAction {
+  ACCESS_DENIED
+  RESOURCE_CREATE
+  RESOURCE_UPDATE
+  RESOURCE_DELETE
+  ROSTER_UPDATE
   SHIFT_REPORT_SAVE
   LOGIN
   LOGOUT
@@ -142,6 +147,8 @@ model Tenant {
   timeEntries                TimeEntry[]
   notificationConfigs        NotificationConfig[]
   onCallSchedules            OnCallSchedule[]
+  teamRosterPolicies         TeamRosterPolicy[]
+  teamRosterDays             TeamRosterDay[]
   apiKeys                    ApiKey[]
   satisfactionResponses      SatisfactionResponse[]
   workflowRules              WorkflowRule[]
@@ -172,6 +179,8 @@ model TenantSector {
 }
 
 model User {
+  responsibleOccurrences Occurrence[] @relation("OccurrenceResponsible")
+  openedOccurrences Occurrence[] @relation("OccurrenceOpener")
   id                      String       @id @default(uuid())
   name                    String
   email                   String       @unique
@@ -179,6 +188,7 @@ model User {
   status                  UserStatus   @default(ACTIVE)
   twoFactorEnabled        Boolean      @default(false)
   twoFactorSecretEnc      String?
+  twoFactorLastCounter    Int?
   bootstrapTokenHash      String?
   bootstrapTokenExpiresAt DateTime?
   lastLoginAt             DateTime?
@@ -224,7 +234,7 @@ model Customer {
   tenantId       String
   legalName      String
   tradeName      String
-  taxId          String
+  taxId          String?
   personType     String
   address        Json         @default("{}")
   contacts       Json         @default("{}")
@@ -258,7 +268,7 @@ model NetworkTopology {
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Cascade)
+  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
   revisions NetworkTopologyRevision[]
 
   @@index([tenantId, updatedAt])
@@ -281,6 +291,10 @@ model NetworkTopologyRevision {
 }
 
 model Occurrence {
+  analystResponsibleUserId String?
+  openedByUserId String?
+  responsibleUser User? @relation("OccurrenceResponsible", fields: [analystResponsibleUserId], references: [id], onDelete: SetNull)
+  openedByUser User? @relation("OccurrenceOpener", fields: [openedByUserId], references: [id], onDelete: SetNull)
   id                 String           @id @default(uuid())
   tenantId           String
   number             String
@@ -311,6 +325,7 @@ model Occurrence {
   @@unique([tenantId, number])
   @@index([tenantId, provider, createdAt(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
+  @@index([tenantId, customerId, status])
 }
 
 model Role {
@@ -359,6 +374,8 @@ model Session {
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId, expiresAt])
+  @@index([expiresAt])
+  @@index([revokedAt])
 }
 
 model BootstrapOtp {
@@ -454,6 +471,8 @@ model ServiceOrder {
   @@index([tenantId, resolvedAt])
   @@index([tenantId, closedAt])
   @@index([tenantId, createdAt])
+  @@index([tenantId, assigneeUserId, status])
+  @@index([tenantId, ownerUserId])
 }
 
 model ServiceOrderOccurrence {
@@ -832,8 +851,24 @@ model ShiftReport {
   revisions Json @default("[]")
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
+  attachments ShiftReportAttachment[]
   @@index([tenantId, referenceDate, shift])
   @@index([tenantId, authorUserId])
+}
+
+model ShiftReportAttachment {
+  id           String   @id @default(uuid())
+  reportId     String
+  fileName     String
+  mimeType     String
+  sizeBytes    Int
+  storageKey   String
+  uploadedById String
+  uploadedAt   DateTime @default(now())
+
+  report ShiftReport @relation(fields: [reportId], references: [id], onDelete: Cascade)
+
+  @@index([reportId, uploadedAt(sort: Desc)])
 }
 
 model Note {
@@ -850,6 +885,7 @@ model Note {
   author User?   @relation(fields: [authorUserId], references: [id], onDelete: SetNull)
 
   @@index([tenantId, updatedAt(sort: Desc)])
+  @@index([tenantId, authorUserId, updatedAt])
 }
 
 model OccurrenceAnnotation {
@@ -1011,6 +1047,7 @@ enum ChangeRisk {
 }
 
 model ChangeRequest {
+  version Int @default(0)
   serviceOrders   ServiceOrder[]
   id              String       @id @default(uuid())
   tenantId        String
@@ -1057,8 +1094,8 @@ model TimeEntry {
   createdAt   DateTime @default(now())
 
   tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
-  user   User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
+  user   User         @relation(fields: [userId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, orderId])
   @@index([tenantId, userId, loggedAt])
@@ -1099,6 +1136,35 @@ model NotificationConfig {
 }
 
 // ─── On-Call Schedule ──────────────────────────────────────────────────────
+
+model TeamRosterPolicy {
+  id            String   @id @default(uuid())
+  tenantId      String
+  effectiveFrom String
+  dayUserIds    String[] @default([])
+  nightUserIds  String[] @default([])
+  version       Int      @default(1)
+  updatedAt     DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, effectiveFrom])
+}
+
+model TeamRosterDay {
+  id          String   @id @default(uuid())
+  tenantId    String
+  date        String
+  userIds     String[] @default([])
+  holidayName String?
+  notes       String?
+  version     Int      @default(1)
+  updatedAt   DateTime @updatedAt
+
+  tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+
+  @@unique([tenantId, date])
+}
 
 model OnCallSchedule {
   id        String   @id @default(uuid())
@@ -1150,7 +1216,7 @@ model SatisfactionResponse {
   answeredAt DateTime?
 
   tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
 
   @@index([tenantId, answered])
 }
