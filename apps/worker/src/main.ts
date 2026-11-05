@@ -7,15 +7,21 @@ const STRONG_SECRET_NAMES = new Set(['SECRETS_ENCRYPTION_KEY', 'WORKER_API_TOKEN
 
 function validateEnv() {
   const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
-  if (!isProduction) return;
+  const host = process.env.WORKER_HOST || '0.0.0.0';
+  if (!isProduction && ['localhost', '127.0.0.1', '::1'].includes(host)) return;
 
   const criticalVars = [
     { name: 'SECRETS_ENCRYPTION_KEY', value: process.env.SECRETS_ENCRYPTION_KEY },
     { name: 'DATABASE_URL', value: process.env.DATABASE_URL },
     { name: 'WORKER_API_TOKEN', value: process.env.WORKER_API_TOKEN },
-    { name: 'SMTP_HOST', value: process.env.SMTP_HOST },
-    { name: 'SMTP_USER', value: process.env.SMTP_USER },
-    { name: 'SMTP_PASS', value: process.env.SMTP_PASS },
+    // E-mail é opcional (sem SMTP, só não envia e registra aviso). Só é validado quando
+    // configurado: exigir SMTP derrubava o worker inteiro e parava o monitor de SLA.
+    ...(process.env.SMTP_HOST
+      ? [
+          { name: 'SMTP_USER', value: process.env.SMTP_USER },
+          { name: 'SMTP_PASS', value: process.env.SMTP_PASS },
+        ]
+      : []),
   ];
 
   const insecure = criticalVars.filter(
@@ -38,9 +44,7 @@ async function bootstrap() {
   const app = await NestFactory.create(AppModule);
   const port = Number(process.env.PORT || 3002);
 
-  app.enableCors();
-
-  await app.listen(port, '0.0.0.0');
+  await app.listen(port, process.env.WORKER_HOST || '0.0.0.0');
   console.log(`[worker] running on port ${port}`);
 }
 

@@ -2,15 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { SlaMonitoringService } from '../../sla/sla-monitoring.service';
 import { QUEUE_SLA_MONITORING } from '../queue.constants';
-
-const redisConnection = {
-  host: (process.env.REDIS_URL || 'redis://redis:6379').replace(/^redis:\/\//, '').split(':')[0],
-  port: parseInt(
-    (process.env.REDIS_URL || 'redis://redis:6379').replace(/^redis:\/\//, '').split(':')[1] ||
-      '6379',
-    10,
-  ),
-};
+import { redisConnection } from '../../common/redis-connection';
 
 @Injectable()
 export class SlaMonitoringProcessor implements OnModuleDestroy {

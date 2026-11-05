@@ -3,6 +3,7 @@ import { Queue } from 'bullmq';
 import {
   QUEUE_IXC_RECONCILIATION,
   QUEUE_EXPORT_RETENTION,
+  QUEUE_SESSION_RETENTION,
   QUEUE_MONTHLY_HEALTH_REPORT,
   QUEUE_AUDIT_ARCHIVING,
   QUEUE_SLA_MONITORING,
@@ -12,15 +13,7 @@ import {
   JOB_AUDIT_ARCHIVE,
   JOB_SLA_EVALUATE,
 } from './queue.constants';
-
-const redisConnection = {
-  host: (process.env.REDIS_URL || 'redis://redis:6379').replace(/^redis:\/\//, '').split(':')[0],
-  port: parseInt(
-    (process.env.REDIS_URL || 'redis://redis:6379').replace(/^redis:\/\//, '').split(':')[1] ||
-      '6379',
-    10,
-  ),
-};
+import { redisConnection } from '../common/redis-connection';
 
 @Injectable()
 export class QueueSchedulerService implements OnModuleInit, OnModuleDestroy {
@@ -90,6 +83,12 @@ export class QueueSchedulerService implements OnModuleInit, OnModuleDestroy {
         name: JOB_AUDIT_ARCHIVE,
         opts: { attempts: 3, backoff: { type: 'exponential', delay: 15_000 } },
       },
+    );
+
+    await this.createQueue(QUEUE_SESSION_RETENTION).upsertJobScheduler(
+      'session-retention-schedule',
+      { pattern: '30 2 * * *' },
+      { name: 'cleanup', opts: { attempts: 3, backoff: { type: 'exponential', delay: 5000 } } },
     );
 
     // SLA Monitoring — periodic scan (default 60s)

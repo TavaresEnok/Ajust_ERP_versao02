@@ -1,8 +1,7 @@
 import { Inject, Injectable, Logger } from '@nestjs/common';
 import { PrismaService } from '../prisma/prisma.service';
 import { decryptSecret } from '../common.secrets';
-import { ServiceOrderStatus, ServiceOrderType, Priority } from '@prisma/client';
-import { fromZonedTime, toZonedTime } from 'date-fns-tz';
+import { assertSafeUrl, safeFetch } from '../common/ssrf-guard';
 
 /* ──────────────────────────────────────────────────────────────
    Configurações de resiliência
@@ -74,14 +73,6 @@ function recordFailure(integrationId: string): void {
     cb.openedAt = Date.now();
   }
 }
-
-interface DaySchedule {
-  isWorkDay: boolean;
-  startTime: string;
-  endTime: string;
-}
-
-type CalendarConfig = Record<number, DaySchedule>;
 
 /* ──────────────────────────────────────────────────────────────
    Serviço Principal
@@ -287,14 +278,17 @@ export class IxcReconciliationService {
     const since = (lastSyncAt || new Date(Date.now() - 5 * 60_000)).toISOString();
     const url = `${baseUrl.replace(/\/+$/, '')}/api/v1/tickets/delta?since=${encodeURIComponent(since)}`;
     const token = decryptSecret(apiTokenEnc);
+    // O token do IXC só vai para endereço público, sem seguir redirecionamento (C-066/C-055).
+    await assertSafeUrl(url);
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), HTTP_TIMEOUT_MS);
 
     try {
-      const response = await fetch(url, {
+      const response = await safeFetch(url, {
         method: 'GET',
         signal: controller.signal,
+        redirect: 'manual',
         headers: token ? { Authorization: `Bearer ${token}` } : undefined,
       });
 
@@ -314,300 +308,19 @@ export class IxcReconciliationService {
      applyDelta — upsert atômico sem race condition
      ──────────────────────────────────────────────────────────── */
   private async applyDelta(tenantId: string, delta: Record<string, unknown>): Promise<boolean> {
-    const externalProtocol = String(delta.externalProtocol || '').trim();
-    if (!externalProtocol) return false;
-
-    const existing = await this.prisma.serviceOrder.findFirst({
-      where: { tenantId, externalProtocol, deletedAt: null },
+    if (!String(delta.externalProtocol || '').trim()) return false;
+    const token = process.env.WORKER_API_TOKEN;
+    if (!token) throw new Error('WORKER_API_TOKEN não configurado.');
+    const base = (process.env.API_INTERNAL_URL || 'http://api:3001').replace(/\/+$/, '');
+    const response = await fetch(`${base}/integrations/ixc/internal/delta`, {
+      method: 'POST',
+      redirect: 'error',
+      signal: AbortSignal.timeout(HTTP_TIMEOUT_MS),
+      headers: { Authorization: `Bearer ${token}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ tenantId, delta }),
     });
-
-    const mappedStatus = this.mapStatus(delta.status as string | undefined);
-    const type = this.mapType(delta.type as string | undefined);
-    const priority = this.mapPriority(delta.priority as string | undefined);
-    const title = typeof delta.title === 'string' && delta.title.trim() ? delta.title.trim() : null;
-    const description =
-      typeof delta.description === 'string' && delta.description.trim()
-        ? delta.description.trim()
-        : null;
-    const externalUpdatedAt = delta.updatedAt ? new Date(delta.updatedAt as string) : null;
-
-    if (existing) {
-      // Idempotência: só aplica se o delta é mais recente
-      const canApply =
-        !externalUpdatedAt || externalUpdatedAt.getTime() >= existing.updatedAt.getTime();
-      if (!canApply) return false;
-
-      await this.prisma.serviceOrder.update({
-        where: { id: existing.id },
-        data: {
-          sourceSystem: 'SGP',
-          ...(mappedStatus ? { status: mappedStatus } : {}),
-          ...(title ? { title } : {}),
-          ...(description ? { description } : {}),
-          occurrences: {
-            create: {
-              sourceSystem: 'POLLING',
-              message: `Reconciliacao IXC aplicada (externalProtocol=${externalProtocol}).`,
-            },
-          },
-        },
-      });
-      return true;
-    }
-
-    // Nova OS via sync
-    const protocol = await this.buildProtocol(tenantId);
-    const deadlineAt = await this.calculateDeadlineAt(tenantId, priority, type);
-    await this.prisma.serviceOrder.create({
-      data: {
-        tenantId,
-        protocol,
-        externalProtocol,
-        sourceSystem: 'SGP',
-        type,
-        priority,
-        status: mappedStatus || 'ABERTA',
-        title: title || `IXC Delta ${externalProtocol}`,
-        description: description || 'Criada via reconciliacao IXC.',
-        deadlineAt,
-        occurrences: {
-          create: {
-            sourceSystem: 'POLLING',
-            message: `OS criada via reconciliacao IXC (externalProtocol=${externalProtocol}).`,
-          },
-        },
-      },
-    });
-    return true;
-  }
-
-  /* ────────────────────────────────────────────────────────────
-     Mapeamentos de status / tipo / prioridade
-     ──────────────────────────────────────────────────────────── */
-  private mapStatus(status?: string): ServiceOrderStatus | null {
-    if (!status) return null;
-    const n = status.trim().toLowerCase();
-    if (['aberta', 'open', 'novo'].includes(n)) return 'ABERTA';
-    if (['em_analise', 'em analise', 'triagem', 'analysis'].includes(n)) return 'EM_ANALISE';
-    if (['campo', 'ag_campo', 'ag campo'].includes(n)) return 'AG_CAMPO';
-    if (['terceiros', 'ag_terceiros', 'ag terceiros'].includes(n)) return 'AG_TERCEIROS';
-    if (['resolvida', 'resolved'].includes(n)) return 'RESOLVIDA';
-    if (['fechada', 'closed'].includes(n)) return 'FECHADA';
-    if (['cancelada', 'cancelled', 'canceled'].includes(n)) return 'CANCELADA';
-    return null;
-  }
-
-  private mapType(type?: string): ServiceOrderType {
-    const n = String(type || '')
-      .trim()
-      .toUpperCase();
-    const allowed: ServiceOrderType[] = [
-      'ROMPIMENTO',
-      'LENTIDAO',
-      'CONFIGURACAO_ONU',
-      'TROCA_SENHA',
-      'CANCELAMENTO',
-      'AUDITORIA',
-      'INSTALACAO',
-      'BGP',
-    ];
-    return allowed.includes(n as ServiceOrderType) ? (n as ServiceOrderType) : 'AUDITORIA';
-  }
-
-  private mapPriority(priority?: string): Priority {
-    const n = String(priority || '')
-      .trim()
-      .toUpperCase();
-    const allowed: Priority[] = ['BAIXA', 'NORMAL', 'ALTA', 'CRITICA'];
-    return allowed.includes(n as Priority) ? (n as Priority) : 'NORMAL';
-  }
-
-  /**
-   * Protocolo via sequência PostgreSQL atômica — sem race condition.
-   */
-  private async buildProtocol(tenantId: string): Promise<string> {
-    const year = new Date().getFullYear();
-    const seqName = `os_seq_${tenantId.replace(/-/g, '_')}`;
-
-    await this.prisma.$executeRawUnsafe(
-      `CREATE SEQUENCE IF NOT EXISTS "${seqName}" START 1 INCREMENT 1`,
-    );
-
-    const result = await this.prisma.$queryRawUnsafe<[{ nextval: bigint }]>(
-      `SELECT nextval('"${seqName}"')`,
-    );
-
-    const seq = Number(result[0].nextval);
-    return `${year}${String(seq).padStart(6, '0')}`;
-  }
-
-  private async calculateDeadlineAt(
-    tenantId: string,
-    priority: Priority,
-    type: ServiceOrderType,
-  ): Promise<Date> {
-    const hours = await this.findApplicableSlaHours(tenantId, priority, type);
-    return this.calculateTargetDate(new Date(), hours, tenantId);
-  }
-
-  private async findApplicableSlaHours(
-    tenantId: string,
-    priority: Priority,
-    type: ServiceOrderType,
-  ): Promise<number> {
-    const policies = await this.prisma.slaPolicy.findMany({
-      where: { tenantId, active: true },
-      orderBy: [{ isOverride: 'desc' }, { updatedAt: 'desc' }],
-    });
-
-    const typeOverride = policies.find(
-      (policy) => policy.isOverride && policy.serviceOrderType === type,
-    );
-    if (typeOverride) return typeOverride.hours;
-
-    const legacyExactMatch = policies.find(
-      (policy) =>
-        !policy.isOverride && policy.priority === priority && policy.serviceOrderType === type,
-    );
-    if (legacyExactMatch) return legacyExactMatch.hours;
-
-    const priorityPolicy = policies.find(
-      (policy) =>
-        !policy.isOverride && policy.priority === priority && policy.serviceOrderType === null,
-    );
-    return priorityPolicy?.hours ?? 48;
-  }
-
-  private async calculateTargetDate(
-    startDate: Date,
-    slaHours: number,
-    tenantId: string,
-  ): Promise<Date> {
-    const [calendar, timezone] = await Promise.all([
-      this.getBusinessCalendar(tenantId),
-      this.getTenantTimezone(tenantId),
-    ]);
-    let remainingMinutes = slaHours * 60;
-    const current = toZonedTime(startDate, timezone);
-    await this.adjustWithExceptions(current, tenantId, calendar);
-
-    for (let safety = 0; safety < 1000; safety += 1) {
-      if (remainingMinutes <= 0) break;
-
-      const exception = await this.getCalendarExceptionForWallDate(tenantId, current);
-      if (exception && !exception.isWorkDay) {
-        current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
-        await this.adjustWithExceptions(current, tenantId, calendar);
-        continue;
-      }
-
-      const dayConfig = calendar[current.getDay()];
-      const endTime = exception?.endTime || dayConfig.endTime;
-      const [endH, endM] = endTime.split(':').map(Number);
-      const eod = new Date(current);
-      eod.setHours(endH, endM, 0, 0);
-
-      const minutesToEndOfDay = (eod.getTime() - current.getTime()) / 60000;
-
-      if (remainingMinutes <= minutesToEndOfDay) {
-        current.setTime(current.getTime() + remainingMinutes * 60000);
-        remainingMinutes = 0;
-      } else {
-        remainingMinutes -= minutesToEndOfDay;
-        current.setDate(current.getDate() + 1);
-        current.setHours(8, 0, 0, 0);
-        await this.adjustWithExceptions(current, tenantId, calendar);
-      }
-    }
-
-    return fromZonedTime(current, timezone);
-  }
-
-  private async getBusinessCalendar(tenantId: string): Promise<CalendarConfig> {
-    const rows = await this.prisma.businessCalendar.findMany({ where: { tenantId } });
-    const result: CalendarConfig = {} as CalendarConfig;
-    for (let i = 0; i < 7; i += 1) {
-      const row = rows.find((item) => item.dayOfWeek === i);
-      if (row) {
-        result[i] = {
-          isWorkDay: row.isWorkDay,
-          startTime: row.startTime,
-          endTime: row.endTime,
-        };
-      } else {
-        const isWeekend = i === 0 || i === 6;
-        result[i] = {
-          isWorkDay: !isWeekend,
-          startTime: '08:00',
-          endTime: '18:00',
-        };
-      }
-    }
-    return result;
-  }
-
-  private async adjustWithExceptions(
-    date: Date,
-    tenantId: string,
-    calendar: CalendarConfig,
-  ): Promise<void> {
-    for (let i = 0; i < 366; i += 1) {
-      const exception = await this.getCalendarExceptionForWallDate(tenantId, date);
-      const dayConfig = calendar[date.getDay()];
-
-      if (exception && !exception.isWorkDay) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-        continue;
-      }
-
-      if (!exception && (!dayConfig || !dayConfig.isWorkDay)) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-        continue;
-      }
-
-      const startTime = exception?.startTime || dayConfig?.startTime || '08:00';
-      const endTime = exception?.endTime || dayConfig?.endTime || '18:00';
-      const [startH, startM] = startTime.split(':').map(Number);
-      const [endH, endM] = endTime.split(':').map(Number);
-      const startMinutes = startH * 60 + startM;
-      const endMinutes = endH * 60 + endM;
-      const currentMinutes = date.getHours() * 60 + date.getMinutes();
-
-      if (currentMinutes >= endMinutes) {
-        date.setDate(date.getDate() + 1);
-        date.setHours(8, 0, 0, 0);
-        continue;
-      }
-
-      if (currentMinutes < startMinutes) {
-        date.setHours(startH, startM, 0, 0);
-      }
-      return;
-    }
-  }
-
-  private async getTenantTimezone(tenantId: string): Promise<string> {
-    const tenant = await this.prisma.tenant.findUnique({
-      where: { id: tenantId },
-      select: { timezone: true },
-    });
-    const timezone = tenant?.timezone || 'America/Sao_Paulo';
-    try {
-      new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
-      return timezone;
-    } catch {
-      return 'America/Sao_Paulo';
-    }
-  }
-
-  private getCalendarExceptionForWallDate(tenantId: string, wallDate: Date) {
-    const startOfDay = new Date(wallDate);
-    startOfDay.setHours(0, 0, 0, 0);
-    return this.prisma.businessCalendarException.findUnique({
-      where: { tenantId_date: { tenantId, date: startOfDay } },
-    });
+    if (!response.ok) throw new Error(`Reconciliação recusada pela API: HTTP ${response.status}`);
+    const result = (await response.json()) as { applied: boolean };
+    return result.applied;
   }
 }

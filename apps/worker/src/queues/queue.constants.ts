@@ -10,3 +10,4 @@ export const JOB_MONTHLY_REPORT = 'generate';
 export const JOB_AUDIT_ARCHIVE = 'archive';
 export const JOB_SLA_EVALUATE = 'evaluate';
 
+export const QUEUE_SESSION_RETENTION = 'session-retention';

@@ -1,3 +1,5 @@
+import { SessionRetentionService } from './reports/session-retention.service';
+import { SessionRetentionProcessor } from './queues/processors/session-retention.processor';
 import { Module } from '@nestjs/common';
 import { AppController } from './app.controller';
 import { IxcReconciliationService } from './integrations/ixc-reconciliation.service';
@@ -17,6 +19,8 @@ import { WorkerAuthGuard } from './worker-auth.guard';
   imports: [PrismaModule],
   controllers: [AppController],
   providers: [
+    SessionRetentionService,
+    SessionRetentionProcessor,
     IxcReconciliationService,
     ExportRetentionService,
     MonthlyHealthReportService,
