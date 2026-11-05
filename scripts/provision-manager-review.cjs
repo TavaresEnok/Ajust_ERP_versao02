@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 // One owner (Ajust), three access profiles. Never creates a tenant or copies customer data.
 // Passwords are generated once, only outside the repository, and never printed.
 const fs = require('node:fs');

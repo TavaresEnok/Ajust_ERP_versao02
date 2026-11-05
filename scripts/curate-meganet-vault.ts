@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { readFileSync } from 'node:fs';
 import { PrismaClient } from '@prisma/client';
 import { encryptVaultSecret, vaultSourceNoteText } from '../apps/api/src/common/vault.crypto';

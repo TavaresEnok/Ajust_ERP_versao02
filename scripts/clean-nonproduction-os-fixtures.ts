@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 /** Remove only the audited E2E/homologation fixtures left beside the demo data. */
 import { existsSync, unlinkSync } from 'node:fs';
 import { resolve, sep } from 'node:path';

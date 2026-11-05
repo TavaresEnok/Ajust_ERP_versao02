@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: false });
 import { PrismaClient } from '@prisma/client';
 import { encryptVaultSecret, decryptVaultSecret } from '../apps/api/src/common/vault.crypto';
 const db = new PrismaClient();

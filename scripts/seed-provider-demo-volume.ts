@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 /**
  * Adds 20 real provider/customer records from the SGP customer directory and
  * creates a 120-day SYNTHETIC operating scenario in the local ERP.

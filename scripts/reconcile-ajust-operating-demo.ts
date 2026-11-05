@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 import { Prisma, ServiceOrderType } from '@prisma/client';
 import { PrismaService } from '../apps/api/src/prisma/prisma.service';
 import { ajustFlow } from '../apps/api/src/service-processes/ajust-default-flows';

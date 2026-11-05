@@ -30,7 +30,13 @@ const failures = [];
 for (const endpoint of endpoints) {
   const startedAt = Date.now();
   try {
-    const response = await fetch(endpoint.url, { signal: AbortSignal.timeout(5_000) });
+    const response = await fetch(endpoint.url, {
+      signal: AbortSignal.timeout(5_000),
+      headers:
+        endpoint.name === 'api-metrics' && process.env.API_METRICS_TOKEN
+          ? { Authorization: `Bearer ${process.env.API_METRICS_TOKEN}` }
+          : undefined,
+    });
     const body = await response.text();
     const durationMs = Date.now() - startedAt;
     if (!response.ok || !body.includes(endpoint.contains)) {

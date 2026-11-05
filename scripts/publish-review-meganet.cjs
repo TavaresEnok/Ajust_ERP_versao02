@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 // Publish only the reviewed 20-order Meganet sample for the requested client-portal review.
 // Internal comments, attachments, credentials and all other customers stay unchanged.
 const fs = require('node:fs');

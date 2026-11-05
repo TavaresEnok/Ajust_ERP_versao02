@@ -73,8 +73,8 @@ async function main() {
     const nav = (
       await page.locator('nav[aria-label="Navegação principal"]').innerText()
     ).toLocaleLowerCase('pt-BR');
-    expect(nav.indexOf('escala de plantão')).toBeGreaterThan(-1);
-    expect(nav.indexOf('escala de plantão')).toBeLessThan(nav.indexOf('conhecimento'));
+    expect(nav.indexOf('escala da equipe')).toBeGreaterThan(-1);
+    expect(nav.indexOf('escala da equipe')).toBeLessThan(nav.indexOf('conhecimento'));
     await page.getByRole('textbox', { name: 'Buscar provedor' }).fill(sample.name);
     await page.getByRole('link', { name: 'Cadastrar topologia' }).click();
     await expect(page.getByRole('button', { name: 'Importar diagrama existente' })).toBeVisible();

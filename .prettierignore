@@ -10,3 +10,6 @@ prisma/migrations
 **/mockups/**
 .gitleaks.toml
 **/next-env.d.ts
+
+# Local browser session state
+**/e2e/.auth/**

@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 const fs = require('node:fs');
 const { chromium } = require('../apps/web/node_modules/@playwright/test');
 const { PrismaClient } = require('@prisma/client');

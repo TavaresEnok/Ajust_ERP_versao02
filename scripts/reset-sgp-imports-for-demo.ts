@@ -1,3 +1,4 @@
+require('./data-script-guard.cjs').assertDataScriptAllowed({ fixture: true });
 /**
  * One-time, destructive reset of the pre-production SGP import in the Ajust ERP,
  * followed by clean, native demonstration records. Requires --execute and an

@@ -15,9 +15,11 @@ async function main() {
       const page = await context.newPage();
       await page.goto(`${base}/login`, { waitUntil: 'domcontentloaded' });
       await expect(async () => {
-        await page.getByRole('button', {
-          name: role === 'gerente' ? /^Gerente/ : /^Analista · Anderson/,
-        }).click();
+        await page
+          .getByRole('button', {
+            name: role === 'gerente' ? /^Gerente/ : /^Analista · Anderson/,
+          })
+          .click();
         await expect(page.locator('#auth-password')).not.toHaveValue('');
       }).toPass({ timeout: 30000 });
       const login = await context.request.post(`${base}/api/public/auth/login`, {
@@ -34,8 +36,11 @@ async function main() {
       let origins = await response.json();
       if (role === 'gerente' && process.argv.includes('--configure')) {
         const names = origins.map((origin) => origin.name);
-        const missing = expectedOrigins.filter((name) =>
-          !names.some((current) => current.toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR')),
+        const missing = expectedOrigins.filter(
+          (name) =>
+            !names.some(
+              (current) => current.toLocaleLowerCase('pt-BR') === name.toLocaleLowerCase('pt-BR'),
+            ),
         );
         if (missing.length) {
           const saved = await context.request.patch(endpoint, {
@@ -44,7 +49,13 @@ async function main() {
           });
           expect(saved.status()).toBe(200);
           origins = await saved.json();
-          console.log(JSON.stringify({ previous: names, added: missing, current: origins.map((o) => o.name) }));
+          console.log(
+            JSON.stringify({
+              previous: names,
+              added: missing,
+              current: origins.map((o) => o.name),
+            }),
+          );
         }
       }
       for (const name of expectedOrigins) expect(origins.map((o) => o.name)).toContain(name);
@@ -53,12 +64,15 @@ async function main() {
       });
       const dialog = page.getByRole('dialog');
       await expect(async () => {
-        if (!await dialog.isVisible()) await page.getByRole('button', { name: 'Novo atendimento', exact: true }).first().click();
+        if (!(await dialog.isVisible()))
+          await page.getByRole('button', { name: 'Novo atendimento', exact: true }).first().click();
         await expect(dialog).toBeVisible();
       }).toPass({ timeout: 30000 });
       for (const name of expectedOrigins) {
         await dialog.locator('input[name="origin"]').locator('..').getByRole('button').click();
-        await dialog.getByRole('combobox', { name: 'Buscar opções de Origem', exact: true }).fill(name);
+        await dialog
+          .getByRole('combobox', { name: 'Buscar opções de Origem', exact: true })
+          .fill(name);
         await dialog.getByRole('option', { name, exact: true }).click();
         await expect(dialog.locator('input[name="origin"]')).toHaveValue(name);
       }
@@ -70,4 +84,7 @@ async function main() {
     await browser.close();
   }
 }
-main().catch((error) => { console.error(error.message); process.exitCode = 1; });
+main().catch((error) => {
+  console.error(error.message);
+  process.exitCode = 1;
+});
