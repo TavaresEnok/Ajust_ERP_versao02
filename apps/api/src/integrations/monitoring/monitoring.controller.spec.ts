@@ -5,6 +5,8 @@ describe('MonitoringController (Zabbix, C-044)', () => {
   const token = 'monitoring-token-for-tests';
   let prisma: any;
   let orders: any;
+  let apiKeys: any;
+  let redis: any;
   let controller: MonitoringController;
 
   beforeEach(() => {
@@ -23,7 +25,10 @@ describe('MonitoringController (Zabbix, C-044)', () => {
       createOccurrenceWithFirstOrder: jest.fn().mockResolvedValue({ id: 'occ-1' }),
       resolveFromIntegration: jest.fn().mockResolvedValue(['2026100010']),
     };
-    controller = new MonitoringController(prisma, orders);
+    prisma.occurrence.update = jest.fn();
+    apiKeys = { validateKey: jest.fn().mockResolvedValue(null) };
+    redis = { incrEx: jest.fn().mockResolvedValue(1) };
+    controller = new MonitoringController(prisma, orders, apiKeys, redis);
   });
 
   afterEach(() => {
@@ -92,5 +97,31 @@ describe('MonitoringController (Zabbix, C-044)', () => {
     prisma.knowledgeCredential.findFirst.mockResolvedValue(null);
     const result = await call({ eventName: 'CPU alta', host: 'desconhecido' });
     expect(result).toMatchObject({ provider: 'NOC / ZABBIX' });
+  });
+
+  it('chave de API do tenant dispensa o cabeçalho x-tenant-slug', async () => {
+    apiKeys.validateKey.mockResolvedValue({ tenantId: 'tenant-1', keyId: 'k1' });
+    await controller.handleZabbixWebhook('Bearer ajust_chave', '', { eventName: 'Down' });
+    expect(prisma.tenant.findFirst).toHaveBeenCalledWith({
+      where: expect.objectContaining({ id: 'tenant-1' }),
+    });
+  });
+
+  it('limite de alertas por minuto por tenant', async () => {
+    redis.incrEx.mockResolvedValue(121);
+    await expect(call({ eventName: 'Down' })).rejects.toMatchObject({ status: 429 });
+    expect(orders.createOccurrenceWithFirstOrder).not.toHaveBeenCalled();
+  });
+
+  it('problema que volta depois de encerrado mantém a deduplicação', async () => {
+    prisma.occurrence.findUnique.mockResolvedValue({ id: 'old', number: 'N', status: 'ENCERRADA' });
+    await call({ eventId: 991, eventName: 'Link down' });
+    expect(prisma.occurrence.update).toHaveBeenCalledWith({
+      where: { id: 'old' },
+      data: { externalId: expect.stringMatching(/^zabbix:991#encerrada-/) },
+    });
+    expect(orders.createOccurrenceWithFirstOrder.mock.calls[0][2]).toMatchObject({
+      externalId: 'zabbix:991',
+    });
   });
 });

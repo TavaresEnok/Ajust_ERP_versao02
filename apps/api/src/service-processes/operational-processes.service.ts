@@ -1,3 +1,4 @@
+import type { ServiceOrderStatus } from '@prisma/client';
 import { transactionScope } from '../prisma/transaction-scope';
 import {
   BadRequestException,
@@ -5,6 +6,7 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Optional,
   NotFoundException,
   OnModuleDestroy,
   OnModuleInit,
@@ -26,6 +28,8 @@ import {
   needsClosingApproval,
   statusDates,
 } from '../service-orders/service-order-rules';
+import { ServiceOrderLifecycleService } from '../service-orders/service-order-lifecycle.service';
+import { nextOrderProtocolInTransaction } from '../service-orders/order-protocol';
 
 type Tx = Prisma.TransactionClient;
 const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
@@ -48,9 +52,12 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(WorkflowsService) private readonly automations: WorkflowsService,
+    @Optional()
+    @Inject(ServiceOrderLifecycleService)
+    private readonly lifecycle?: ServiceOrderLifecycleService,
   ) {}
   inTransaction(tx: Prisma.TransactionClient) {
-    return new OperationalProcessesService(transactionScope(tx), this.automations);
+    return new OperationalProcessesService(transactionScope(tx), this.automations, this.lifecycle);
   }
 
   onModuleInit() {
@@ -850,7 +857,11 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
                 processNodeId: node.id,
                 parentOrderId: root.id,
                 rootOrderId: root.id,
-                protocol: `${demonstration ? 'DEMO' : 'FLUXO'}-${randomUUID().slice(0, 12)}`,
+                // Etapas reais usam a sequência normal de protocolo (C-067); só demonstração
+                // mantém o prefixo DEMO-.
+                protocol: demonstration
+                  ? `DEMO-${randomUUID().slice(0, 12)}`
+                  : await nextOrderProtocolInTransaction(tx, tenantId),
                 sourceSystem: 'ERP',
                 sourceMetadata: {
                   ...(demonstration ? { demonstration: true } : {}),
@@ -1046,7 +1057,12 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
         eventKey: `${instanceId}:${stepId}:${orderId}:closed`,
         type: 'order_closed',
         status: demo ? 'DEMO_RECORDED' : 'PENDING',
-        payload: json({ ...order, status: 'FECHADA', operationalProcess: true }),
+        payload: json({
+          ...order,
+          previousStatus: order.status,
+          status: 'FECHADA',
+          operationalProcess: true,
+        }),
       },
     });
   }
@@ -1118,6 +1134,23 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
         if (!claim.count) continue;
         try {
           const startedAt = new Date();
+          // Efeitos únicos do fechamento (auditoria, CSAT, aviso, tempo real, ocorrência) para
+          // todo fechamento pelo motor, inclusive pela tela de processos (C-013/C-032/C-035).
+          // Só na primeira entrega: uma nova tentativa reenvia apenas os workflows.
+          const payload = event.payload as Record<string, unknown>;
+          if (event.attempts === 0 && this.lifecycle && typeof payload.id === 'string')
+            await this.lifecycle.afterStatusChange({
+              tenantId: event.tenantId,
+              orderId: payload.id,
+              from: (typeof payload.previousStatus === 'string'
+                ? payload.previousStatus
+                : 'EM_ANALISE') as ServiceOrderStatus,
+              to: 'FECHADA',
+              actorId: null,
+              reason: 'Concluída pelo fluxo de atendimento',
+              source: 'process',
+              workflows: false,
+            });
           await this.automations.executeForEvent(
             event.tenantId,
             { type: 'order_closed', order: event.payload as Record<string, unknown> },

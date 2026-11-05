@@ -6,12 +6,17 @@ import {
   Headers,
   UnauthorizedException,
   Inject,
+  HttpException,
+  HttpStatus,
+  Optional,
 } from '@nestjs/common';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service';
 import { ServiceOrderType, Priority } from '@prisma/client';
 import { timingSafeEqual } from 'node:crypto';
 import { ServiceOrdersService } from '../../service-orders/service-orders.service';
+import { ApiKeysService } from '../../api-keys/api-keys.service';
+import { RedisService } from '../../common/redis.service';
 
 const ZabbixPayloadSchema = z
   .object({
@@ -38,6 +43,8 @@ export class MonitoringController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(ServiceOrdersService) private readonly serviceOrders: ServiceOrdersService,
+    @Optional() @Inject(ApiKeysService) private readonly apiKeys?: ApiKeysService,
+    @Optional() @Inject(RedisService) private readonly redis?: RedisService,
   ) {}
 
   @Post('zabbix')
@@ -46,19 +53,28 @@ export class MonitoringController {
     @Headers('x-tenant-slug') tenantSlug: string,
     @Body() rawPayload: unknown,
   ) {
+    // Autenticação por tenant (C-044): uma chave de API do próprio tenant (Configurações >
+    // Chaves de API) define a empresa sozinha. O token global legado continua aceito, mas
+    // aí o tenant vem do cabeçalho x-tenant-slug.
+    const rawKey = authHeader?.startsWith('Bearer ') ? authHeader.slice(7).trim() : '';
+    const apiKey = rawKey.startsWith('ajust_') ? await this.apiKeys?.validateKey(rawKey) : null;
     const expectedToken = process.env.MONITORING_WEBHOOK_TOKEN;
-    if (!expectedToken || !this.matchesToken(authHeader, `Bearer ${expectedToken}`)) {
-      throw new UnauthorizedException('Invalid token');
-    }
-    if (!tenantSlug?.trim()) {
+    const globalToken = !!expectedToken && this.matchesToken(authHeader, `Bearer ${expectedToken}`);
+    if (!apiKey && !globalToken) throw new UnauthorizedException('Invalid token');
+    if (!apiKey && !tenantSlug?.trim()) {
       throw new BadRequestException('Missing x-tenant-slug header.');
     }
 
     const payload = ZabbixPayloadSchema.parse(rawPayload);
     const tenant = await this.prisma.tenant.findFirst({
-      where: { slug: tenantSlug.trim(), status: 'ACTIVE', deletedAt: null },
+      where: {
+        ...(apiKey ? { id: apiKey.tenantId } : { slug: tenantSlug.trim() }),
+        status: 'ACTIVE',
+        deletedAt: null,
+      },
     });
     if (!tenant) return { status: 'no tenant' };
+    await this.assertWithinRate(tenant.id);
 
     const problemKey = String(payload.eventId ?? payload.triggerId ?? '').trim();
     const externalId = problemKey ? `zabbix:${problemKey}` : null;
@@ -88,6 +104,14 @@ export class MonitoringController {
     if (existing && existing.status !== 'ENCERRADA')
       return { status: 'duplicate', occurrenceId: existing.id };
 
+    // Problema que volta depois de encerrado: a chave passa para a nova ocorrência e a antiga
+    // fica com uma chave arquivada, para a deduplicação continuar valendo (C-044).
+    if (existing && externalId)
+      await this.prisma.occurrence.update({
+        where: { id: existing.id },
+        data: { externalId: `${externalId}#encerrada-${Date.now()}` },
+      });
+
     const title = payload.eventName || 'Alerta de Monitoramento';
     const desc = payload.host
       ? `Host ${payload.host} reportou um problema: ${title}. Severidade: ${payload.severity || 'não informada'}.`
@@ -110,7 +134,7 @@ export class MonitoringController {
       analystResponsible: 'Equipe Ajust',
       description: `INCIDENTE DETECTADO AUTOMATICAMENTE: ${desc}`,
       sourceSystem: 'WEBHOOK',
-      ...(externalId && !existing ? { externalId } : {}),
+      ...(externalId ? { externalId } : {}),
       sourceMetadata: { zabbix: payload } as never,
       firstOrder: {
         type: ServiceOrderType.ROMPIMENTO,
@@ -123,6 +147,18 @@ export class MonitoringController {
       },
     });
     return { success: true, occurrenceId: occurrence.id, provider };
+  }
+
+  /** Até 120 alertas por minuto por tenant: uma tempestade do Zabbix não derruba a API (C-044). */
+  private async assertWithinRate(tenantId: string) {
+    if (!this.redis) return;
+    const limit = Number(process.env.MONITORING_WEBHOOK_PER_MINUTE || 120);
+    const count = await this.redis.incrEx(`rate-limit:monitoring:${tenantId}`, 60);
+    if (count > limit)
+      throw new HttpException(
+        'Limite de alertas por minuto atingido para esta empresa.',
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
   }
 
   /** Host do alerta → provedor, pelo host cadastrado no cofre (credenciais do equipamento). */

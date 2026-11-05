@@ -51,11 +51,13 @@ export class OrderOperationsService {
     order: { id: string; status: ServiceOrderStatus },
     reason: string,
     workflows = true,
+    handledElsewhere: ServiceOrderStatus[] = [],
   ) {
     const current = await this.prisma.serviceOrder.findUnique({
       where: { id: order.id },
       select: { status: true },
     });
+    if (current && handledElsewhere.includes(current.status)) return;
     if (current && current.status !== order.status)
       await this.lifecycle?.afterStatusChange({
         tenantId,
@@ -225,7 +227,9 @@ export class OrderOperationsService {
           data: { status: 'COMPLETED', completedAt: new Date() },
         });
       await this.syncOccurrence(tenantId, order.occurrenceId);
-      await this.after(tenantId, actorId, order, input.reason, false);
+      // Fechado pelo motor: os efeitos saem pela fila do processo (uma vez só). Aqui fica só
+      // o caso "resolvida aguardando aprovação", que não gera evento de fechamento.
+      await this.after(tenantId, actorId, order, input.reason, false, ['FECHADA']);
       if (
         order.changeRequestId &&
         (await this.prisma.serviceOrder.findUniqueOrThrow({ where: { id } })).status === 'FECHADA'

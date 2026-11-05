@@ -39,3 +39,17 @@ export async function withFreshProtocol<T>(
   }
   throw last;
 }
+
+/**
+ * Para criar O.S. dentro de uma transação (ex.: etapas do motor de processos), onde não dá
+ * para tentar de novo após colisão: trava por tenant até o fim da transação e então numera.
+ */
+export async function nextOrderProtocolInTransaction(
+  tx: RawQuery & {
+    $executeRaw(query: TemplateStringsArray, ...values: unknown[]): Promise<number>;
+  },
+  tenantId: string,
+) {
+  await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`order-protocol:${tenantId}`}))`;
+  return nextOrderProtocol(tx, tenantId);
+}
