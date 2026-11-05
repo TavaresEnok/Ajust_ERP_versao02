@@ -34,7 +34,7 @@ export class SecretsValidationService implements OnModuleInit {
       JWT_RESET_SECRET: process.env.JWT_RESET_SECRET,
       SECRETS_ENCRYPTION_KEY: process.env.SECRETS_ENCRYPTION_KEY,
       POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD,
-      SMTP_PASS: process.env.SMTP_PASS,
+      ...(process.env.SMTP_HOST ? { SMTP_PASS: process.env.SMTP_PASS } : {}),
       MONITORING_WEBHOOK_TOKEN: process.env.MONITORING_WEBHOOK_TOKEN,
       CHAT_WEBHOOK_TOKEN: process.env.CHAT_WEBHOOK_TOKEN,
     };

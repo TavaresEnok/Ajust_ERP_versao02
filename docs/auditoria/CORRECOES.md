@@ -89,7 +89,7 @@
 | C-075 | Alta | 6 | O ERP é acessado por HTTP puro, sem TLS | Corrigido (aplicado) |
 | C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (falta só o destino externo) |
 | C-077 | Média | 6 | Redis de produção descarta chaves das filas e do rate limit quando enche | Corrigido nos arquivos de compose (produção pendente) |
-| C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Em correção (HTTPS pronto; falta a troca para imagens de produção) |
+| C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Corrigido (em execução) |
 | C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido (em execução) |
 | C-080 | Média | 7 | Mensagens de erro da API em inglês chegam à tela | Corrigido (sem commit; já em execução) |
 | C-081 | Média | 7 | Os testes de integração com banco nunca rodam no CI | Corrigido no código (CI remoto pendente) |
@@ -1109,7 +1109,8 @@
 - **Como validar:** `docker compose config` não mostra nenhum valor padrão inseguro; dentro do contêiner, `id -u` ≠ 0.
 - **Andamento (04/11):** `env_file` passa a ser `.env.example` e depois `.env` (o `.env` vence); padrões inseguros removidos; `.dockerignore` exclui `backups/`, `uploads/`, `*.dump` e `.env.*`. Pendente: rodar o compose de produção, `USER node`, tags fixas.
 - **Situação (05/11):** o HTTPS, que era o pré-requisito, está no ar. Falta trocar o servidor do compose de desenvolvimento (`pnpm dev`, código montado) para imagens construídas; o `docker-compose.prod.yml` ainda publica a web na porta 80, que é do Caddy, e precisa ser adaptado (web em `127.0.0.1:8070`) antes da troca.
-- **Status:** Em correção (HTTPS pronto; falta a troca para imagens de produção)
+- **Conclusão (05/11):** o servidor roda o `docker-compose.prod.yml` com imagens construídas (`local/ajust-erp/*:202611051933`, tag fixa), sem o repositório montado, lendo só o `.env`. Web em `127.0.0.1:8070` e API em `127.0.0.1:8092`, ambas atrás do Caddy; os três contêineres rodam como `node` (uid 1000); a chave do cofre é montada só leitura em `/run/secrets/vault.key` a partir de `/home/app/secrets/ajust_erp/`; uploads em bind do diretório do host (o backup continua cobrindo). Ajustes que a troca exigiu: `start-api.sh` acha `dist/src/main.js`; SMTP opcional também na API (como no worker, C-086); `HOSTNAME=0.0.0.0` na web (o Next standalone escutava no IP do contêiner e o healthcheck falhava). Validado: os seis contêineres saudáveis, login, Socket.IO e draw.io respondem por HTTPS, SLA avaliado a cada minuto. Reversão: `docker compose -f docker-compose.prod.yml stop web api worker` e `docker compose up -d`.
+- **Status:** Corrigido (em execução)
 
 ### C-079 · Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente
 - **Severidade:** Média
