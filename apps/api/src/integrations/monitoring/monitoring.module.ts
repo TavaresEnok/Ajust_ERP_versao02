@@ -1,11 +1,10 @@
 import { Module } from '@nestjs/common';
 import { MonitoringController } from './monitoring.controller';
 import { PrismaModule } from '../../prisma/prisma.module';
-import { RealtimeModule } from '../../realtime/realtime.module';
-import { SlaModule } from '../../sla/sla.module';
+import { ServiceOrdersModule } from '../../service-orders/service-orders.module';
 
 @Module({
-  imports: [PrismaModule, RealtimeModule, SlaModule],
+  imports: [PrismaModule, ServiceOrdersModule],
   controllers: [MonitoringController],
 })
 export class MonitoringWebhookModule {}

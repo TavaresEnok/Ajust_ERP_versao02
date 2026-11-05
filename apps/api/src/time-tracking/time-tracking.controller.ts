@@ -33,6 +33,8 @@ const CreateTimeEntrySchema = z.object({
 const ListTimeEntriesSchema = z
   .object({
     orderId: z.string().uuid().optional(),
+    limit: z.coerce.number().int().min(1).max(200).default(50),
+    offset: z.coerce.number().int().min(0).default(0),
     from: z
       .string()
       .refine((value) => !Number.isNaN(new Date(value).getTime()))
@@ -61,19 +63,46 @@ export class TimeTrackingController {
     @Query('orderId') orderId?: string,
     @Query('from') from?: string,
     @Query('to') to?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
-    const input = ListTimeEntriesSchema.parse({ orderId, from, to });
-    if (input.orderId) return this.svc.listByOrder(req.auth.tenantId, input.orderId);
-    return this.svc.listByTenant(req.auth.tenantId, input.from, input.to);
+    const input = ListTimeEntriesSchema.parse({ orderId, from, to, limit, offset });
+    const userId = req.auth.role === 'analista' ? req.auth.userId : undefined;
+    if (input.orderId)
+      return this.svc.listByOrder(
+        req.auth.tenantId,
+        input.orderId,
+        userId,
+        input.limit,
+        input.offset,
+      );
+    return this.svc.listByTenant(
+      req.auth.tenantId,
+      input.from,
+      input.to,
+      userId,
+      input.limit,
+      input.offset,
+    );
+  }
+
+  @Get('order-total')
+  orderTotal(@Req() req: RequestWithAuth, @Query('orderId') orderId: string) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
+    return this.svc.orderTotal(req.auth.tenantId, z.string().uuid().parse(orderId));
   }
 
   @Get('summary')
   summary(@Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     assertAnyRole(req.auth, ['super_admin', 'gerente', 'analista']);
-    return this.svc.summary(req.auth.tenantId);
+    return this.svc.summary(
+      req.auth.tenantId,
+      req.auth.role === 'analista' ? req.auth.userId : undefined,
+    );
   }
 
   @Post()
@@ -84,6 +113,7 @@ export class TimeTrackingController {
       req.auth.tenantId,
       req.auth.userId,
       CreateTimeEntrySchema.parse(body) as CreateTimeEntryInput,
+      req.auth.role || '',
     );
   }
 

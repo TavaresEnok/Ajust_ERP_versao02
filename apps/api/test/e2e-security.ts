@@ -87,7 +87,7 @@ const api = {
     requestJson('POST', path, { headers: options?.headers, body }),
 };
 
-function generateTotpCode(secret: string): string {
+function generateTotpCode(secret: string, timestamp = Date.now()): string {
   const alphabet = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';
   let bits = 0;
   let value = 0;
@@ -104,7 +104,7 @@ function generateTotpCode(secret: string): string {
     }
   }
 
-  let counter = Math.floor(Date.now() / 1000 / 30);
+  let counter = Math.floor(timestamp / 1000 / 30);
   const counterBuffer = Buffer.alloc(8);
   for (let index = 7; index >= 0; index--) {
     counterBuffer[index] = counter & 0xff;
@@ -264,9 +264,10 @@ async function testTwoFAWorkflow() {
       return false;
     }
 
+    const enrollmentCode = generateTotpCode(secret);
     const confirmResponse = await api.post(
       '/auth/2fa/confirm',
-      { secret, code: generateTotpCode(secret) },
+      { secret, code: enrollmentCode },
       {
         headers: {
           Authorization: `Bearer ${context.adminAccessToken}`,
@@ -298,9 +299,19 @@ async function testTwoFAWorkflow() {
     }
     console.log(`  ✅ Step 4: Login returned a temporary 2FA challenge`);
 
+    const replayResponse = await api.post('/auth/verify-2fa', {
+      temporaryToken: challengeResponse.data.temporaryToken,
+      code: enrollmentCode,
+    });
+    if (replayResponse.status !== 401) {
+      console.log('  ❌ FAIL: Enrollment TOTP must not be reused for login');
+      return false;
+    }
+
     const verificationResponse = await api.post('/auth/verify-2fa', {
       temporaryToken: challengeResponse.data.temporaryToken,
-      code: generateTotpCode(secret),
+      // Adjacent future step is accepted by the documented clock-drift window.
+      code: generateTotpCode(secret, Date.now() + 30_000),
     });
     if (
       ![200, 201].includes(verificationResponse.status) ||

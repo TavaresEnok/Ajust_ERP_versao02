@@ -33,7 +33,10 @@ const CreateChangeSchema = z.object({
   tags: z.array(z.string().trim().min(1).max(100)).max(100).optional(),
 });
 
-const ChangeTransitionSchema = z.object({ toStatus: z.nativeEnum(ChangeStatus) });
+const ChangeTransitionSchema = z.object({
+  toStatus: z.nativeEnum(ChangeStatus),
+  expectedVersion: z.number().int().nonnegative(),
+});
 
 @ApiTags('Change Management')
 @ApiBearerAuth()
@@ -67,7 +70,13 @@ export class ChangeController {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     assertManagerRole(req.auth);
     const input = ChangeTransitionSchema.parse(body);
-    return this.changeService.transition(req.auth.tenantId, id, req.auth.userId, input.toStatus);
+    return this.changeService.transition(
+      req.auth.tenantId,
+      id,
+      req.auth.userId,
+      input.toStatus,
+      input.expectedVersion,
+    );
   }
 
   @Delete(':id')

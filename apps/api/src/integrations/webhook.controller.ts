@@ -6,6 +6,7 @@ import {
   Headers,
   UnauthorizedException,
   Inject,
+  UnprocessableEntityException,
 } from '@nestjs/common';
 import { ServiceOrdersService } from '../service-orders/service-orders.service';
 import { Priority, ServiceOrderType } from '@prisma/client';
@@ -21,6 +22,8 @@ const ChatWebhookSchema = z.object({
   requester: z.string().trim().min(1).max(200),
   priority: z.nativeEnum(Priority).optional(),
   type: z.nativeEnum(ServiceOrderType).optional(),
+  /** Provedor no cadastro da Ajust; sem ele, o provedor é procurado pelo nome em `requester`. */
+  customerId: z.string().uuid().optional(),
 });
 
 @Controller('webhooks/chat')
@@ -43,14 +46,46 @@ export class WebhookController {
       throw new BadRequestException('Tenant is unavailable.');
     }
 
-    return this.serviceOrders.create(null, 'gerente', {
+    // O.S. só existe dentro de uma ocorrência: o chat abre o atendimento completo (C-043).
+    const customer = await this.prisma.customer.findFirst({
+      where: {
+        tenantId,
+        deletedAt: null,
+        ...(payload.customerId
+          ? { id: payload.customerId }
+          : {
+              OR: [
+                { tradeName: { equals: payload.requester, mode: 'insensitive' } },
+                { legalName: { equals: payload.requester, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, tradeName: true, legalName: true },
+    });
+    if (!customer)
+      throw new UnprocessableEntityException(
+        'Provedor não identificado. Envie customerId ou o nome exato do provedor em requester.',
+      );
+    const type = payload.type || 'AUDITORIA';
+    const provider = customer.tradeName || customer.legalName;
+    return this.serviceOrders.createOccurrenceWithFirstOrder(null, 'gerente', {
       tenantId,
-      title: payload.title,
-      description: payload.description,
-      priority: payload.priority || 'NORMAL',
-      type: payload.type || 'AUDITORIA',
-      requester: payload.requester,
+      customerId: customer.id,
+      provider,
+      type,
+      sector: 'Atendimento',
       origin: 'CHAT_BOT',
+      openedByName: 'Integração de chat',
+      analystResponsible: 'Equipe Ajust',
+      description: payload.description,
+      firstOrder: {
+        type,
+        priority: payload.priority || 'NORMAL',
+        title: payload.title,
+        description: payload.description,
+        requester: provider,
+        origin: 'CHAT_BOT',
+      },
     });
   }
 

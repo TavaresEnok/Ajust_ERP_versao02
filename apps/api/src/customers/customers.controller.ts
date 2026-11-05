@@ -1,18 +1,8 @@
-import {
-  Controller,
-  Get,
-  Inject,
-  Module,
-  NotFoundException,
-  Param,
-  Req,
-  UseGuards,
-} from '@nestjs/common';
+import { Controller, Get, Inject, NotFoundException, Param, Req, UseGuards } from '@nestjs/common';
 import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { assertAnyRole } from '../common/role-utils';
 import { RequestWithAuth } from '../common/request-with-auth';
-import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 
 @Controller('customers')
@@ -27,7 +17,15 @@ export class CustomersController {
 
   @Get()
   list(@Req() req: RequestWithAuth) {
-    return this.prisma.customer.findMany({ where: this.scope(req), orderBy: { tradeName: 'asc' } });
+    return this.prisma.customer.findMany({
+      where: this.scope(req),
+      orderBy: { tradeName: 'asc' },
+      include: {
+        _count: {
+          select: { occurrences: { where: { ...this.scope(req), status: { not: 'ENCERRADA' } } } },
+        },
+      },
+    });
   }
 
   @Get(':id')
@@ -52,6 +50,11 @@ export class CustomersController {
                 analystName: true,
                 createdAt: true,
                 processInstanceId: true,
+                deadlineAt: true,
+                pausedAt: true,
+                slaEligible: true,
+                scheduledAt: true,
+                assignee: { select: { name: true } },
               },
             },
           },
@@ -62,6 +65,3 @@ export class CustomersController {
     return customer;
   }
 }
-
-@Module({ imports: [PrismaModule], controllers: [CustomersController] })
-export class CustomersModule {}

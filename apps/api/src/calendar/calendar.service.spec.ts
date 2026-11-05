@@ -40,7 +40,17 @@ describe('CalendarService.listEvents', () => {
     await svc.listEvents({ tenantId: 't1', from: '2025-01-01', to: '2025-01-31' });
     const where = prisma.calendarEvent.findMany.mock.calls[0][0].where;
     expect(where.tenantId).toBe('t1');
-    expect(where.startAt).toBeDefined();
+    expect(where.AND).toEqual(
+      expect.arrayContaining([
+        { startAt: { lt: new Date('2025-01-31') } },
+        {
+          OR: [
+            { endAt: { gt: new Date('2025-01-01') } },
+            { endAt: null, startAt: { gte: new Date('2025-01-01') } },
+          ],
+        },
+      ]),
+    );
   });
 
   it('adiciona OR (global OR assignee=user) quando userId é fornecido', async () => {
@@ -99,6 +109,17 @@ describe('CalendarService.listTenantUsers', () => {
 });
 
 describe('CalendarService.checkConflict', () => {
+  it('checks appointments without an end time as points inside other appointments or at the same instant', async () => {
+    const prisma = makePrisma();
+    const svc = new CalendarService(prisma);
+    const instant = new Date('2026-10-27T12:00:00Z');
+    await svc.checkConflict('t1', 'u1', instant, instant);
+    const conditions = prisma.calendarEvent.findMany.mock.calls[0][0].where.AND;
+    expect(conditions[0]).toEqual({ startAt: { lte: instant } });
+    expect(conditions[1].OR).toContainEqual({
+      AND: [{ endAt: null }, { startAt: { equals: instant } }],
+    });
+  });
   it('retorna hasConflict=true quando há eventos conflitantes', async () => {
     const prisma = makePrisma();
     prisma.calendarEvent.findMany.mockResolvedValueOnce([{ id: 'e1' }]);
@@ -138,7 +159,13 @@ describe('CalendarService.create', () => {
     prisma.calendarEvent.findMany.mockResolvedValueOnce([{ id: 'e1' }]);
     const svc = new CalendarService(prisma);
     await expect(
-      svc.create('t1', 'u1', { title: 'X', startAt: '2025-01-01T10:00:00Z', assigneeId: 'u2' }),
+      svc.create(
+        't1',
+        'u1',
+        { title: 'X', startAt: '2025-01-01T10:00:00Z', assigneeId: 'u2' },
+        false,
+        'gerente',
+      ),
     ).rejects.toThrow(/Conflict/);
   });
 
@@ -150,6 +177,7 @@ describe('CalendarService.create', () => {
       'u1',
       { title: 'X', startAt: '2025-01-01T10:00:00Z', assigneeId: 'u2' },
       true,
+      'gerente',
     );
     expect(prisma.calendarEvent.create).toHaveBeenCalled();
   });
@@ -170,6 +198,20 @@ describe('CalendarService.create', () => {
 });
 
 describe('CalendarService.update', () => {
+  it('does not allow the calendar to change an execution scheduled from a service order', async () => {
+    const prisma = makePrisma();
+    prisma.calendarEvent.findFirst.mockResolvedValueOnce({
+      id: 'e1',
+      tenantId: 't1',
+      serviceOrderId: 'o1',
+      title: 'Execução · O.S. 123',
+    });
+    const svc = new CalendarService(prisma);
+    await expect(
+      svc.update('e1', 't1', 'u1', 'analista', { startAt: '2026-10-27T10:00:00Z' }),
+    ).rejects.toThrow('Abra a ordem de serviço');
+    expect(prisma.calendarEvent.update).not.toHaveBeenCalled();
+  });
   it('lança NotFoundException se evento não existe', async () => {
     const prisma = makePrisma({ findFirst: jest.fn().mockResolvedValue(null) });
     const svc = new CalendarService(prisma);
@@ -188,6 +230,20 @@ describe('CalendarService.update', () => {
 });
 
 describe('CalendarService.remove', () => {
+  it('protects a service-order schedule from deletion through the calendar, even for managers', async () => {
+    const prisma = makePrisma();
+    prisma.calendarEvent.findFirst.mockResolvedValueOnce({
+      id: 'e1',
+      tenantId: 't1',
+      serviceOrderId: 'o1',
+      title: 'Execução · O.S. 123',
+    });
+    const svc = new CalendarService(prisma);
+    await expect(svc.remove('e1', 't1', 'u1', 'gerente')).rejects.toThrow(
+      'Abra a ordem de serviço',
+    );
+    expect(prisma.calendarEvent.delete).not.toHaveBeenCalled();
+  });
   it('deleta e retorna { deleted: true }', async () => {
     const prisma = makePrisma();
     const svc = new CalendarService(prisma);
@@ -205,5 +261,35 @@ describe('CalendarService.remove', () => {
     });
     const svc = new CalendarService(prisma);
     await expect(svc.remove('e1', 't1', 'u1', 'analista')).rejects.toThrow('seus próprios eventos');
+  });
+});
+
+describe('Calendar privacy and ownership', () => {
+  it('blocks customers from listing staff and strips analyst emails', async () => {
+    const prisma = makePrisma();
+    const svc = new CalendarService(prisma);
+    await expect(svc.listTenantUsers('t1', 'cliente')).rejects.toMatchObject({ status: 403 });
+    prisma.userTenant.findMany.mockResolvedValue([
+      {
+        user: { id: 'u1', name: 'Ana', email: 'private@example.test' },
+        role: { code: 'analista' },
+      },
+    ]);
+    expect((await svc.listTenantUsers('t1', 'analista'))[0]).not.toHaveProperty('email');
+    expect((await svc.listTenantUsers('t1', 'gerente'))[0]).toHaveProperty('email');
+  });
+  it('prevents assigning someone else even when skipping conflicts', async () => {
+    const prisma = makePrisma();
+    const svc = new CalendarService(prisma);
+    await expect(
+      svc.create(
+        't1',
+        'u1',
+        { title: 'X', startAt: '2026-11-04T12:00:00Z', assigneeId: 'u2' },
+        true,
+        'analista',
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(prisma.calendarEvent.create).not.toHaveBeenCalled();
   });
 });

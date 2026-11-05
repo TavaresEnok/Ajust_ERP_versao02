@@ -1,5 +1,12 @@
 import { Inject, Injectable, NotFoundException } from '@nestjs/common';
-import { Asset, AssetCategory, AssetConfigSnapshot, AssetServiceOrder, AssetStatus, Prisma } from '@prisma/client';
+import {
+  Asset,
+  AssetCategory,
+  AssetConfigSnapshot,
+  AssetServiceOrder,
+  AssetStatus,
+  Prisma,
+} from '@prisma/client';
 import { createHash } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -171,7 +178,11 @@ export class CmdbService {
     });
   }
 
-  async getSnapshot(tenantId: string, assetId: string, snapshotId: string): Promise<AssetConfigSnapshot> {
+  async getSnapshot(
+    tenantId: string,
+    assetId: string,
+    snapshotId: string,
+  ): Promise<AssetConfigSnapshot> {
     const snapshot = await this.prisma.assetConfigSnapshot.findFirst({
       where: { id: snapshotId, assetId, tenantId },
       include: {
@@ -251,4 +262,3 @@ export class CmdbService {
     return result.reverse();
   }
 }
-

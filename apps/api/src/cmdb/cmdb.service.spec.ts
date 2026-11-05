@@ -11,7 +11,9 @@ function makePrisma(overrides: any = {}): any {
     assetConfigSnapshot: {
       findFirst: jest.fn().mockResolvedValue(null),
       findMany: jest.fn().mockResolvedValue([]),
-      create: jest.fn().mockImplementation(({ data }: any) => Promise.resolve({ id: 'snap-1', ...data })),
+      create: jest
+        .fn()
+        .mockImplementation(({ data }: any) => Promise.resolve({ id: 'snap-1', ...data })),
     },
     assetServiceOrder: {
       upsert: jest.fn().mockResolvedValue({ assetId: 'a1', orderId: 'o1' }),
@@ -23,7 +25,6 @@ function makePrisma(overrides: any = {}): any {
   for (const key of Object.keys(overrides)) base.asset[key] = overrides[key];
   return base;
 }
-
 
 describe('CmdbService.list', () => {
   it('retorna assets do tenant com createdBy selecionado', async () => {
@@ -172,12 +173,11 @@ describe('CmdbService.snapshots (CMDB-01)', () => {
     const snapB = {
       id: 'snap-2',
       version: 2,
-      content: 'interface GigabitEthernet0/0/1\n ip address 10.0.0.1 255.255.255.0\n undo shutdown\n description Link Upstream',
+      content:
+        'interface GigabitEthernet0/0/1\n ip address 10.0.0.1 255.255.255.0\n undo shutdown\n description Link Upstream',
     };
 
-    prisma.assetConfigSnapshot.findFirst
-      .mockResolvedValueOnce(snapA)
-      .mockResolvedValueOnce(snapB);
+    prisma.assetConfigSnapshot.findFirst.mockResolvedValueOnce(snapA).mockResolvedValueOnce(snapB);
 
     const svc = new CmdbService(prisma);
     const diff = await svc.diffSnapshots('t1', 'a1', 'snap-1', 'snap-2');
@@ -197,4 +197,3 @@ describe('CmdbService.snapshots (CMDB-01)', () => {
     expect(diff.removedLinesCount).toBe(1);
   });
 });
-

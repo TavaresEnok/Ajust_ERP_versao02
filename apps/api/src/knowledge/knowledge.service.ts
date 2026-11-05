@@ -2,10 +2,13 @@ import {
   BadRequestException,
   ConflictException,
   ForbiddenException,
+  HttpException,
+  HttpStatus,
   Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
+import { compare } from 'bcryptjs';
 import { parseTotp, totp } from '../common/totp';
 import { packVaultContent, unpackVaultContent, type VaultAccess } from '../common/vault-content';
 import { Prisma } from '@prisma/client';
@@ -564,11 +567,14 @@ export class KnowledgeService {
     authUserId: string,
     tenantId: string,
     credentialId: string,
+    reason?: string,
+    currentPassword?: string,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(authRole)) {
       throw new ForbiddenException('Role is not allowed to reveal credential secret.');
     }
 
+    await this.authorizeReveal(authUserId, reason, currentPassword);
     const credential = await this.prisma.knowledgeCredential.findFirst({
       where: { id: credentialId, tenantId },
       select: {
@@ -590,19 +596,12 @@ export class KnowledgeService {
     if (!credential) {
       throw new NotFoundException('Credential not found.');
     }
-
-    await this.logAudit(
-      tenantId,
-      authUserId,
-      'CREDENTIAL_ACCESS',
-      'knowledge_credential',
-      credential.id,
-      {
-        op: 'reveal',
-        provider: credential.provider,
-        environment: credential.environment,
-      },
-    );
+    await this.recordReveal(tenantId, authUserId, authRole, credential.id, {
+      op: 'reveal',
+      provider: credential.provider,
+      environment: credential.environment,
+      ...(reason?.trim() ? { reason: reason.trim().slice(0, 300) } : {}),
+    });
 
     const content = unpackVaultContent(
       credential.protectedContentEnc ? decryptSecret(credential.protectedContentEnc) : null,
@@ -622,6 +621,82 @@ export class KnowledgeService {
       updatedAt: credential.updatedAt,
       sourceNote: credential.sourceNoteEnc ? vaultSourceNoteText(credential.sourceNoteEnc) : null,
     };
+  }
+
+  /**
+   * Limite de revelações por pessoa e hora (C-054): um analista com a conta tomada ou mal-
+   * intencionado não esvazia o cofre em minutos. Gerente e super admin têm o dobro. O motivo
+   * é obrigatório e fica no histórico da credencial.
+   */
+  private async authorizeReveal(userId: string, reason?: string, password?: string) {
+    if (!reason?.trim() || reason.trim().length > 300)
+      throw new BadRequestException('Informe o motivo da consulta (até 300 caracteres).');
+    if (!password || password.length > 256)
+      throw new ForbiddenException('Confirme sua senha para consultar o cofre.');
+    const user = await this.prisma.user.findUnique({
+      where: { id: userId },
+      select: { passwordHash: true, status: true, deletedAt: true },
+    });
+    if (
+      !user ||
+      user.status !== 'ACTIVE' ||
+      user.deletedAt ||
+      !(await compare(password, user.passwordHash))
+    )
+      throw new ForbiddenException('Senha atual inválida.');
+  }
+
+  private async recordReveal(
+    tenantId: string,
+    userId: string,
+    role: string,
+    credentialId: string,
+    metadata: Prisma.InputJsonObject,
+  ) {
+    await this.prisma.$transaction(async (tx) => {
+      // Serialize counting and recording across API replicas, not just inside this process.
+      await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${userId}))::text`;
+      await this.assertRevealWithinLimit(tenantId, userId, role, tx);
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: userId,
+          action: 'CREDENTIAL_ACCESS',
+          resourceType: 'knowledge_credential',
+          resourceId: credentialId,
+          metadata,
+        },
+      });
+    });
+  }
+
+  private async assertRevealWithinLimit(
+    tenantId: string,
+    userId: string,
+    role: string,
+    tx: Prisma.TransactionClient,
+  ) {
+    const configured = Number(process.env.VAULT_REVEALS_PER_HOUR || 30);
+    const perHour =
+      (Number.isInteger(configured) && configured > 0 ? configured : 30) *
+      (role === 'analista' ? 1 : 2);
+    const used = await tx.auditLog.count({
+      where: {
+        tenantId,
+        actorUserId: userId,
+        resourceType: 'knowledge_credential',
+        createdAt: { gte: new Date(Date.now() - 3_600_000) },
+        OR: [
+          { metadata: { path: ['op'], equals: 'reveal' } },
+          { metadata: { path: ['op'], equals: 'totp' } },
+        ],
+      },
+    });
+    if (used >= perHour)
+      throw new HttpException(
+        `Limite de ${perHour} credenciais reveladas por hora atingido. Aguarde um pouco ou peça a um gerente.`,
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
   }
 
   async credentialHistory(role: string, tenantId: string, id: string) {
@@ -645,8 +720,16 @@ export class KnowledgeService {
     }));
   }
 
-  async credentialTotp(role: string, userId: string, tenantId: string, id: string) {
+  async credentialTotp(
+    role: string,
+    userId: string,
+    tenantId: string,
+    id: string,
+    reason?: string,
+    currentPassword?: string,
+  ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
+    await this.authorizeReveal(userId, reason, currentPassword);
     const row = await this.prisma.knowledgeCredential.findFirst({
       where: { id, tenantId },
       select: { id: true, totpSecretEnc: true },
@@ -654,8 +737,9 @@ export class KnowledgeService {
     if (!row) throw new NotFoundException();
     if (!row.totpSecretEnc)
       throw new BadRequestException('Cadastre a chave 2FA em Editar para gerar os códigos.');
-    await this.logAudit(tenantId, userId, 'CREDENTIAL_ACCESS', 'knowledge_credential', id, {
+    await this.recordReveal(tenantId, userId, role, id, {
       op: 'totp',
+      reason: reason!.trim(),
     });
     return totp(decryptSecret(row.totpSecretEnc));
   }
@@ -669,7 +753,9 @@ export class KnowledgeService {
           tenantId,
           resourceType: 'knowledge_credential',
           resourceId: { not: null },
-          action: { in: ['OS_CREATE', 'OS_UPDATE'] },
+          action: {
+            in: ['OS_CREATE', 'OS_UPDATE', 'RESOURCE_CREATE', 'RESOURCE_UPDATE', 'RESOURCE_DELETE'],
+          },
         },
         orderBy: { createdAt: 'desc' },
         select: { createdAt: true, actorUser: { select: { name: true } }, metadata: true },
@@ -950,8 +1036,7 @@ export class KnowledgeService {
       throw new NotFoundException('Note not found.');
     }
 
-    const canEditAnyNote = authRole === 'super_admin' || authRole === 'gerente';
-    if (!canEditAnyNote && note.authorUserId !== authUserId) {
+    if (note.authorUserId !== authUserId) {
       throw new ForbiddenException('Only the note author can update this note.');
     }
 
@@ -995,8 +1080,7 @@ export class KnowledgeService {
       throw new NotFoundException('Note not found.');
     }
 
-    const canDeleteAnyNote = authRole === 'super_admin' || authRole === 'gerente';
-    if (!canDeleteAnyNote && note.authorUserId !== authUserId) {
+    if (note.authorUserId !== authUserId) {
       throw new ForbiddenException('Only the note author can remove this note.');
     }
 

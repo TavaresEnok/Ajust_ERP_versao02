@@ -9,10 +9,9 @@ import {
 } from '@nestjs/common';
 import { z } from 'zod';
 import { PrismaService } from '../../prisma/prisma.service';
-import { EventsGateway } from '../../events.gateway';
-import { ServiceOrderType, Priority, SourceSystem } from '@prisma/client';
-import { randomUUID, timingSafeEqual } from 'node:crypto';
-import { SlaEngineService } from '../../sla/sla-engine.service';
+import { ServiceOrderType, Priority } from '@prisma/client';
+import { timingSafeEqual } from 'node:crypto';
+import { ServiceOrdersService } from '../../service-orders/service-orders.service';
 
 const ZabbixPayloadSchema = z
   .object({
@@ -21,15 +20,24 @@ const ZabbixPayloadSchema = z
     severity: z
       .enum(['Not classified', 'Information', 'Warning', 'Average', 'High', 'Disaster'])
       .optional(),
+    // Identidade do problema no Zabbix ({EVENT.ID} / {TRIGGER.ID}) e situação ({EVENT.STATUS}).
+    eventId: z.union([z.string(), z.number()]).optional(),
+    triggerId: z.union([z.string(), z.number()]).optional(),
+    status: z.string().max(40).optional(),
   })
   .passthrough();
 
+const RECOVERY = new Set(['ok', 'resolved', 'recovery', 'resolvido']);
+
+/**
+ * Alertas do Zabbix (auditoria C-044): um problema = uma ocorrência (deduplicada pelo id do
+ * evento ou do trigger), a recuperação resolve a O.S. aberta e a abertura usa o fluxo normal.
+ */
 @Controller('webhooks/monitoring')
 export class MonitoringController {
   constructor(
     @Inject(PrismaService) private readonly prisma: PrismaService,
-    @Inject(EventsGateway) private readonly eventsGateway: EventsGateway,
-    @Inject(SlaEngineService) private readonly slaEngine: SlaEngineService,
+    @Inject(ServiceOrdersService) private readonly serviceOrders: ServiceOrdersService,
   ) {}
 
   @Post('zabbix')
@@ -42,78 +50,99 @@ export class MonitoringController {
     if (!expectedToken || !this.matchesToken(authHeader, `Bearer ${expectedToken}`)) {
       throw new UnauthorizedException('Invalid token');
     }
-
     if (!tenantSlug?.trim()) {
       throw new BadRequestException('Missing x-tenant-slug header.');
     }
 
     const payload = ZabbixPayloadSchema.parse(rawPayload);
-
     const tenant = await this.prisma.tenant.findFirst({
       where: { slug: tenantSlug.trim(), status: 'ACTIVE', deletedAt: null },
     });
     if (!tenant) return { status: 'no tenant' };
 
+    const problemKey = String(payload.eventId ?? payload.triggerId ?? '').trim();
+    const externalId = problemKey ? `zabbix:${problemKey}` : null;
+    const existing = externalId
+      ? await this.prisma.occurrence.findUnique({
+          where: {
+            tenantId_sourceSystem_externalId: {
+              tenantId: tenant.id,
+              sourceSystem: 'WEBHOOK',
+              externalId,
+            },
+          },
+          select: { id: true, number: true, status: true },
+        })
+      : null;
+
+    if (payload.status && RECOVERY.has(payload.status.trim().toLowerCase())) {
+      if (!existing) return { status: 'recovery_without_problem' };
+      const resolved = await this.serviceOrders.resolveFromIntegration(
+        tenant.id,
+        existing.id,
+        `Zabbix informou recuperação${payload.host ? ` em ${payload.host}` : ''}.`,
+      );
+      return { status: 'resolved', occurrenceId: existing.id, resolved };
+    }
+    // Mesmo problema chegando de novo (repetição do Zabbix): não abre outro chamado.
+    if (existing && existing.status !== 'ENCERRADA')
+      return { status: 'duplicate', occurrenceId: existing.id };
+
     const title = payload.eventName || 'Alerta de Monitoramento';
     const desc = payload.host
-      ? `Host: ${payload.host} reportou um problema. Detalhes: ${JSON.stringify(payload)}`
-      : JSON.stringify(payload);
+      ? `Host ${payload.host} reportou um problema: ${title}. Severidade: ${payload.severity || 'não informada'}.`
+      : `Alerta do Zabbix: ${title}.`;
+    const priority: Priority =
+      payload.severity === 'Disaster' || payload.severity === 'High'
+        ? Priority.CRITICA
+        : Priority.ALTA;
+    const customer = payload.host ? await this.customerForHost(tenant.id, payload.host) : null;
+    const provider = customer ? customer.tradeName || customer.legalName : 'NOC / ZABBIX';
 
-    let priority: Priority = Priority.ALTA;
-    if (payload.severity === 'Disaster' || payload.severity === 'High') priority = Priority.CRITICA;
-
-    const suffix = `${Date.now()}-${randomUUID().slice(0, 8)}`;
-    const policy = await this.slaEngine.findApplicablePolicy(
-      tenant.id,
-      priority,
-      ServiceOrderType.ROMPIMENTO,
-    );
-    const deadlineAt = await this.slaEngine.calculateTargetDate(
-      new Date(),
-      policy.hours,
-      tenant.id,
-    );
-
-    const order = await this.prisma.$transaction(async (tx) => {
-      const occurrence = await tx.occurrence.create({
-        data: {
-          tenantId: tenant.id,
-          number: `ZBX-${suffix}`,
-          provider: 'NOC / ZABBIX',
-          type: 'ROMPIMENTO/INCIDENTE GLOBAL',
-          status: 'ABERTA',
-          sector: 'NOC N3',
-          origin: 'Monitoramento Zabbix',
-          openedByName: 'Sistema Zabbix',
-          analystResponsible: 'Zabbix Automacao',
-          description: `INCIDENTE DETECTADO AUTOMATICAMENTE:\n${desc}`,
-        },
-      });
-
-      return tx.serviceOrder.create({
-        data: {
-          tenantId: tenant.id,
-          protocol: `MNT-${suffix}`,
-          sourceSystem: SourceSystem.ERP,
-          type: ServiceOrderType.ROMPIMENTO,
-          occurrenceId: occurrence.id,
-          priority,
-          status: 'ABERTA',
-          title: `[ALERTA ZABBIX] ${title}`,
-          description: desc,
-          sector: 'NOC N3',
-          deadlineAt,
-          origin: 'Monitoramento',
-        },
-      });
+    const occurrence = await this.serviceOrders.createOccurrenceWithFirstOrder(null, 'gerente', {
+      tenantId: tenant.id,
+      ...(customer ? { customerId: customer.id } : {}),
+      provider,
+      type: 'ROMPIMENTO/INCIDENTE',
+      sector: 'NOC N3',
+      origin: 'Monitoramento Zabbix',
+      openedByName: 'Sistema Zabbix',
+      analystResponsible: 'Equipe Ajust',
+      description: `INCIDENTE DETECTADO AUTOMATICAMENTE: ${desc}`,
+      sourceSystem: 'WEBHOOK',
+      ...(externalId && !existing ? { externalId } : {}),
+      sourceMetadata: { zabbix: payload } as never,
+      firstOrder: {
+        type: ServiceOrderType.ROMPIMENTO,
+        priority,
+        title: `[ALERTA ZABBIX] ${title}`,
+        description: desc,
+        requester: provider,
+        sector: 'NOC N3',
+        origin: 'Monitoramento',
+      },
     });
+    return { success: true, occurrenceId: occurrence.id, provider };
+  }
 
-    this.eventsGateway.emitTenantEvent(tenant.id, 'order_created', {
-      orderId: order.id,
-      source: 'ZABBIX',
+  /** Host do alerta → provedor, pelo host cadastrado no cofre (credenciais do equipamento). */
+  private async customerForHost(tenantId: string, host: string) {
+    const credential = await this.prisma.knowledgeCredential.findFirst({
+      where: { tenantId, host: { equals: host, mode: 'insensitive' } },
+      select: { provider: true },
     });
-
-    return { success: true, orderId: order.id };
+    if (!credential?.provider) return null;
+    return this.prisma.customer.findFirst({
+      where: {
+        tenantId,
+        deletedAt: null,
+        OR: [
+          { tradeName: { equals: credential.provider, mode: 'insensitive' } },
+          { legalName: { equals: credential.provider, mode: 'insensitive' } },
+        ],
+      },
+      select: { id: true, tradeName: true, legalName: true },
+    });
   }
 
   private matchesToken(received: string, expected: string): boolean {

@@ -14,6 +14,20 @@ describe('Customer registration tenant scope', () => {
     expect(findMany).toHaveBeenCalledWith({
       where: { tenantId: 'ajust-workspace', deletedAt: null },
       orderBy: { tradeName: 'asc' },
+      // Contagem de ocorrências abertas do provedor (sempre dentro do mesmo workspace).
+      include: {
+        _count: {
+          select: {
+            occurrences: {
+              where: {
+                tenantId: 'ajust-workspace',
+                deletedAt: null,
+                status: { not: 'ENCERRADA' },
+              },
+            },
+          },
+        },
+      },
     });
   });
   it('does not expose another workspace through a known customer UUID', async () => {

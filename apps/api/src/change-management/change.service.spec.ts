@@ -7,14 +7,20 @@ function makePrisma(overrides: any = {}): any {
       findFirst: jest.fn().mockResolvedValue({
         id: 'c1',
         tenantId: 't1',
+        version: 0,
+        requestedById: 'requester',
         status: 'AGUARDANDO_APROVACAO',
       }),
       count: jest.fn().mockResolvedValue(0),
       create: jest.fn().mockResolvedValue({ id: 'c1', number: 'RFC-00001' }),
+      updateMany: jest.fn().mockResolvedValue({ count: 1 }),
+      findUniqueOrThrow: jest.fn().mockResolvedValue({ id: 'c1', version: 1 }),
       update: jest.fn().mockResolvedValue({ id: 'c1' }),
     },
   };
   for (const key of Object.keys(overrides)) base.changeRequest[key] = overrides[key];
+  base.auditLog = { create: jest.fn().mockResolvedValue({}) };
+  base.$transaction = jest.fn((run) => run(base));
   return base;
 }
 
@@ -60,14 +66,14 @@ describe('ChangeService.transition', () => {
   it('lança NotFoundException se RFC não existe', async () => {
     const prisma = makePrisma({ findFirst: jest.fn().mockResolvedValue(null) });
     const svc = new ChangeService(prisma);
-    await expect(svc.transition('t1', 'c1', 'u1', 'APROVADO')).rejects.toThrow('RFC not found');
+    await expect(svc.transition('t1', 'c1', 'u1', 'APROVADO', 0)).rejects.toThrow('RFC not found');
   });
 
   it('define approvedById/At ao aprovar', async () => {
     const prisma = makePrisma();
     const svc = new ChangeService(prisma);
-    await svc.transition('t1', 'c1', 'u1', 'APROVADO');
-    const data = prisma.changeRequest.update.mock.calls[0][0].data;
+    await svc.transition('t1', 'c1', 'u1', 'APROVADO', 0);
+    const data = prisma.changeRequest.updateMany.mock.calls[0][0].data;
     expect(data.status).toBe('APROVADO');
     expect(data.approvedById).toBe('u1');
     expect(data.approvedAt).toBeInstanceOf(Date);
@@ -78,11 +84,13 @@ describe('ChangeService.transition', () => {
     prisma.changeRequest.findFirst.mockResolvedValueOnce({
       id: 'c1',
       tenantId: 't1',
+      version: 0,
+      requestedById: 'requester',
       status: 'APROVADO',
     });
     const svc = new ChangeService(prisma);
-    await svc.transition('t1', 'c1', 'u1', 'EM_EXECUCAO');
-    const data = prisma.changeRequest.update.mock.calls[0][0].data;
+    await svc.transition('t1', 'c1', 'u1', 'EM_EXECUCAO', 0);
+    const data = prisma.changeRequest.updateMany.mock.calls[0][0].data;
     expect(data.executedById).toBe('u1');
   });
 
@@ -91,10 +99,14 @@ describe('ChangeService.transition', () => {
     prisma.changeRequest.findFirst.mockResolvedValueOnce({
       id: 'c1',
       tenantId: 't1',
+      version: 0,
+      requestedById: 'requester',
       status: 'RASCUNHO',
     });
     const svc = new ChangeService(prisma);
-    await expect(svc.transition('t1', 'c1', 'u1', 'CONCLUIDO')).rejects.toThrow('is not allowed');
+    await expect(svc.transition('t1', 'c1', 'u1', 'CONCLUIDO', 0)).rejects.toThrow(
+      'is not allowed',
+    );
   });
 });
 
@@ -107,5 +119,30 @@ describe('ChangeService.remove', () => {
       expect.objectContaining({ data: { deletedAt: expect.any(Date) } }),
     );
     expect(result).toBeDefined();
+  });
+});
+
+describe('RFC concurrency and approval separation', () => {
+  it('rejects missing/stale version and self approval before changing data', async () => {
+    const prisma = makePrisma();
+    const svc = new ChangeService(prisma);
+    await expect(svc.transition('t1', 'c1', 'u1', 'APROVADO')).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(svc.transition('t1', 'c1', 'u1', 'APROVADO', 4)).rejects.toMatchObject({
+      status: 409,
+    });
+    await expect(svc.transition('t1', 'c1', 'requester', 'APROVADO', 0)).rejects.toMatchObject({
+      status: 403,
+    });
+    expect(prisma.changeRequest.updateMany).not.toHaveBeenCalled();
+  });
+  it('rejects a concurrent winner and never records a successful audit', async () => {
+    const prisma = makePrisma();
+    prisma.changeRequest.updateMany.mockResolvedValue({ count: 0 });
+    await expect(
+      new ChangeService(prisma).transition('t1', 'c1', 'u1', 'APROVADO', 0),
+    ).rejects.toMatchObject({ status: 409 });
+    expect(prisma.auditLog.create).not.toHaveBeenCalled();
   });
 });

@@ -3,10 +3,18 @@ import { TimeTrackingService } from './time-tracking.service';
 function makePrisma(overrides: any = {}): any {
   const base: any = {
     timeEntry: {
+      groupBy: jest.fn().mockResolvedValue([]),
+      aggregate: jest.fn().mockResolvedValue({ _sum: { minutes: 135 } }),
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest.fn().mockResolvedValue({ id: 'te1', tenantId: 't1' }),
       create: jest.fn().mockResolvedValue({ id: 'te1' }),
       delete: jest.fn().mockResolvedValue({ id: 'te1' }),
+    },
+    user: {
+      findMany: jest.fn().mockResolvedValue([
+        { id: 'u1', name: 'Ana' },
+        { id: 'u2', name: 'Bob' },
+      ]),
     },
     serviceOrder: {
       findFirst: jest.fn().mockResolvedValue({ id: 'o1', tenantId: 't1' }),
@@ -85,10 +93,9 @@ describe('TimeTrackingService.remove', () => {
 describe('TimeTrackingService.summary', () => {
   it('agrega minutos por usuário', async () => {
     const prisma = makePrisma();
-    prisma.timeEntry.findMany.mockResolvedValueOnce([
-      { id: 'e1', userId: 'u1', minutes: 30, billable: true, user: { name: 'Ana' } },
-      { id: 'e2', userId: 'u1', minutes: 60, billable: true, user: { name: 'Ana' } },
-      { id: 'e3', userId: 'u2', minutes: 45, billable: false, user: { name: 'Bob' } },
+    prisma.timeEntry.groupBy.mockResolvedValueOnce([
+      { userId: 'u1', billable: true, _sum: { minutes: 90 } },
+      { userId: 'u2', billable: false, _sum: { minutes: 45 } },
     ]);
     const svc = new TimeTrackingService(prisma);
     const summary = await svc.summary('t1');
@@ -109,5 +116,68 @@ describe('TimeTrackingService.summary', () => {
     expect(summary.totalMinutes).toBe(0);
     expect(summary.billableMinutes).toBe(0);
     expect(summary.byUser).toEqual([]);
+  });
+});
+
+describe('Time entry constraints', () => {
+  it('refuses future dates, old analyst entries and closed orders', async () => {
+    const prisma = makePrisma();
+    const svc = new TimeTrackingService(prisma);
+    await expect(
+      svc.create(
+        't1',
+        'u1',
+        { orderId: 'o1', minutes: 30, loggedAt: new Date(Date.now() + 60000).toISOString() },
+        'gerente',
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      svc.create(
+        't1',
+        'u1',
+        { orderId: 'o1', minutes: 30, loggedAt: '2000-01-01T00:00:00Z' },
+        'analista',
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    prisma.serviceOrder.findFirst.mockResolvedValue({ id: 'o1', status: 'FECHADA' });
+    await expect(
+      svc.create('t1', 'u1', { orderId: 'o1', minutes: 30 }, 'analista'),
+    ).rejects.toMatchObject({ status: 403 });
+    await svc.create('t1', 'u1', { orderId: 'o1', minutes: 30 }, 'gerente');
+    expect(prisma.timeEntry.create).toHaveBeenCalledTimes(1);
+  });
+  it('restricts analyst listings and limits every page', async () => {
+    const prisma = makePrisma();
+    const svc = new TimeTrackingService(prisma);
+    await svc.listByTenant('t1', undefined, undefined, 'u1', 500, 10);
+    expect(prisma.timeEntry.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: 't1', userId: 'u1' }, take: 200, skip: 10 }),
+    );
+    await svc.summary('t1', 'u1');
+    expect(prisma.timeEntry.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ where: { tenantId: 't1', userId: 'u1' } }),
+    );
+  });
+});
+
+describe('Time entry totals', () => {
+  it('returns only aggregate minutes, with tenant and live-order scope', async () => {
+    const prisma = makePrisma();
+    const svc = new TimeTrackingService(prisma);
+    expect(await svc.orderTotal('t1', 'o1')).toEqual({ orderId: 'o1', totalMinutes: 135 });
+    expect(prisma.timeEntry.aggregate).toHaveBeenCalledWith({
+      where: { tenantId: 't1', orderId: 'o1' },
+      _sum: { minutes: true },
+    });
+    prisma.serviceOrder.findFirst.mockResolvedValue(null);
+    await expect(svc.orderTotal('t1', 'other')).rejects.toThrow('O.S. não encontrada');
+    expect(prisma.timeEntry.aggregate).toHaveBeenCalledTimes(1);
+  });
+  it('aggregates only the authenticated analyst in the summary', async () => {
+    const prisma = makePrisma();
+    await new TimeTrackingService(prisma).summary('t1', 'u1');
+    expect(prisma.timeEntry.groupBy).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { tenantId: 't1', userId: 'u1' } }),
+    );
   });
 });

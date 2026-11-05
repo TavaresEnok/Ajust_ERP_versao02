@@ -36,9 +36,9 @@ const CalendarEventSchema = z.object({
   type: z.nativeEnum(CalendarEventType).optional(),
   isGlobal: z.boolean().optional(),
   startAt: z.string().datetime({ offset: true }),
-  endAt: z.string().datetime({ offset: true }).optional(),
+  endAt: z.string().datetime({ offset: true }).nullable().optional(),
   allDay: z.boolean().optional(),
-  meetingLink: z.string().url().max(2048).optional(),
+  meetingLink: z.string().url().max(2048).nullable().optional(),
   location: z.string().trim().max(500).optional(),
   color: z
     .string()
@@ -123,7 +123,7 @@ export class CalendarController {
   @Get('users')
   async listUsers(@Req() req: RequestWithAuth) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
-    return this.calendarService.listTenantUsers(req.auth.tenantId);
+    return this.calendarService.listTenantUsers(req.auth.tenantId, req.auth.role || '');
   }
 
   /**
@@ -168,6 +168,7 @@ export class CalendarController {
       req.auth.userId,
       input,
       skipConflictCheck === 'true',
+      role,
     );
   }
 
