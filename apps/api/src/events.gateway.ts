@@ -29,7 +29,9 @@ function getCorsOrigin() {
     const base = process.env.WEB_BASE_URL || process.env.WEB_URL;
     return base ? [base] : false;
   }
-  return ['http://localhost:3000', 'http://localhost:8070'];
+  // Fora de produção também aceita o endereço público (HTTPS pelo Caddy, C-075).
+  const publicUrl = process.env.WEB_BASE_URL || process.env.PUBLIC_APP_URL;
+  return ['http://localhost:3000', 'http://localhost:8070', ...(publicUrl ? [publicUrl] : [])];
 }
 
 @WebSocketGateway({
