@@ -41,7 +41,7 @@ services:
   web:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/web:${IMAGE_TAG:-latest}
     ports:
-      - "80:3000"
+      - "127.0.0.1:8070:3000"
     environment:
       - NODE_ENV=production
       - API_INTERNAL_URL=http://api:3001
@@ -69,18 +69,20 @@ services:
   api:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/api:${IMAGE_TAG:-latest}
     ports:
-      - "3001:3001"
+      - "127.0.0.1:8071:3001"
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-      - JWT_RESET_SECRET=${JWT_RESET_SECRET}
-      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
-      - MONITORING_WEBHOOK_TOKEN=${MONITORING_WEBHOOK_TOKEN}
-      - CHAT_WEBHOOK_TOKEN=${CHAT_WEBHOOK_TOKEN}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN:?Defina WORKER_API_TOKEN}
+      - REQUIRE_2FA_ROLES=super_admin,gerente
+      - DATABASE_URL=${DATABASE_URL:?Defina DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:?Configure a URL autenticada do Redis}
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?Defina JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?Defina JWT_REFRESH_SECRET}
+      - JWT_RESET_SECRET=${JWT_RESET_SECRET:?Defina JWT_RESET_SECRET}
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:?Defina SECRETS_ENCRYPTION_KEY}
+      - MONITORING_WEBHOOK_TOKEN=${MONITORING_WEBHOOK_TOKEN:?Defina MONITORING_WEBHOOK_TOKEN}
+      - CHAT_WEBHOOK_TOKEN=${CHAT_WEBHOOK_TOKEN:?Defina CHAT_WEBHOOK_TOKEN}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
       - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}
@@ -90,8 +92,15 @@ services:
       - WEB_BASE_URL=${WEB_BASE_URL}
       - FRONTEND_URL=${WEB_BASE_URL}
       - UPLOAD_ROOT=${UPLOAD_ROOT:-/app/uploads}
+      - VAULT_KEY_FILE=/run/secrets/vault.key
     volumes:
       - uploads_data:/app/uploads
+      - type: bind
+        source: ${VAULT_KEY_HOST_FILE:?Informe o caminho da chave existente do cofre fora de uploads}
+        target: /run/secrets/vault.key
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       postgres:
         condition: service_healthy
@@ -115,13 +124,13 @@ services:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/worker:${IMAGE_TAG:-latest}
     environment:
       - NODE_ENV=production
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379
+      - DATABASE_URL=${DATABASE_URL:?Defina DATABASE_URL}
+      - REDIS_URL=${REDIS_URL:?Configure a URL autenticada do Redis}
       - IXC_RECONCILE_INTERVAL_MS=${IXC_RECONCILE_INTERVAL_MS:-300000}
       - UPLOAD_ROOT=${UPLOAD_ROOT:-/app/uploads}
-      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
-      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
-      - WORKER_API_TOKEN=${WORKER_API_TOKEN}
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:?Defina SECRETS_ENCRYPTION_KEY}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN:?Defina WORKER_API_TOKEN}
       - SMTP_HOST=${SMTP_HOST}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}
@@ -154,7 +163,7 @@ services:
     environment:
       POSTGRES_DB: ajust_erp
       POSTGRES_USER: ajust
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -173,12 +182,22 @@ services:
   # ── Redis (Pub/Sub + Sessions) ───────────────────────────
   redis:
     image: redis:7-alpine
-    command: >
-      redis-server
-      --save 60 1
-      --loglevel warning
-      --maxmemory 256mb
-      --maxmemory-policy allkeys-lru
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Defina REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --save
+      - "60 1"
+      - --loglevel
+      - warning
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?Defina REDIS_PASSWORD}
     volumes:
       - redis_data:/data
     healthcheck:
