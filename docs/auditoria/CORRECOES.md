@@ -87,7 +87,7 @@
 | C-073 | Baixa | 5 | Sessões expiradas nunca são removidas | Corrigido no código (não implantado) |
 | C-074 | Baixa | 5 | Algumas exclusões em cascata apagam histórico que deveria ficar | Corrigido no código (migration pendente) |
 | C-075 | Alta | 6 | O ERP é acessado por HTTP puro, sem TLS | Em correção (preparado; falta o domínio) |
-| C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (parcial; falta destino externo e agendamento) |
+| C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (falta só o destino externo) |
 | C-077 | Média | 6 | Redis de produção descarta chaves das filas e do rate limit quando enche | Corrigido nos arquivos de compose (produção pendente) |
 | C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Em correção (parcial) |
 | C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido (em execução) |
@@ -1083,7 +1083,8 @@
 - **Como validar:** existe backup de hoje fora do servidor; o restore num ambiente limpo abre uma credencial do cofre.
 - **Andamento (04/11):** backup completo feito e validado em `/home/app/backups/ajust_erp/20261104_160913/` (banco, `uploads/`, `vault.key`, `.env` antigo, `SHA256SUMS`; pasta `0700`). **Falta:** copiar para fora do servidor e agendar a rotina diária.
 - **Conclusão (05/11):** `scripts/backup-completo.sh`: banco validado, uploads com a chave do cofre, `.env` e hashes, retenção de 14 dias, e cópia externa por rsync assim que existir `destino.conf`. Executado com sucesso em 05/11. O agendamento no crontab foi bloqueado pelas permissões do assistente e precisa ser instalado pelo usuário.
-- **Status:** Em correção (parcial; falta destino externo e agendamento)
+- **Agendamento (05/11):** `crontab` do usuário app roda `scripts/backup-completo.sh` todo dia às 03:00 (log em `/home/app/backups/ajust_erp/backup.log`). Falta só o destino externo (`destino.conf`).
+- **Status:** Em correção (falta só o destino externo)
 
 ### C-077 · Redis de produção descarta chaves das filas e do rate limit quando enche
 - **Severidade:** Média
