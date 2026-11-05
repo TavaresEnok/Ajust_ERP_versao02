@@ -270,18 +270,28 @@ export class KnowledgeController {
   }
 
   @Post('credentials/:id/totp')
-  async credentialTotp(@Req() req: RequestWithAuth, @Param('id') id: string) {
+  async credentialTotp(
+    @Req() req: RequestWithAuth,
+    @Param('id') id: string,
+    @Body() body?: { reason?: unknown; currentPassword?: unknown },
+  ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException();
     return this.knowledgeService.credentialTotp(
       req.auth.role || '',
       req.auth.userId,
       req.auth.tenantId,
       id,
+      typeof body?.reason === 'string' ? body.reason : undefined,
+      typeof body?.currentPassword === 'string' ? body.currentPassword : undefined,
     );
   }
 
   @Post('credentials/:id/reveal')
-  async revealCredential(@Req() req: RequestWithAuth, @Param('id') id: string) {
+  async revealCredential(
+    @Req() req: RequestWithAuth,
+    @Param('id') id: string,
+    @Body() body?: { reason?: unknown; currentPassword?: unknown },
+  ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
     return this.knowledgeService.revealCredential(
@@ -289,6 +299,8 @@ export class KnowledgeController {
       req.auth.userId,
       req.auth.tenantId,
       id,
+      typeof body?.reason === 'string' ? body.reason : undefined,
+      typeof body?.currentPassword === 'string' ? body.currentPassword : undefined,
     );
   }
 

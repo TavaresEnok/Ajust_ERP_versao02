@@ -1,4 +1,11 @@
-import { BadRequestException, ForbiddenException, Inject, Injectable } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  Optional,
+} from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
 import {
@@ -11,6 +18,17 @@ import {
 import { EventsGateway } from '../../events.gateway';
 import { decryptSecret, encryptSecret } from '../../common/secrets.crypto';
 import { SlaEngineService } from '../../sla/sla-engine.service';
+import { nextOrderProtocol } from '../../service-orders/order-protocol';
+import { ServiceOrdersService } from '../../service-orders/service-orders.service';
+import { ServiceOrderLifecycleService } from '../../service-orders/service-order-lifecycle.service';
+import {
+  AWAITING_APPROVAL_MESSAGE,
+  ORDER_TRANSITIONS,
+  hasCurrentApproval,
+  isActiveStatus,
+  needsClosingApproval,
+  statusDates,
+} from '../../service-orders/service-order-rules';
 
 type IxcWebhookInput = {
   tenantId: string;
@@ -20,15 +38,7 @@ type IxcWebhookInput = {
   title?: string;
   description?: string;
   priority?: 'BAIXA' | 'NORMAL' | 'ALTA' | 'CRITICA';
-  type?:
-    | 'ROMPIMENTO'
-    | 'LENTIDAO'
-    | 'CONFIGURACAO_ONU'
-    | 'TROCA_SENHA'
-    | 'CANCELAMENTO'
-    | 'AUDITORIA'
-    | 'INSTALACAO'
-    | 'BGP';
+  type?: ServiceOrderType;
   payload: Record<string, unknown>;
   rawBody?: string;
   signature?: string;
@@ -53,6 +63,12 @@ export class IxcService {
     @Inject(PrismaService) private readonly prisma: PrismaService,
     @Inject(EventsGateway) private readonly eventsGateway: EventsGateway,
     @Inject(SlaEngineService) private readonly slaEngine: SlaEngineService,
+    @Optional()
+    @Inject(ServiceOrdersService)
+    private readonly serviceOrders?: ServiceOrdersService,
+    @Optional()
+    @Inject(ServiceOrderLifecycleService)
+    private readonly lifecycle?: ServiceOrderLifecycleService,
   ) {}
 
   async receiveWebhook(input: IxcWebhookInput) {
@@ -63,8 +79,19 @@ export class IxcService {
     );
 
     const payloadHash = createHash('sha256')
-      .update(JSON.stringify(input.payload || {}))
+      .update(input.rawBody || JSON.stringify(input.payload || {}))
       .digest('hex');
+    // Mesmo corpo assinado reenviado em 24 h é ignorado (proteção contra replay, C-045).
+    const replay = await this.prisma.syncEvent.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        source: 'WEBHOOK',
+        payloadHash,
+        receivedAt: { gte: new Date(Date.now() - 24 * 3_600_000) },
+      },
+      select: { id: true },
+    });
+    if (replay) return { syncEventId: replay.id, processed: false, duplicate: true };
 
     const syncEvent = await this.prisma.syncEvent.create({
       data: {
@@ -188,6 +215,36 @@ export class IxcService {
     return this.toPublicIntegration(created);
   }
 
+  async applyPollingDelta(tenantId: string, delta: Record<string, unknown>) {
+    const integration = await this.prisma.providerIntegration.findFirst({
+      where: { tenantId, provider: 'IXC', status: 'ACTIVE' },
+    });
+    if (!integration) throw new BadRequestException('Integração IXC inativa.');
+    const externalProtocol = String(delta.externalProtocol || '').trim();
+    if (!externalProtocol) return { applied: false };
+    const updatedAt = delta.updatedAt ? new Date(String(delta.updatedAt)) : null;
+    if (updatedAt && !Number.isFinite(updatedAt.getTime()))
+      throw new BadRequestException('Data externa inválida.');
+    const priority =
+      Object.values(Priority).find((p) => p === String(delta.priority).toUpperCase()) ??
+      Priority.NORMAL;
+    const type =
+      Object.values(ServiceOrderType).find((t) => t === String(delta.type).toUpperCase()) ??
+      ServiceOrderType.AUDITORIA;
+    const result = await this.applyWebhookToOrder({
+      tenantId,
+      externalProtocol,
+      eventType: 'POLLING',
+      status: typeof delta.status === 'string' ? delta.status : undefined,
+      title: typeof delta.title === 'string' ? delta.title : undefined,
+      description: typeof delta.description === 'string' ? delta.description : undefined,
+      priority,
+      type,
+      payload: { ...delta, ...(updatedAt ? { ixcUpdatedAt: updatedAt.toISOString() } : {}) },
+    });
+    return { applied: result.operation !== 'skipped', ...result };
+  }
+
   private async applyWebhookToOrder(input: IxcWebhookInput) {
     const mappedStatus = this.mapIxcStatus(input.status);
 
@@ -208,19 +265,86 @@ export class IxcService {
       : null;
 
     if (existing) {
-      const updated = await this.prisma.serviceOrder.update({
-        where: { id: existing.id },
+      const previous = existing.sourceMetadata as Record<string, unknown> | null;
+      const incoming = input.payload.ixcUpdatedAt;
+      if (
+        typeof incoming === 'string' &&
+        typeof previous?.ixcUpdatedAt === 'string' &&
+        new Date(incoming) <= new Date(previous.ixcUpdatedAt)
+      )
+        return { orderId: existing.id, operation: 'skipped' as const };
+      // O status do IXC passa pelas mesmas regras do ERP (C-045): transição válida, datas,
+      // versão, aprovação e efeitos. Fora disso, registra conflito e não mexe no status.
+      let target = mappedStatus && mappedStatus !== existing.status ? mappedStatus : null;
+      let note = '';
+      if (
+        input.eventType === 'POLLING' &&
+        ['RESOLVIDA', 'FECHADA', 'CANCELADA'].includes(existing.status) &&
+        target
+      ) {
+        note = ' Status externo ignorado: atendimento já concluído.';
+        target = null;
+      }
+      if (target) {
+        const forwardClose =
+          isActiveStatus(existing.status) && (target === 'RESOLVIDA' || target === 'FECHADA');
+        if (!forwardClose && !ORDER_TRANSITIONS[existing.status].includes(target)) {
+          note = ` Status ${input.status} ignorado: ${existing.status} → ${target} não é permitido.`;
+          target = null;
+        } else if (
+          target === 'FECHADA' &&
+          needsClosingApproval(existing) &&
+          !(await hasCurrentApproval(this.prisma, existing))
+        ) {
+          target = 'RESOLVIDA';
+          note = ` ${AWAITING_APPROVAL_MESSAGE}`;
+        }
+        if (target === existing.status) target = null;
+      }
+      const changed = await this.prisma.serviceOrder.updateMany({
+        where: { id: existing.id, version: existing.version },
         data: {
-          status: mappedStatus || existing.status,
+          ...(typeof incoming === 'string'
+            ? { sourceMetadata: { ...previous, ixcUpdatedAt: incoming } as Prisma.InputJsonValue }
+            : {}),
+          ...(target ? { ...statusDates(existing, target), status: target } : {}),
           title: input.title || existing.title,
           description: input.description || existing.description,
-          occurrences: {
-            create: {
-              sourceSystem: 'WEBHOOK',
-              message: `Webhook IXC recebido (${input.eventType})${input.status ? ` status=${input.status}` : ''}.`,
-            },
-          },
+          version: { increment: 1 },
         },
+      });
+      if (changed.count !== 1)
+        throw new ConflictException('O.S. alterada durante a sincronização.');
+      await this.prisma.serviceOrderOccurrence.create({
+        data: {
+          serviceOrderId: existing.id,
+          sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
+          message: `Webhook IXC recebido (${input.eventType})${input.status ? ` status=${input.status}` : ''}.${note}`,
+        },
+      });
+      if (target) {
+        await this.prisma.serviceOrderStatusEvent.create({
+          data: {
+            tenantId: input.tenantId,
+            serviceOrderId: existing.id,
+            fromStatus: existing.status,
+            toStatus: target,
+            reason: `IXC ${input.eventType}`,
+            metadata: { source: 'ixc-webhook' },
+          },
+        });
+        await this.lifecycle?.afterStatusChange({
+          tenantId: input.tenantId,
+          orderId: existing.id,
+          from: existing.status,
+          to: target,
+          actorId: null,
+          reason: `IXC ${input.eventType}`,
+          source: 'integration',
+        });
+      }
+      const updated = await this.prisma.serviceOrder.findUniqueOrThrow({
+        where: { id: existing.id },
       });
 
       this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order.synced', {
@@ -233,7 +357,52 @@ export class IxcService {
         at: new Date().toISOString(),
       });
 
-      return { orderId: updated.id, operation: 'updated' as const };
+      return {
+        orderId: updated.id,
+        operation: 'updated' as const,
+        ...(note ? { note: note.trim() } : {}),
+      };
+    }
+
+    // O.S. nova: atendimento completo (ocorrência + primeira O.S.) pelo fluxo normal.
+    if (this.serviceOrders) {
+      const customer = await this.customerFor(input);
+      const type = input.type || ServiceOrderType.AUDITORIA;
+      const provider = customer
+        ? customer.tradeName || customer.legalName
+        : 'IXC (provedor não identificado)';
+      const occurrence = await this.serviceOrders.createOccurrenceWithFirstOrder(null, 'gerente', {
+        tenantId: input.tenantId,
+        ...(customer ? { customerId: customer.id } : {}),
+        provider,
+        type,
+        sector: 'Atendimento',
+        origin: 'IXC',
+        openedByName: 'Integração IXC',
+        analystResponsible: 'Equipe Ajust',
+        description: input.description || `Criada via webhook IXC (${input.eventType}).`,
+        sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
+        firstOrder: {
+          type,
+          priority: input.priority || Priority.NORMAL,
+          title: input.title || `IXC ${input.eventType}`,
+          description: input.description || `Criada via webhook IXC (${input.eventType}).`,
+          requester: provider,
+          origin: 'IXC',
+        },
+      });
+      const first = (occurrence as { serviceOrders?: Array<{ id: string }> }).serviceOrders?.[0];
+      if (first && input.externalProtocol)
+        await this.prisma.serviceOrder.update({
+          where: { id: first.id },
+          data: {
+            externalProtocol: input.externalProtocol,
+            ...(typeof input.payload.ixcUpdatedAt === 'string'
+              ? { sourceMetadata: { ixcUpdatedAt: input.payload.ixcUpdatedAt } }
+              : {}),
+          },
+        });
+      return { orderId: first?.id, operation: 'created' as const };
     }
 
     const protocol = await this.buildProtocol(input.tenantId);
@@ -251,7 +420,7 @@ export class IxcService {
         tenantId: input.tenantId,
         protocol,
         externalProtocol: input.externalProtocol || null,
-        sourceSystem: 'SGP',
+        sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
         type,
         priority,
         status: mappedStatus || 'ABERTA',
@@ -260,7 +429,7 @@ export class IxcService {
         deadlineAt,
         occurrences: {
           create: {
-            sourceSystem: 'WEBHOOK',
+            sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
             message: `OS criada via webhook IXC (${input.eventType}).`,
           },
         },
@@ -278,6 +447,28 @@ export class IxcService {
     });
 
     return { orderId: created.id, operation: 'created' as const };
+  }
+
+  /** Provedor do chamado: `payload.customerId` (cadastro da Ajust) ou nome em `payload.provider`. */
+  private async customerFor(input: IxcWebhookInput) {
+    const id = typeof input.payload?.customerId === 'string' ? input.payload.customerId : null;
+    const name = typeof input.payload?.provider === 'string' ? input.payload.provider : null;
+    if (!id && !name) return null;
+    return this.prisma.customer.findFirst({
+      where: {
+        tenantId: input.tenantId,
+        deletedAt: null,
+        ...(id
+          ? { id }
+          : {
+              OR: [
+                { tradeName: { equals: name!, mode: 'insensitive' } },
+                { legalName: { equals: name!, mode: 'insensitive' } },
+              ],
+            }),
+      },
+      select: { id: true, tradeName: true, legalName: true },
+    });
   }
 
   private mapIxcStatus(ixcStatus?: string): ServiceOrderStatus | null {
@@ -335,9 +526,8 @@ export class IxcService {
   }
 
   private async buildProtocol(tenantId: string) {
-    const year = new Date().getFullYear();
-    const count = await this.prisma.serviceOrder.count({ where: { tenantId } });
-    return `${year}${String(100000 + count + 1).padStart(6, '0')}`;
+    // Mesmo gerador da API principal (C-067); a contagem antiga colidia com a sequência.
+    return nextOrderProtocol(this.prisma, tenantId);
   }
 
   private toPublicIntegration(integration: ProviderIntegration): PublicProviderIntegration {

@@ -15,9 +15,9 @@ export interface CreateCalendarEventDto {
   type?: CalendarEventType;
   isGlobal?: boolean;
   startAt: string; // ISO datetime
-  endAt?: string;
+  endAt?: string | null;
   allDay?: boolean;
-  meetingLink?: string;
+  meetingLink?: string | null;
   location?: string;
   color?: string;
   assigneeId?: string; // null = global
@@ -49,10 +49,7 @@ export class CalendarService {
     if (fromDate && toDate) this.assertValidRange(fromDate, toDate);
 
     if (fromDate || toDate) {
-      where.startAt = {
-        ...(fromDate ? { gte: fromDate } : {}),
-        ...(toDate ? { lte: toDate } : {}),
-      };
+      where.AND = this.overlapWindow(fromDate, toDate);
     }
 
     // Return events that are either global OR assigned to this user
@@ -86,10 +83,7 @@ export class CalendarService {
     if (fromDate && toDate) this.assertValidRange(fromDate, toDate);
 
     if (fromDate || toDate) {
-      where.startAt = {
-        ...(fromDate ? { gte: fromDate } : {}),
-        ...(toDate ? { lte: toDate } : {}),
-      };
+      where.AND = this.overlapWindow(fromDate, toDate);
     }
 
     if (assigneeId === 'global') {
@@ -109,7 +103,9 @@ export class CalendarService {
     });
   }
 
-  async listTenantUsers(tenantId: string) {
+  async listTenantUsers(tenantId: string, role = 'analista') {
+    if (!['super_admin', 'gerente', 'analista'].includes(role))
+      throw new ForbiddenException('Apenas a equipe pode consultar participantes.');
     const userTenants = await this.prisma.userTenant.findMany({
       where: {
         tenantId,
@@ -127,7 +123,7 @@ export class CalendarService {
     return userTenants.map((ut) => ({
       id: ut.user.id,
       name: ut.user.name,
-      email: ut.user.email,
+      ...(['super_admin', 'gerente'].includes(role) ? { email: ut.user.email } : {}),
       role: ut.role?.code ?? 'ANALYST',
     }));
   }
@@ -148,11 +144,21 @@ export class CalendarService {
       where: {
         tenantId,
         AND: [
-          { startAt: { lt: endAt } },
+          { startAt: endAt.getTime() === startAt.getTime() ? { lte: startAt } : { lt: endAt } },
           {
             OR: [
               { endAt: { gt: startAt } },
-              { AND: [{ endAt: null }, { startAt: { gte: startAt } }] },
+              {
+                AND: [
+                  { endAt: null },
+                  {
+                    startAt:
+                      endAt.getTime() === startAt.getTime()
+                        ? { equals: startAt }
+                        : { gte: startAt },
+                  },
+                ],
+              },
             ],
           },
           {
@@ -178,7 +184,15 @@ export class CalendarService {
     createdById: string,
     dto: CreateCalendarEventDto,
     skipConflictCheck?: boolean,
+    role = 'analista',
   ) {
+    if (
+      !['super_admin', 'gerente'].includes(role) &&
+      (dto.isGlobal || (dto.assigneeId && dto.assigneeId !== createdById))
+    )
+      throw new ForbiddenException(
+        'Apenas gerentes podem atribuir eventos a outra pessoa ou criar eventos globais.',
+      );
     const startAt = this.parseDate(dto.startAt, 'startAt');
     const endAt = dto.endAt ? this.parseDate(dto.endAt, 'endAt') : null;
     this.assertValidRange(startAt, endAt);
@@ -244,6 +258,7 @@ export class CalendarService {
   ) {
     const event = await this.prisma.calendarEvent.findFirst({ where: { id, tenantId } });
     if (!event) throw new NotFoundException('Evento não encontrado.');
+    this.assertNotOrderSchedule(event);
 
     const canManageAll = role === 'super_admin' || role === 'gerente';
     if (!canManageAll && (event.createdById !== actorUserId || event.isGlobal)) {
@@ -269,6 +284,8 @@ export class CalendarService {
         : dto.assigneeId !== undefined
           ? dto.assigneeId || null
           : event.assigneeId;
+    if (!canManageAll && effectiveAssignee !== actorUserId)
+      throw new ForbiddenException('Apenas gerentes podem atribuir eventos a outra pessoa.');
     if (effectiveAssignee) await this.assertTenantUser(tenantId, effectiveAssignee);
     await this.assertTenantReferences(tenantId, dto);
 
@@ -334,12 +351,27 @@ export class CalendarService {
   async remove(id: string, tenantId: string, actorUserId: string, role: string | null) {
     const event = await this.prisma.calendarEvent.findFirst({ where: { id, tenantId } });
     if (!event) throw new NotFoundException('Evento não encontrado.');
+    this.assertNotOrderSchedule(event);
     const canManageAll = role === 'super_admin' || role === 'gerente';
     if (!canManageAll && (event.createdById !== actorUserId || event.isGlobal)) {
       throw new ForbiddenException('Você só pode remover seus próprios eventos pessoais.');
     }
     await this.prisma.calendarEvent.delete({ where: { id } });
     return { deleted: true };
+  }
+
+  private overlapWindow(from: Date | null, to: Date | null) {
+    return [
+      ...(to ? [{ startAt: { lt: to } }] : []),
+      ...(from ? [{ OR: [{ endAt: { gt: from } }, { endAt: null, startAt: { gte: from } }] }] : []),
+    ];
+  }
+
+  private assertNotOrderSchedule(event: CalendarEvent) {
+    if (event.serviceOrderId && event.title.startsWith('Execução · '))
+      throw new ForbiddenException(
+        'Este agendamento pertence a uma O.S. Abra a ordem de serviço para reagendar ou cancelar a execução.',
+      );
   }
 
   private async assertTenantUser(tenantId: string, userId: string): Promise<void> {

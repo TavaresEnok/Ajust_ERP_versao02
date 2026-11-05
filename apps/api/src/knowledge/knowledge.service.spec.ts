@@ -1,3 +1,4 @@
+import { hashSync } from 'bcryptjs';
 import { ConflictException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { KnowledgeService } from './knowledge.service';
 import { packVaultContent, unpackVaultContent } from '../common/vault-content';
@@ -61,6 +62,15 @@ function note(overrides: Record<string, unknown> = {}) {
 
 function makePrisma(): any {
   return {
+    user: {
+      findUnique: jest.fn().mockResolvedValue({
+        status: 'ACTIVE',
+        deletedAt: null,
+        passwordHash: hashSync('confirm-test', 4),
+      }),
+    },
+    auditLog: { count: jest.fn().mockResolvedValue(0), create: jest.fn().mockResolvedValue({}) },
+    $queryRaw: jest.fn().mockResolvedValue([]),
     knowledgeArticle: {
       findMany: jest.fn().mockResolvedValue([article()]),
       findFirst: jest.fn().mockResolvedValue(null),
@@ -94,6 +104,9 @@ describe('KnowledgeService', () => {
 
   beforeEach(() => {
     prisma = makePrisma();
+    prisma.$transaction.mockImplementation((operation: any) =>
+      typeof operation === 'function' ? operation(prisma) : Promise.all(operation),
+    );
     audit = { log: jest.fn().mockResolvedValue(undefined) };
     service = new KnowledgeService(prisma, audit);
     jest.clearAllMocks();
@@ -147,16 +160,14 @@ describe('KnowledgeService', () => {
 
   it('returns only safe, tenant-scoped credential history to internal staff', async () => {
     prisma.auditLog = {
-      findMany: jest
-        .fn()
-        .mockResolvedValue([
-          {
-            id: 'event-1',
-            createdAt: now,
-            actorUser: { name: 'Anderson' },
-            metadata: { op: 'update', secret: 'must-not-return' },
-          },
-        ]),
+      findMany: jest.fn().mockResolvedValue([
+        {
+          id: 'event-1',
+          createdAt: now,
+          actorUser: { name: 'Anderson' },
+          metadata: { op: 'update', secret: 'must-not-return' },
+        },
+      ]),
     };
     const result = await service.credentialHistory('analista', 'tenant-1', 'credential-1');
     expect(result).toEqual([
@@ -185,16 +196,37 @@ describe('KnowledgeService', () => {
     prisma.knowledgeCredential.findFirst.mockResolvedValue(
       credential({ totpSecretEnc: 'encrypted:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ' }),
     );
-    const result = await service.credentialTotp('analista', 'user-1', 'tenant-1', 'credential-1');
+    const result = await service.credentialTotp(
+      'analista',
+      'user-1',
+      'tenant-1',
+      'credential-1',
+      'Atendimento',
+      'confirm-test',
+    );
     expect(result.code).toMatch(/^\d{6}$/);
     expect(result).not.toHaveProperty('secret');
-    expect(audit.log).toHaveBeenCalled();
+    expect(prisma.auditLog.create).toHaveBeenCalled();
     await expect(
-      service.credentialTotp('cliente', 'user-1', 'tenant-1', 'credential-1'),
+      service.credentialTotp(
+        'cliente',
+        'user-1',
+        'tenant-1',
+        'credential-1',
+        'Atendimento',
+        'confirm-test',
+      ),
     ).rejects.toBeInstanceOf(ForbiddenException);
     prisma.knowledgeCredential.findFirst.mockResolvedValueOnce(null);
     await expect(
-      service.credentialTotp('analista', 'user-1', 'other-tenant', 'credential-1'),
+      service.credentialTotp(
+        'analista',
+        'user-1',
+        'other-tenant',
+        'credential-1',
+        'Atendimento',
+        'confirm-test',
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
@@ -378,8 +410,74 @@ describe('KnowledgeService', () => {
     );
   });
 
+  it('requires a reason and the current password before reading secrets', async () => {
+    await expect(
+      service.revealCredential(
+        'analista',
+        'user-1',
+        'tenant-1',
+        'credential-1',
+        '',
+        'confirm-test',
+      ),
+    ).rejects.toMatchObject({ status: 400 });
+    await expect(
+      service.revealCredential(
+        'analista',
+        'user-1',
+        'tenant-1',
+        'credential-1',
+        'Atendimento',
+        'wrong',
+      ),
+    ).rejects.toMatchObject({ status: 403 });
+    expect(prisma.knowledgeCredential.findFirst).not.toHaveBeenCalled();
+    expect(decryptSecret).not.toHaveBeenCalled();
+  });
+
+  it('recusa revelar acima do limite por hora (C-054)', async () => {
+    prisma.auditLog.count.mockResolvedValue(30);
+    await expect(
+      service.revealCredential(
+        'analista',
+        'user-1',
+        'tenant-1',
+        'credential-1',
+        'Atendimento',
+        'confirm-test',
+      ),
+    ).rejects.toMatchObject({ status: 429 });
+    // Gerente tem o dobro do limite do analista.
+    prisma.auditLog.count.mockResolvedValue(59);
+    await expect(
+      service.revealCredential(
+        'gerente',
+        'user-2',
+        'tenant-1',
+        'credential-1',
+        'Troca de senha',
+        'confirm-test',
+      ),
+    ).resolves.toHaveProperty('secret');
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({
+        actorUserId: 'user-2',
+        action: 'CREDENTIAL_ACCESS',
+        metadata: expect.objectContaining({ op: 'reveal', reason: 'Troca de senha' }),
+      }),
+    });
+  });
+
   it('reveals and audits tenant-owned credential secrets', async () => {
-    const result = await service.revealCredential('analista', 'user-1', 'tenant-1', 'credential-1');
+    prisma.auditLog.count.mockResolvedValue(0);
+    const result = await service.revealCredential(
+      'analista',
+      'user-1',
+      'tenant-1',
+      'credential-1',
+      'Atendimento',
+      'confirm-test',
+    );
 
     expect(decryptSecret).toHaveBeenCalledWith('encrypted:strong-secret');
     expect(result.secret).toBe('strong-secret');
@@ -389,7 +487,14 @@ describe('KnowledgeService', () => {
   it('rejects missing credentials and unauthorized credential mutations', async () => {
     prisma.knowledgeCredential.findFirst.mockResolvedValue(null);
     await expect(
-      service.revealCredential('analista', 'user-1', 'tenant-1', 'missing'),
+      service.revealCredential(
+        'analista',
+        'user-1',
+        'tenant-1',
+        'missing',
+        'Atendimento',
+        'confirm-test',
+      ),
     ).rejects.toBeInstanceOf(NotFoundException);
     await expect(
       service.createCredential('cliente', 'user-1', {
@@ -515,14 +620,17 @@ describe('KnowledgeService', () => {
     expect(prisma.note.delete).toHaveBeenCalledWith({ where: { id: 'note-1' } });
   });
 
-  it('prevents non-manager from mutating another author note', async () => {
-    prisma.note.findFirst.mockResolvedValue(note({ authorUserId: 'other-user' }));
+  it.each(['cliente', 'analista', 'gerente', 'super_admin'])(
+    'prevents %s from mutating another author note',
+    async (role) => {
+      prisma.note.findFirst.mockResolvedValue(note({ authorUserId: 'other-user' }));
 
-    await expect(
-      service.updateNote('cliente', 'user-1', 'tenant-1', 'note-1', { title: 'x' }),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-    await expect(
-      service.deleteNote('cliente', 'user-1', 'tenant-1', 'note-1'),
-    ).rejects.toBeInstanceOf(ForbiddenException);
-  });
+      await expect(
+        service.updateNote(role, 'user-1', 'tenant-1', 'note-1', { title: 'x' }),
+      ).rejects.toBeInstanceOf(ForbiddenException);
+      await expect(service.deleteNote(role, 'user-1', 'tenant-1', 'note-1')).rejects.toBeInstanceOf(
+        ForbiddenException,
+      );
+    },
+  );
 });

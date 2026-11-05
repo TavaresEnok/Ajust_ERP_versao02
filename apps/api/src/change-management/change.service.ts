@@ -1,4 +1,11 @@
-import { BadRequestException, Inject, Injectable, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  ForbiddenException,
+  Inject,
+  Injectable,
+  NotFoundException,
+} from '@nestjs/common';
 import { ChangeRequest, ChangeRisk, ChangeStatus, Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -75,11 +82,16 @@ export class ChangeService {
     id: string,
     actorId: string,
     toStatus: ChangeStatus,
+    expectedVersion?: number,
   ): Promise<ChangeRequest> {
     const rfc = await this.prisma.changeRequest.findFirst({
       where: { id, tenantId, deletedAt: null },
     });
     if (!rfc) throw new NotFoundException('RFC not found.');
+    if (!Number.isInteger(expectedVersion) || expectedVersion !== rfc.version)
+      throw new ConflictException('A mudança foi alterada. Recarregue antes de continuar.');
+    if (toStatus === 'APROVADO' && rfc.requestedById === actorId)
+      throw new ForbiddenException('A aprovação deve ser feita por outro gerente.');
     if (rfc.status === toStatus) throw new BadRequestException('RFC already has requested status.');
 
     const transitions: Record<ChangeStatus, ChangeStatus[]> = {
@@ -101,7 +113,30 @@ export class ChangeService {
       updates.approvedAt = new Date();
     }
     if (toStatus === 'EM_EXECUCAO') updates.executedById = actorId;
-    return this.prisma.changeRequest.update({ where: { id }, data: updates });
+    return this.prisma.$transaction(async (tx) => {
+      const result = await tx.changeRequest.updateMany({
+        where: { id, tenantId, deletedAt: null, version: expectedVersion, status: rfc.status },
+        data: { ...updates, version: { increment: 1 } },
+      });
+      if (result.count !== 1)
+        throw new ConflictException('A mudança foi alterada. Recarregue antes de continuar.');
+      await tx.auditLog.create({
+        data: {
+          tenantId,
+          actorUserId: actorId,
+          action: 'RESOURCE_UPDATE',
+          resourceType: 'change_request',
+          resourceId: id,
+          metadata: {
+            op: 'transition',
+            fromStatus: rfc.status,
+            toStatus,
+            version: rfc.version + 1,
+          },
+        },
+      });
+      return tx.changeRequest.findUniqueOrThrow({ where: { id } });
+    });
   }
 
   async remove(tenantId: string, id: string): Promise<ChangeRequest> {

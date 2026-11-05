@@ -5,10 +5,17 @@ const tenantId = '11111111-1111-4111-8111-111111111111';
 const otherTenantId = '22222222-2222-4222-8222-222222222222';
 
 function makeController() {
-  const serviceOrders = { create: jest.fn().mockResolvedValue({ id: 'order-1' }) };
+  const serviceOrders = {
+    createOccurrenceWithFirstOrder: jest.fn().mockResolvedValue({ id: 'occ-1' }),
+  };
   const prisma = {
     tenant: {
       findFirst: jest.fn().mockResolvedValue({ id: tenantId }),
+    },
+    customer: {
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'cust-1', tradeName: 'Chatbot', legalName: 'Chatbot Ltda' }),
     },
   };
   const apiKeys = {
@@ -45,16 +52,30 @@ describe('WebhookController', () => {
 
     await expect(
       controller.handleIncomingChat('Bearer ajust_valid', validPayload),
-    ).resolves.toEqual({ id: 'order-1' });
+    ).resolves.toEqual({ id: 'occ-1' });
 
     expect(apiKeys.validateKey).toHaveBeenCalledWith('ajust_valid');
     expect(prisma.tenant.findFirst).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ id: tenantId }) }),
     );
-    expect(serviceOrders.create).toHaveBeenCalledWith(
+    // Abre ocorrência + primeira O.S. (create() sem ocorrência é recusado; C-043).
+    expect(serviceOrders.createOccurrenceWithFirstOrder).toHaveBeenCalledWith(
       null,
       'gerente',
-      expect.objectContaining({ tenantId }),
+      expect.objectContaining({
+        tenantId,
+        customerId: 'cust-1',
+        provider: 'Chatbot',
+        firstOrder: expect.objectContaining({ title: 'Falha de conexão', origin: 'CHAT_BOT' }),
+      }),
+    );
+  });
+
+  it('recusa provedor não identificado', async () => {
+    const { controller, prisma } = makeController();
+    prisma.customer.findFirst.mockResolvedValueOnce(null);
+    await expect(controller.handleIncomingChat('Bearer ajust_valid', validPayload)).rejects.toThrow(
+      'Provedor não identificado',
     );
   });
 

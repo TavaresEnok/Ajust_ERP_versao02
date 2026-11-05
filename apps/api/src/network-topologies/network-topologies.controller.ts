@@ -1,10 +1,10 @@
+import { obsoleteRevisionIds } from './revision-retention';
 import {
   Body,
   ConflictException,
   Controller,
   Get,
   Inject,
-  Module,
   NotFoundException,
   Param,
   ParseUUIDPipe,
@@ -19,7 +19,6 @@ import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { assertAnyRole } from '../common/role-utils';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { decryptSecret, encryptSecret } from '../common/secrets.crypto';
-import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { MAX_DIAGRAM_BYTES, validateDrawioXml } from './drawio-xml';
 
@@ -181,6 +180,15 @@ export class NetworkTopologiesController {
             savedByName: user.name,
           },
         });
+        const history = await tx.networkTopologyRevision.findMany({
+          where: { topologyId: id },
+          select: { id: true, createdAt: true, version: true },
+        });
+        const obsolete = obsoleteRevisionIds(history);
+        if (obsolete.length)
+          await tx.networkTopologyRevision.deleteMany({
+            where: { topologyId: id, id: { in: obsolete } },
+          });
         return tx.networkTopology.findUniqueOrThrow({ where: { id }, select: summary });
       });
     } catch (error) {
@@ -192,6 +200,3 @@ export class NetworkTopologiesController {
     }
   }
 }
-
-@Module({ imports: [PrismaModule], controllers: [NetworkTopologiesController] })
-export class NetworkTopologiesModule {}

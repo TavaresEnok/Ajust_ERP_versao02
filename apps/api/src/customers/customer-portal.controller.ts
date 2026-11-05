@@ -3,7 +3,6 @@ import {
   ForbiddenException,
   Get,
   Inject,
-  Module,
   NotFoundException,
   Param,
   Query,
@@ -16,7 +15,6 @@ import { AuthGuard } from '../auth/auth.guard';
 import { TenantIsolationGuard } from '../auth/tenant-isolation.guard';
 import { RequestWithAuth } from '../common/request-with-auth';
 import { PrismaService } from '../prisma/prisma.service';
-import { PrismaModule } from '../prisma/prisma.module';
 
 const Page = z.object({
   offset: z.coerce.number().int().min(0).default(0),
@@ -172,5 +170,3 @@ export class CustomerPortalController {
     return { ...order, deadlineAt: order.slaEligible ? order.deadlineAt : null };
   }
 }
-@Module({ imports: [PrismaModule], controllers: [CustomerPortalController] })
-export class CustomerPortalModule {}

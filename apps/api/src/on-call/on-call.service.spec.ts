@@ -53,7 +53,7 @@ describe('OnCallService.currentOnCall', () => {
 
 describe('OnCallService.create', () => {
   it('converte startsAt/endsAt para Date', async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma({ findFirst: jest.fn().mockResolvedValue(null) });
     const svc = new OnCallService(prisma);
     await svc.create('t1', {
       userId: 'u1',
@@ -66,7 +66,7 @@ describe('OnCallService.create', () => {
   });
 
   it('rejeita usuário que não pertence ao tenant', async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma({ findFirst: jest.fn().mockResolvedValue(null) });
     prisma.userTenant.findFirst.mockResolvedValueOnce(null);
     const svc = new OnCallService(prisma);
     await expect(
@@ -75,11 +75,11 @@ describe('OnCallService.create', () => {
         startsAt: '2025-01-01T00:00:00Z',
         endsAt: '2025-01-02T00:00:00Z',
       }),
-    ).rejects.toThrow('not a member');
+    ).rejects.toThrow('pessoa ativa da equipe');
   });
 
   it('exige usuário ativo no tenant', async () => {
-    const prisma = makePrisma();
+    const prisma = makePrisma({ findFirst: jest.fn().mockResolvedValue(null) });
     const svc = new OnCallService(prisma);
     await svc.create('t1', {
       userId: 'u1',
@@ -90,6 +90,7 @@ describe('OnCallService.create', () => {
       where: {
         userId: 'u1',
         tenantId: 't1',
+        role: { code: { in: ['super_admin', 'gerente', 'analista'] } },
         user: { status: 'ACTIVE', deletedAt: null },
       },
       select: { userId: true },
@@ -97,7 +98,7 @@ describe('OnCallService.create', () => {
   });
 
   it('rejeita intervalo invertido', async () => {
-    const svc = new OnCallService(makePrisma());
+    const svc = new OnCallService(makePrisma({ findFirst: jest.fn().mockResolvedValue(null) }));
     await expect(
       svc.create('t1', {
         userId: 'u1',
@@ -105,6 +106,25 @@ describe('OnCallService.create', () => {
         endsAt: '2025-01-01T00:00:00Z',
       }),
     ).rejects.toThrow('término após o início');
+  });
+
+  it('recusa plantão sobreposto (C-059)', async () => {
+    const prisma = makePrisma({
+      findFirst: jest.fn().mockResolvedValue({
+        id: 's9',
+        startsAt: new Date('2025-01-01T12:00:00Z'),
+        endsAt: new Date('2025-01-01T20:00:00Z'),
+        user: { name: 'Ana' },
+      }),
+    });
+    await expect(
+      new OnCallService(prisma).create('t1', {
+        userId: 'u1',
+        startsAt: '2025-01-01T00:00:00Z',
+        endsAt: '2025-01-02T00:00:00Z',
+      }),
+    ).rejects.toThrow('Já existe plantão de Ana');
+    expect(prisma.onCallSchedule.create).not.toHaveBeenCalled();
   });
 });
 

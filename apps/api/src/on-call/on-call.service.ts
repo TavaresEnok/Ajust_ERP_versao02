@@ -36,15 +36,27 @@ export class OnCallService {
       throw new BadRequestException('Plantão deve ter datas válidas e término após o início.');
     }
 
+    // Plantonista é sempre da equipe, nunca um login de cliente (C-059).
     const membership = await this.prisma.userTenant.findFirst({
       where: {
         userId: input.userId,
         tenantId,
+        role: { code: { in: ['super_admin', 'gerente', 'analista'] } },
         user: { status: 'ACTIVE', deletedAt: null },
       },
       select: { userId: true },
     });
-    if (!membership) throw new NotFoundException('Active user is not a member of this tenant.');
+    if (!membership)
+      throw new NotFoundException('Selecione uma pessoa ativa da equipe para o plantão.');
+    // Um plantonista por vez: sem sobreposição de períodos (C-059).
+    const overlap = await this.prisma.onCallSchedule.findFirst({
+      where: { tenantId, startsAt: { lt: endsAt }, endsAt: { gt: startsAt } },
+      include: { user: { select: { name: true } } },
+    });
+    if (overlap)
+      throw new BadRequestException(
+        `Já existe plantão de ${overlap.user?.name ?? 'outra pessoa'} entre ${overlap.startsAt.toISOString()} e ${overlap.endsAt.toISOString()}.`,
+      );
 
     return this.prisma.onCallSchedule.create({
       data: {
