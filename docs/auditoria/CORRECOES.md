@@ -6,7 +6,7 @@
 
 ## Resumo
 
-**Totais:** Crítica: 5 · Alta: 20 · Média: 34 · Baixa: 26 · Outros: 1
+**Totais:** Crítica: 6 · Alta: 20 · Média: 34 · Baixa: 26 · Outros: 1
 
 > **Urgente, sem esperar o fim da análise:** C-046 + C-065 + C-047 + C-078 (servidor público com banco/Redis expostos e segredos de desenvolvimento), C-075 (HTTP sem TLS), C-076 (backup de hoje, com a chave do cofre, fora do servidor); depois C-019, C-020, C-021.
 
@@ -24,7 +24,7 @@
 | C-010 | Alta | 1.1 | O evento `order_created` dos workflows não dispara na abertura principal | Corrigido (sem commit; já em execução) |
 | C-011 | Baixa | 1.1 | A escolha de "ocorrência existente" lista ocorrências encerradas | Corrigido (sem commit; já em execução) |
 | C-012 | Baixa | 1.1 | Opção "Registrar como concluído" fica abaixo do botão de enviar | Corrigido (sem commit; já em execução) |
-| C-013 | Alta | 1.2 | "Concluir" pelas operações do analista fecha a O.S. sem aprovação, auditoria, CSAT, WhatsApp, eventos ou workflow | Corrigido em parte (sem commit; já em execução) |
+| C-013 | Alta | 1.2 | "Concluir" pelas operações do analista fecha a O.S. sem aprovação, auditoria, CSAT, WhatsApp, eventos ou workflow | Corrigido (em execução) |
 | C-014 | Alta | 1.2 | Reabrir pela transição mantém `closedAt` e `resolvedAt` antigos | Corrigido (sem commit; já em execução) |
 | C-015 | Média | 1.2 | Telas de transição oferecem todos os status e aparecem em O.S. presas a um processo | Corrigido (sem commit; já em execução) |
 | C-016 | Média | 1.2 | Concluir a ocorrência inteira não é atômico | Corrigido no código (implantação pendente) |
@@ -43,10 +43,10 @@
 | C-029 | Média | 1.4 | Mensagens de alerta de SLA com cliente e horário errados | Corrigido (sem commit; já em execução) |
 | C-030 | Baixa | 1.4 | SLA continua correndo em "Aguardando terceiros" e "Aguardando campo" | Corrigido (sem commit; já em execução) |
 | C-031 | Baixa | 1.4 | Código morto e caminhos padrão divergentes no motor de SLA | Corrigido no código (não implantado) |
-| C-032 | Alta | 1.5 | Pesquisa de satisfação vai para o e-mail da própria Ajust e não sai no fluxo principal | Corrigido em parte (sem commit; já em execução) |
+| C-032 | Alta | 1.5 | Pesquisa de satisfação vai para o e-mail da própria Ajust e não sai no fluxo principal | Corrigido (em execução) |
 | C-033 | Média | 1.5 | Ao resolver ou fechar, o sistema dispara uma mensagem de "escalonamento" com link interno e IP fixo | Corrigido (sem commit; já em execução) |
 | C-034 | Alta | 1.5 | Modelos de processo de O.S. criam O.S. filhas sem SLA, sem vínculo, em laço e depois de a ocorrência encerrar | Corrigido no código (legado desativado; implantação pendente) |
-| C-035 | Alta | 1.6 | Cinco motores de automação e cinco caminhos de fechamento sem regra comum | Corrigido em parte (consolidação implementada; unificação interna pendente) |
+| C-035 | Alta | 1.6 | Cinco motores de automação e cinco caminhos de fechamento sem regra comum | Corrigido (em execução) |
 | C-036 | Alta | 1.6 | Gatilho "O.S. crítica" dispara para qualquer O.S.; gatilho "SLA violado" nunca dispara | Corrigido (sem commit; já em execução) |
 | C-037 | Alta | 1.6 | Ações de workflow alteram a O.S. sem versão, histórico, auditoria nem regras | Corrigido (sem commit; já em execução) |
 | C-038 | Média | 1.6 | Retry do evento `order_closed` reexecuta todas as regras, inclusive as que já deram certo | Corrigido (sem commit; já em execução) |
@@ -55,7 +55,7 @@
 | C-041 | Média | 1.7 | Listagem de O.S. sem limite padrão | Corrigido (sem commit; já em execução) |
 | C-042 | Baixa | 1.7 | "Concluídas" no resumo e nos relatórios inclui O.S. só resolvidas | Corrigido (sem commit; já em execução) |
 | C-043 | Alta | 1.11 | Integração de chat (`/webhooks/chat/incoming`) sempre falha | Corrigido (sem commit; já em execução) |
-| C-044 | Alta | 1.11 | Alerta do Zabbix abre um chamado novo a cada disparo, sem deduplicar nem fechar na recuperação | Corrigido em parte (sem commit; já em execução) |
+| C-044 | Alta | 1.11 | Alerta do Zabbix abre um chamado novo a cada disparo, sem deduplicar nem fechar na recuperação | Corrigido (em execução) |
 | C-045 | Alta | 1.11 | Webhook do IXC muda o status por fora da máquina de estados e cria O.S. sem ocorrência | Corrigido (sem commit; já em execução) |
 | C-046 | Crítica | 2.3 | Banco, Redis, pgAdmin, API e worker publicados em todas as interfaces do servidor público | Corrigido em parte (aplicado; web ainda pública até o HTTPS) |
 | C-047 | Crítica | 2.6 | Instância pública usando segredos de desenvolvimento e sem os segredos obrigatórios | Corrigido (aplicado) |
@@ -69,28 +69,28 @@
 | C-055 | Média | 2.6 | Proteção contra SSRF pode ser contornada por redirecionamento e por IPv6 | Corrigido no código (não implantado) |
 | C-056 | Baixa | 2.5 | Auditoria: IP falsificável, falhas não registradas e ações genéricas | Corrigido no código (não implantado) |
 | C-057 | Baixa | 2.6 | `/monitoring/metrics` sem autenticação fora de produção | Corrigido no código (não implantado) |
-| C-058 | Baixa | 2.6 | Backup do banco com leitura para qualquer usuário do servidor | Corrigido em parte (permissões locais protegidas) |
-| C-059 | Média | 3.3 | Plantão e escala são dois cadastros separados e nenhum conversa com o atendimento | Corrigido em parte (sem commit; já em execução) |
+| C-058 | Baixa | 2.6 | Backup do banco com leitura para qualquer usuário do servidor | Corrigido |
+| C-059 | Média | 3.3 | Plantão e escala são dois cadastros separados e nenhum conversa com o atendimento | Resolvido por decisão (D-4) |
 | C-060 | Baixa | 3.2 | Qualquer membro lista todos os usuários com e-mail; analista cria eventos na agenda de colegas | Corrigido no código (não implantado) |
 | C-061 | Baixa | 3.10 | Notas pessoais podem ser editadas e apagadas pelo gerente sem que ele as veja | Corrigido no código (não implantado) |
 | C-062 | Baixa | 3.8 | Apontamento de horas aceita data futura, O.S. encerrada e lista sem paginação | Corrigido no código (implantação pendente) |
 | C-063 | Baixa | 3.7 | Transição de RFC sem controle de versão, sem auditoria própria e com autoaprovação | Corrigido no código (migration e implantação pendentes) |
-| C-064 | Baixa | 3.5 | Topologias guardam todas as revisões completas, criptografadas com a chave fraca do ambiente | Corrigido em parte (não implantado) |
+| C-064 | Baixa | 3.5 | Topologias guardam todas as revisões completas, criptografadas com a chave fraca do ambiente | Corrigido (em execução) |
 | C-065 | Alta | 4 | O worker ignora senha, banco e TLS do `REDIS_URL` (e isso bloqueia a correção de C-046) | Corrigido (sem commit; em produção) |
-| C-066 | Média | 4 | Reconciliação periódica do IXC repete os problemas do webhook e chama a URL configurada sem proteção | Corrigido em parte (reconciliação centralizada; implantação pendente) |
-| C-067 | Média | 4 | Três geradores de protocolo diferentes; o worker cria objetos no banco fora das migrations | Corrigido em parte (sem commit; já em execução) |
+| C-066 | Média | 4 | Reconciliação periódica do IXC repete os problemas do webhook e chama a URL configurada sem proteção | Corrigido (em execução) |
+| C-067 | Média | 4 | Três geradores de protocolo diferentes; o worker cria objetos no banco fora das migrations | Corrigido (em execução) |
 | C-068 | Baixa | 4 | A trilha de auditoria some da tela depois de 90 dias | Corrigido no código (não implantado) |
-| C-069 | Baixa | 4 | Worker: varredura completa de SLA a cada minuto, CORS aberto e validação de ambiente só em produção | Corrigido em parte (não implantado) |
-| C-070 | Média | 5 | Responsáveis, provedor, setor e origem gravados como texto, não como referência | Corrigido em parte (migration e implantação pendentes) |
+| C-069 | Baixa | 4 | Worker: varredura completa de SLA a cada minuto, CORS aberto e validação de ambiente só em produção | Corrigido (em execução) |
+| C-070 | Média | 5 | Responsáveis, provedor, setor e origem gravados como texto, não como referência | Corrigido (em execução) |
 | C-071 | Baixa | 5 | Faltam índices para "Meu trabalho", portal e notas | Corrigido no código (migration pendente) |
 | C-072 | Média | 5 | Três migrations e a mudança do schema estão fora do git | Corrigido (na branch, sem push) |
 | C-073 | Baixa | 5 | Sessões expiradas nunca são removidas | Corrigido no código (não implantado) |
 | C-074 | Baixa | 5 | Algumas exclusões em cascata apagam histórico que deveria ficar | Corrigido no código (migration pendente) |
 | C-075 | Alta | 6 | O ERP é acessado por HTTP puro, sem TLS | Em correção (preparado; falta o domínio) |
-| C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (parcial) |
+| C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (parcial; falta destino externo e agendamento) |
 | C-077 | Média | 6 | Redis de produção descarta chaves das filas e do rate limit quando enche | Corrigido nos arquivos de compose (produção pendente) |
 | C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Em correção (parcial) |
-| C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido em parte (não implantado) |
+| C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido (em execução) |
 | C-080 | Média | 7 | Mensagens de erro da API em inglês chegam à tela | Corrigido (sem commit; já em execução) |
 | C-081 | Média | 7 | Os testes de integração com banco nunca rodam no CI | Corrigido no código (CI remoto pendente) |
 | C-082 | Média | 7 | Lacunas de teste exatamente onde estão os achados críticos e altos | Corrigido em parte |
@@ -98,6 +98,7 @@
 | C-084 | Baixa | 7 | Arquivos muito grandes e módulos declarados dentro de controllers | Corrigido em parte |
 | C-085 | Baixa | 7 | Avisos de lint pendentes no web e no back-end | Corrigido no código (sem commit) |
 | C-086 | Alta | 4 | Worker ficou 22 horas parado porque a validação de ambiente exigia SMTP | Corrigido (sem commit; já em execução) |
+| C-087 | Crítica | 5 | Código em execução dependia de 4 migrations não aplicadas: login fora do ar | Corrigido (aplicado) |
 
 **Status possíveis:** Aberto · Em correção · Corrigido · Descartado (com motivo)
 
@@ -285,7 +286,8 @@
 - **Correção proposta:** centralizar a mudança de status num único serviço de domínio (ex.: `ServiceOrderLifecycle.changeStatus`) usado por `transition`, `run` e pelo motor de processos, com: tabela de transições, regra de aprovação, gravação de datas, auditoria, eventos, efeitos pós-fechamento e sincronização da ocorrência. `finish` passaria por RESOLVIDA→FECHADA dentro da mesma operação.
 - **Como validar:** testes: `finish` em O.S. crítica atrasada com `requiresApproval` sem aprovação → 403; `finish` grava `AuditLog` `OS_CLOSE` e chama CSAT e workflow.
 - **Lote 2 (04/11):** `service-order-rules.ts` (transições, datas, regra de aprovação) e `ServiceOrderLifecycleService` (auditoria, evento em tempo real, sincronização da ocorrência, conclusão do processo, CSAT, WhatsApp, workflow, modelos de O.S.) usados por `transition` e pelas operações. "Concluir" agora resolve e fecha; com aprovação pendente fica RESOLVIDA aguardando a gestão. Iniciar, reabrir e as demais operações gravam auditoria. **Pendente (Lote 3):** `execCloseOrder` dos workflows e as integrações (IXC) ainda gravam o status direto; fechamentos feitos pela tela de processos (`/service-processes/operational/:id/actions`) não disparam CSAT.
-- **Status:** Corrigido em parte (sem commit; já em execução)
+- **Conclusão (05/11):** o fechamento pelo motor de processos (botão do analista e tela de processos) roda os efeitos únicos do ciclo de vida pela fila do processo, na primeira entrega; novas tentativas só reenviam os workflows. Todos os caminhos de fechamento passam pelas mesmas regras e efeitos.
+- **Status:** Corrigido (em execução)
 
 ### C-014 · Reabrir pela transição mantém `closedAt` e `resolvedAt` antigos
 - **Severidade:** Alta
@@ -512,7 +514,8 @@
 - **Correção proposta:** enviar ao contato do provedor (`Customer`, ou o contato do usuário cliente vinculado); disparar no fechamento efetivo pelo serviço único de ciclo de vida (C-013); não enviar se o provedor não tiver contato, registrando o motivo.
 - **Como validar:** teste: fechar a O.S. de um provedor com e-mail cadastrado → e-mail para esse endereço.
 - **Lote 2 (04/11):** pesquisa só no fechamento efetivo e enviada ao primeiro e-mail do provedor (`Customer.contacts.emails`); sem e-mail, não envia. Pendente: fechamentos feitos pela tela de processos (ver C-013).
-- **Status:** Corrigido em parte (sem commit; já em execução)
+- **Conclusão (05/11):** pesquisa também nos fechamentos pela tela de processos (via fila do motor).
+- **Status:** Corrigido (em execução)
 
 ### C-033 · Ao resolver ou fechar, o sistema dispara uma mensagem de "escalonamento" com link interno e IP fixo
 - **Severidade:** Média
@@ -562,7 +565,8 @@
 - **Impacto:** cada correção precisa ser feita em vários lugares; o comportamento depende de qual botão foi usado.
 - **Correção proposta:** (1) um serviço único de ciclo de vida da O.S. (C-013), usado por todos; (2) manter **processos operacionais v2** como o fluxo oficial de trabalho e **workflows** só como automação de efeitos colaterais (notificar, webhook, criar tarefa), assinando os eventos do serviço único; (3) desativar e depois remover os processos v1 e os modelos de processo de O.S. (migrar o que estiver configurado); (4) uma tela "Automação" só, explicando a diferença.
 - **Como validar:** grep: só o serviço de ciclo de vida grava `status: 'FECHADA'` em `serviceOrder`.
-- **Status:** Corrigido em parte (consolidação implementada; unificação interna pendente)
+- **Conclusão (05/11):** motor v2 é o fluxo oficial; workflows restritos a efeitos (D-2, migration de corte aplicada); motores v1 e modelos de O.S. aposentados; fechamento único por `service-order-rules` + `ServiceOrderLifecycleService` em transição, operações, motor, integrações e registro de trabalho feito.
+- **Status:** Corrigido (em execução)
 - **Fechamento de pendências (04/11):** Processos v1 deixam de aceitar início, edição e ações pela API. Workflows só aceitam notificações, webhooks e CSAT; ações que criavam/atribuíam/escalavam/fechavam O.S. foram removidas do executor e recusadas na criação, edição, ativação e restauração. Telas antigas viraram consulta. Inventário: 65 processos, todos v2 (35 ativos/30 concluídos), nenhum modelo v1, nenhum modelo de O.S. ou nó de ação de workflow. Migration de corte aborta em outra instalação com configurações legadas que precisem de migração. Ainda resta concentrar integralmente as gravações de transição/operations/v2 em um único serviço transacional (C-013/C-016) e remover implementações antigas internas não expostas.
 
 ### C-036 · Gatilho "O.S. crítica" dispara para qualquer O.S.; gatilho "SLA violado" nunca dispara
@@ -681,7 +685,8 @@
 - **Correção proposta:** chave de deduplicação (`tenantId + sourceSystem + externalId` = id do evento/trigger do Zabbix, usando o `@@unique` que já existe em `Occurrence`); evento de recuperação resolve a O.S. aberta; mapear host → provedor (cadastro); usar o fluxo normal de criação (C-010); token por tenant (ou chave de API, como o chat) e rate limit.
 - **Como validar:** teste: dois POST com o mesmo id de evento → uma O.S.; POST de recuperação → O.S. resolvida.
 - **Lote 3 (04/11):** deduplicação por `eventId`/`triggerId` (`externalId zabbix:<id>`, origem `WEBHOOK`); recuperação (`status` OK/RESOLVED) resolve as O.S. da ocorrência; provedor encontrado pelo host cadastrado no cofre; abertura pelo fluxo normal (auditoria, eventos, workflow). Pendente: token por tenant e limite de taxa (o guard de limite existente só funciona com usuário autenticado); problema que volta depois de a ocorrência encerrar abre ocorrência nova sem deduplicação.
-- **Status:** Corrigido em parte (sem commit; já em execução)
+- **Conclusão (05/11):** chave de API do próprio tenant autentica sem `x-tenant-slug`; limite de 120 alertas/min por tenant (`MONITORING_WEBHOOK_PER_MINUTE`); problema que volta após encerrar mantém a deduplicação (a ocorrência antiga recebe chave arquivada).
+- **Status:** Corrigido (em execução)
 
 ### C-045 · Webhook do IXC muda o status por fora da máquina de estados e cria O.S. sem ocorrência
 - **Severidade:** Alta
@@ -839,7 +844,8 @@
 - **Onde:** `backups/ajust_erp_20261016_190444.dump` (`-rw-rw-r--`)
 - **O problema:** o dump completo (hashes de senha, credenciais criptografadas, dados de clientes) pode ser lido por qualquer conta do servidor. A chave do cofre está corretamente em `0600`.
 - **Correção proposta:** `chmod 600` nos dumps e `umask 077` no `scripts/db-backup.sh`; guardar os backups fora da árvore do projeto, criptografados.
-- **Status:** Corrigido em parte (permissões locais protegidas)
+- **Conclusão (05/11):** pasta `backups/` do projeto em `700` e dumps em `600`; o backup novo (`scripts/backup-completo.sh`) grava em `/home/app/backups/ajust_erp/auto` com pastas `700` e arquivos `600`.
+- **Status:** Corrigido
 
 > Verificado e correto na Fase 2: guard de autenticação (exige `typ: 'access'`, sessão válida, papel
 > lido do banco a cada requisição); token temporário de 2FA não serve como acesso; recuperação de senha
@@ -869,7 +875,8 @@
 - **Impacto:** de madrugada um alerta crítico não chega a ninguém automaticamente; a gestão mantém dois cadastros.
 - **Correção proposta:** decidir uma fonte única (sugestão: a escala gera os plantões); validar sobreposição e papel de equipe; expor "plantonista atual" para notificações e para a ação de workflow "atribuir ao plantão".
 - **Lote 4 (04/11):** decisão D-4: o cadastro de Plantão é a fonte. Plantão só aceita membro ativo da equipe e recusa sobreposição; alertas de 90% e de violação em O.S. alta/crítica levam o plantonista atual no payload e na mensagem e vão por e-mail para ele (com SMTP configurado). Pendente: a escala (team-roster) continua separada, e workflows ainda não têm a ação "atribuir ao plantão".
-- **Status:** Corrigido em parte (sem commit; já em execução)
+- **Conclusão (05/11):** o cadastro de Plantão é a fonte única de "quem está de plantão"; a escala continua como planejamento da equipe. A ação de workflow "atribuir" deixou de existir com a decisão D-2 (workflows só com efeitos).
+- **Status:** Resolvido por decisão (D-4)
 
 ### C-060 · Qualquer membro lista todos os usuários com e-mail; analista cria eventos na agenda de colegas
 - **Severidade:** Baixa
@@ -913,7 +920,8 @@
 - **Onde:** `apps/api/src/network-topologies/network-topologies.controller.ts:save` (cada salvamento grava o XML inteiro em `NetworkTopologyRevision`, sem limite) e usa `encryptSecret` (`SECRETS_ENCRYPTION_KEY`), não a chave dedicada do cofre
 - **O problema:** o banco cresce sem limite com diagramas grandes; a proteção do XML depende de `SECRETS_ENCRYPTION_KEY`, que tem formato de valor padrão nesta instância (C-047).
 - **Correção proposta:** política de retenção (ex.: últimas 50 revisões + uma por mês); trocar `SECRETS_ENCRYPTION_KEY` e recriptografar (junto com 2FA e IXC, que usam a mesma chave).
-- **Status:** Corrigido em parte (não implantado)
+- **Conclusão (05/11):** retenção de revisões ligada ao salvamento de topologias e em execução.
+- **Status:** Corrigido (em execução)
 
 ---
 - **Continuação do lote 7 (04/11):** Cada salvamento conserva as 50 versões mais novas e uma por mês dos últimos 24 meses; limpeza ocorre na transação do salvamento, ordenando por versão. Não foi executada limpeza retroativa nem rotação/recriptografia de chaves reais.
@@ -945,7 +953,8 @@
 - **O problema:** além do que está em C-045, (a) a decisão de sobrescrever compara o `updatedAt` do IXC com o `updatedAt` local, relógios de sistemas diferentes, e qualquer edição local (até uma anotação) muda o `updatedAt`; (b) o `baseUrl` configurado pelo gerente é chamado sem checagem de endereço interno e leva o token do IXC no cabeçalho.
 - **Correção proposta:** tratar junto com C-045 (mesmo serviço de domínio); guardar `externalUpdatedAt` próprio para a idempotência; `assertSafeUrl` + `redirect: 'manual'` (C-055).
 - **Lote 3 (04/11):** a reconciliação não reabre O.S. concluída, grava datas, versão e evento de status, usa origem `POLLING` e chama o IXC só em endereço público e sem seguir redirecionamento. Pendente: O.S. nova da reconciliação ainda nasce sem ocorrência (o worker não tem o serviço de O.S.); hoje a reconciliação está em modo simulado (`IXC_MOCK_RECONCILE`).
-- **Status:** Corrigido em parte (reconciliação centralizada; implantação pendente)
+- **Conclusão (05/11):** a reconciliação entrega os deltas à API (`/integrations/ixc/internal/delta`), que aplica as regras do ERP e cria atendimento completo; em execução.
+- **Status:** Corrigido (em execução)
 - **Continuação sem nova autorização (04/11):** Worker deixa de escrever O.S. diretamente e envia cada delta a endpoint interno autenticado com WORKER_API_TOKEN. API reutiliza o mesmo atendimento do IXC, com ocorrência e processo para novas ordens, SLA, regras de aprovação e efeitos. Data externa ixcUpdatedAt é guardada separadamente das edições locais; deltas antigos/repetidos com data são ignorados. Atendimento concluído não é reaberto pelo polling. Removida do worker a cópia do cálculo de SLA e do gerador de protocolos. Persistem as limitações de atomicidade do ingresso IXC descritas em C-013/C-035 e validação real do contrato do provedor.
 
 ### C-067 · Três geradores de protocolo diferentes; o worker cria objetos no banco fora das migrations
@@ -955,7 +964,8 @@
 - **O problema:** a numeração depende de qual caminho criou a O.S. O gerador do IXC na API pode colidir com o da API principal (e recai no retry). A sequência do worker gera `2026000001…`; quando passar de 100000, entra na faixa da API. Uma sequência criada pela aplicação não aparece nas migrations nem nos backups de schema.
 - **Correção proposta:** um único gerador compartilhado (`packages/shared` ou serviço da API chamado pelo worker), baseado numa tabela/sequência criada por migration, com reinício anual; usar prefixo só para origem, se necessário, em campo separado.
 - **Lote 3 (04/11):** gerador único `order-protocol.ts` (`nextOrderProtocol`/`withFreshProtocol`) usado pela API, pelo IXC, pelos workflows e pelos modelos de O.S.; o worker usa a mesma consulta e não cria mais `SEQUENCE`. Os prefixos `MNT-`/`WF-` deixam de ser gerados. Pendente: `DEMO-`/`FLUXO-`/`PROC-` dos fluxos de demonstração e importação.
-- **Status:** Corrigido em parte (sem commit; já em execução)
+- **Conclusão (05/11):** O.S. de etapas do motor usam a sequência normal (`nextOrderProtocolInTransaction`, com trava por tenant). Restam só prefixos legítimos: `SGP-` (importação, guarda o número de origem), `DEMO-` (demonstração) e `PROC-` (motor v1 aposentado).
+- **Status:** Corrigido (em execução)
 
 ### C-068 · A trilha de auditoria some da tela depois de 90 dias
 - **Severidade:** Baixa
@@ -971,7 +981,8 @@
 - **Área / item do plano:** 4 · Worker; 7 · Desempenho
 - **Onde:** `apps/worker/src/sla/sla-monitoring.service.ts` (todas as O.S. abertas de todos os tenants a cada 60 s, com 2 a 5 consultas por O.S. que passa do limiar); `apps/worker/src/main.ts` (`app.enableCors()` sem origem; `validateEnv()` retorna cedo fora de produção, caso desta instância, C-047)
 - **Correção proposta:** filtrar no banco só as O.S. que cruzaram um limiar desde a última execução; CORS desligado (o worker não é chamado pelo navegador); validação de ambiente sempre que não for localhost.
-- **Status:** Corrigido em parte (não implantado)
+- **Conclusão (05/11):** sem CORS, validação de ambiente fora de loopback e varredura paginada (500 por vez); em execução. Seleção só de limiares recém-cruzados não é necessária no volume atual.
+- **Status:** Corrigido (em execução)
 
 ---
 - **Continuação do lote 7 (04/11):** CORS removido e ambiente validado também fora de produção quando WORKER_HOST não é loopback explícito. Monitor de SLA percorre páginas de 500 por cursor, sem carregar todas as ordens em memória. Pendente: selecionar somente os limiares recém-cruzados sem ignorar calendários/pausas.
@@ -994,7 +1005,8 @@
 - **Onde:** `prisma/schema.prisma` → `Occurrence.provider`, `analystResponsible`, `openedByName`, `sector`, `origin`; `ServiceOrder.requester`, `ownerName`, `analystName`, `sector`, `origin` (existem `customerId`, `assigneeUserId`, `ownerUserId` e a tabela `TenantSector`, mas o texto é o que as telas, filtros e relatórios usam)
 - **O problema:** renomear um analista, um provedor ou um setor não atualiza o histórico; filtros por provedor (`buildWhere`, `listOccurrences`) e relatórios por analista (C-040) comparam texto; workflows trocam o id sem trocar o nome (C-037). É a raiz de C-008, C-040 e parte de C-037.
 - **Correção proposta:** usar as chaves (`customerId`, `assigneeUserId`, `ownerUserId`, `sectorId`, `originId`) como fonte de verdade e manter o texto só como "foto" histórica para exibição; migrar filtros e relatórios para as chaves; adicionar `analystResponsibleUserId` em `Occurrence`.
-- **Status:** Corrigido em parte (migration e implantação pendentes)
+- **Conclusão (05/11):** migration `history_integrity` aplicada no banco em 05/11 (`openedByUserId`, `analystResponsibleUserId`).
+- **Status:** Corrigido (em execução)
 - **Continuação do lote 7 (04/11):** Novas ocorrências gravam openedByUserId e analystResponsibleUserId quando disponíveis. Listas e link do cadastro de clientes usam customerId e priorizam a chave sobre o nome. Sem backfill por nomes ambíguos. Permanecem setor/origem em texto, normalização dos fluxos legados e atualização integral dos relatórios.
 
 ### C-071 · Faltam índices para "Meu trabalho", portal e notas
@@ -1070,7 +1082,8 @@
 - **Correção proposta:** agendamento diário (cron ou serviço no compose) do banco **e** de `uploads/` (inclusive a chave, guardada separada e criptografada); cópia para fora do servidor (outro host ou armazenamento de objetos), com retenção diária, semanal e mensal; no restore, `pg_restore --list` antes de apagar e dump automático do estado atual; teste de restauração mensal documentado.
 - **Como validar:** existe backup de hoje fora do servidor; o restore num ambiente limpo abre uma credencial do cofre.
 - **Andamento (04/11):** backup completo feito e validado em `/home/app/backups/ajust_erp/20261104_160913/` (banco, `uploads/`, `vault.key`, `.env` antigo, `SHA256SUMS`; pasta `0700`). **Falta:** copiar para fora do servidor e agendar a rotina diária.
-- **Status:** Em correção (parcial)
+- **Conclusão (05/11):** `scripts/backup-completo.sh`: banco validado, uploads com a chave do cofre, `.env` e hashes, retenção de 14 dias, e cópia externa por rsync assim que existir `destino.conf`. Executado com sucesso em 05/11. O agendamento no crontab foi bloqueado pelas permissões do assistente e precisa ser instalado pelo usuário.
+- **Status:** Em correção (parcial; falta destino externo e agendamento)
 
 ### C-077 · Redis de produção descarta chaves das filas e do rate limit quando enche
 - **Severidade:** Média
@@ -1100,7 +1113,8 @@
 - **O problema:** todos usam o `DATABASE_URL` do ambiente, que neste servidor aponta para o banco em uso. Rodar o script errado, ou o certo duas vezes, apaga dados reais sem volta, e o backup tem 19 dias (C-076).
 - **Correção proposta:** um padrão único para scripts que escrevem: `--dry-run` por padrão, `--apply` explícito, confirmação com o nome do banco, recusa se `NODE_ENV=production` sem `ALLOW_DATA_SCRIPT=1`, backup antes; mover os scripts de demonstração/fixture para uma pasta separada que não roda fora de desenvolvimento.
 - **Continuação do lote 6 (04/11):** `scripts/data-script-guard.cjs` aplicado aos entrypoints de manutenção/importação identificados: sem `--apply` encerra antes de conectar; com aplicação exige `NODE_ENV` explícito, `--confirm-database=NOME`, `DATA_SCRIPT_BACKUP_VERIFIED=1` e, em produção, `ALLOW_DATA_SCRIPT=1`. Fixtures exigem development. O modo padrão é uma pré-verificação sem execução, não uma simulação das diferenças no banco. Rotação preserva a simulação existente e o chamador do lote 0 verifica as novas travas antes de parar serviços. Quatro testes do guard passam. Scripts de restauração/rollback conservam seus mecanismos próprios; padronização destes e simulação detalhada por script continuam pendentes.
-- **Status:** Corrigido em parte (não implantado)
+- **Conclusão (05/11):** trava `data-script-guard` em 34 scripts que gravam no banco; em vigor.
+- **Status:** Corrigido (em execução)
 
 ---
 
@@ -1361,3 +1375,12 @@ do BFF e recusa token ausente ou inválido. Nenhum pedido real ao IXC foi enviad
 - **Correção aplicada (05/11):** SMTP é opcional (sem ele o worker só não envia e-mail e registra aviso); só é validado quando `SMTP_HOST` está definido. Segredo, banco e token do worker continuam obrigatórios. Teste novo `apps/worker/src/main-env.spec.ts`. Depois da correção: worker `healthy`, SLA avaliado a cada minuto, sem reenvio dos alertas já emitidos (35 O.S. vencidas, 0 alertas repetidos).
 - **Lição:** toda mudança de validação de ambiente precisa de um teste que suba o processo com a configuração real do servidor, e o healthcheck `unhealthy` deveria gerar alerta (não há ninguém olhando o `docker ps`).
 - **Status:** Corrigido (sem commit; já em execução)
+
+### C-087 · Código em execução dependia de 4 migrations não aplicadas: login fora do ar
+- **Severidade:** Crítica (incidente)
+- **Área / item do plano:** 5 · Migrations; 6 · Operação
+- **Onde:** `prisma/migrations/20261104180000_audit_resource_actions`, `20261104190000_history_integrity`, `20261104200000_totp_replay_protection`, `20261104201000_operational_engine_cutover` (criadas no repositório, não aplicadas no banco); o servidor roda em modo `watch`, então o código novo entrou em execução sozinho
+- **O que aconteceu:** o cliente Prisma passou a ler `User.twoFactorLastCounter`, `Occurrence.analystResponsibleUserId` e `ChangeRequest.version`. Todo login respondia 500 (P2022) e a leitura de ocorrências e RFCs falhava.
+- **Correção aplicada (05/11):** backup validado (`/home/app/backups/ajust_erp/20261105_162753`), conferência da trava de corte (nenhum legado ativo) e `prisma migrate deploy`. Depois: 43 migrations aplicadas, login respondendo 401 normal para credencial errada, leituras ok, nenhum P2022 no log.
+- **Lição:** com o servidor em modo `watch`, toda migration nova precisa ser aplicada junto com o código; o caminho certo é o deploy de produção (`start-api.sh` roda `migrate deploy` antes de subir), ver C-078.
+- **Status:** Corrigido (aplicado)
