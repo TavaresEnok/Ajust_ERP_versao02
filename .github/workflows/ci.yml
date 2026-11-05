@@ -97,13 +97,31 @@ jobs:
       - name: Build Web
         run: pnpm --filter @ajust/web build
 
+      - name: Maintenance script safety tests
+        run: node --test scripts/data-script-guard.test.cjs
+
+      - name: Seed isolated integration database
+        run: node scripts/seed-test-db.cjs
+
+      - name: Database integration tests
+        run: pnpm --filter @ajust/api exec jest --runInBand --testPathPatterns=integration
+        env:
+          PROCESS_DB_TESTS: '1'
+          REGISTRY_DB_TESTS: '1'
+
       - name: Unit tests
         run: pnpm test:unit:coverage
+
+      - name: Operational script safeguards
+        run: node --test scripts/data-script-guard.test.cjs scripts/db-backup.test.cjs
 
       - name: Release configuration check
         run: pnpm release:check
         env:
           POSTGRES_PASSWORD: ci_postgres_password_minimum_32_chars
+          REDIS_PASSWORD: ci_redis_password_minimum_thirty_two_chars
+          REDIS_URL: redis://:ci_redis_password_minimum_thirty_two_chars@redis:6379
+          VAULT_KEY_HOST_FILE: /tmp/ci-vault-key-placeholder
 
       - name: E2E smoke
         run: pnpm --filter @ajust/api test:e2e

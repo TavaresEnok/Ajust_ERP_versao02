@@ -18,3 +18,11 @@ pnpm-debug.log
 .env.local
 .env.*.local
 .DS_Store
+
+# Dados locais que não podem entrar nas imagens (auditoria C-078)
+backups
+uploads
+*.dump
+.env.*
+!.env.example
+!.env.*.example

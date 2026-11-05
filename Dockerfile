@@ -12,6 +12,7 @@ WORKDIR /app
 COPY . .
 # Instala as dependências e constrói tudo (API, Worker, Web)
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN pnpm exec prisma generate --schema prisma/schema.prisma
 RUN pnpm build
 # Após o build da web, copia os arquivos estáticos para standalone
 # (O Next.js output: standalone cria um server.js próprio que precisa do public e static)
@@ -23,19 +24,21 @@ RUN cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static 
 # -----------------
 FROM node:20-alpine AS api
 WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/api/node_modules ./apps/api/node_modules
-COPY --from=builder /app/apps/api/dist ./apps/api/dist
-COPY --from=builder /app/apps/api/package.json ./apps/api/package.json
-# Root package.json e Prisma schema (necessários para prisma db push)
-COPY --from=builder /app/package.json ./package.json
-COPY --from=builder /app/packages ./packages
-COPY --from=builder /app/prisma ./prisma
-COPY start-api.sh ./
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
+COPY --from=builder --chown=node:node /app/apps/api/dist ./apps/api/dist
+COPY --from=builder --chown=node:node /app/apps/api/package.json ./apps/api/package.json
+# Root package.json e Prisma schema (necessários para prisma migrate deploy)
+COPY --from=builder --chown=node:node /app/package.json ./package.json
+COPY --from=builder --chown=node:node /app/packages ./packages
+COPY --from=builder --chown=node:node /app/prisma ./prisma
+COPY --chown=node:node start-api.sh ./
 RUN chmod +x ./start-api.sh
 # Expõe porta interna
 EXPOSE 3001
 ENV NODE_ENV=production
+RUN mkdir -p /app/uploads && chown node:node /app /app/uploads
+USER node
 CMD ["./start-api.sh"]
 
 # -----------------
@@ -43,13 +46,15 @@ CMD ["./start-api.sh"]
 # -----------------
 FROM node:20-alpine AS worker
 WORKDIR /app
-COPY --from=builder /app/node_modules ./node_modules
-COPY --from=builder /app/apps/worker/node_modules ./apps/worker/node_modules
-COPY --from=builder /app/apps/worker/dist ./apps/worker/dist
-COPY --from=builder /app/apps/worker/package.json ./apps/worker/package.json
+COPY --from=builder --chown=node:node /app/node_modules ./node_modules
+COPY --from=builder --chown=node:node /app/apps/worker/node_modules ./apps/worker/node_modules
+COPY --from=builder --chown=node:node /app/apps/worker/dist ./apps/worker/dist
+COPY --from=builder --chown=node:node /app/apps/worker/package.json ./apps/worker/package.json
 # Bibliotecas internas
-COPY --from=builder /app/packages ./packages
+COPY --from=builder --chown=node:node /app/packages ./packages
 ENV NODE_ENV=production
+RUN mkdir -p /app/uploads && chown node:node /app /app/uploads
+USER node
 CMD ["node", "apps/worker/dist/main.js"]
 
 # -----------------
@@ -59,6 +64,8 @@ FROM node:20-alpine AS web
 WORKDIR /app
 ENV NODE_ENV=production
 # Next.js standalone folder contem o node_modules otimizado necessário para a web
-COPY --from=builder /app/apps/web/.next/standalone ./
+COPY --from=builder --chown=node:node /app/apps/web/.next/standalone ./
 EXPOSE 3000
+RUN mkdir -p /app/uploads && chown node:node /app /app/uploads
+USER node
 CMD ["node", "apps/web/server.js"]

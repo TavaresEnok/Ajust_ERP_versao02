@@ -20,6 +20,7 @@ services:
     command: sh -c "corepack enable && corepack pnpm --filter @ajust/web dev"
     env_file:
       - .env.example
+      - .env
     environment:
       CI: "true"
       PORT: ${INTERNAL_WEB_PORT:-3000}
@@ -31,7 +32,7 @@ services:
     volumes:
       - ./:/workspace
     ports:
-      - "${WEB_PORT:-8070}:${INTERNAL_WEB_PORT:-3000}"
+      - "${WEB_BIND:-127.0.0.1}:${WEB_PORT:-8070}:${INTERNAL_WEB_PORT:-3000}"
     depends_on:
       - api
       - drawio
@@ -49,18 +50,19 @@ services:
     command: sh -c "corepack enable && corepack pnpm --filter @ajust/api dev"
     env_file:
       - .env.example
+      - .env
     environment:
       CI: "true"
       PORT: ${INTERNAL_API_PORT:-3001}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ajust}:${POSTGRES_PASSWORD:-ajust123}@postgres:5432/${POSTGRES_DB:-ajust_erp}?schema=public
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ajust}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/${POSTGRES_DB:-ajust_erp}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}@redis:6379
       JWT_ACCESS_TTL: ${JWT_ACCESS_TTL:-15m}
       JWT_REFRESH_TTL_DAYS: ${JWT_REFRESH_TTL_DAYS:-7}
-      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:-dev-access-secret}
-      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev-refresh-secret}
+      JWT_ACCESS_SECRET: ${JWT_ACCESS_SECRET:?defina JWT_ACCESS_SECRET no .env}
+      JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:?defina JWT_REFRESH_SECRET no .env}
       UPLOAD_ROOT: ${UPLOAD_ROOT:-/workspace/uploads}
       IXC_WEBHOOK_REQUIRE_SIGNATURE: ${IXC_WEBHOOK_REQUIRE_SIGNATURE:-true}
-      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-change-this-secret-key-in-production}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?defina SECRETS_ENCRYPTION_KEY no .env}
       LOKI_URL: ${LOKI_URL:-http://loki:3100}
       OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_EXPORTER_OTLP_ENDPOINT:-}
       OTEL_SERVICE_NAME: ajust-api
@@ -68,7 +70,7 @@ services:
       - ./:/workspace
       - ./uploads:${UPLOAD_ROOT:-/workspace/uploads}
     ports:
-      - "${API_PORT:-8071}:${INTERNAL_API_PORT:-3001}"
+      - "127.0.0.1:${API_PORT:-8071}:${INTERNAL_API_PORT:-3001}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,20 +92,21 @@ services:
     command: sh -c "corepack enable && corepack pnpm --filter @ajust/worker dev"
     env_file:
       - .env.example
+      - .env
     environment:
       CI: "true"
       PORT: ${INTERNAL_WORKER_PORT:-3002}
-      DATABASE_URL: postgresql://${POSTGRES_USER:-ajust}:${POSTGRES_PASSWORD:-ajust123}@postgres:5432/${POSTGRES_DB:-ajust_erp}?schema=public
-      REDIS_URL: ${REDIS_URL:-redis://redis:6379}
+      DATABASE_URL: postgresql://${POSTGRES_USER:-ajust}:${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}@postgres:5432/${POSTGRES_DB:-ajust_erp}?schema=public
+      REDIS_URL: redis://:${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}@redis:6379
       IXC_RECONCILE_INTERVAL_MS: ${IXC_RECONCILE_INTERVAL_MS:-300000}
       EXPORT_RETENTION_DAYS: ${EXPORT_RETENTION_DAYS:-30}
       EXPORT_RETENTION_INTERVAL_MS: ${EXPORT_RETENTION_INTERVAL_MS:-3600000}
       IXC_MOCK_RECONCILE: ${IXC_MOCK_RECONCILE:-true}
-      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:-change-this-secret-key-in-production}
+      SECRETS_ENCRYPTION_KEY: ${SECRETS_ENCRYPTION_KEY:?defina SECRETS_ENCRYPTION_KEY no .env}
     volumes:
       - ./:/workspace
     ports:
-      - "${WORKER_PORT:-8076}:${INTERNAL_WORKER_PORT:-3002}"
+      - "127.0.0.1:${WORKER_PORT:-8076}:${INTERNAL_WORKER_PORT:-3002}"
     depends_on:
       postgres:
         condition: service_healthy
@@ -122,9 +125,9 @@ services:
     environment:
       POSTGRES_DB: ${POSTGRES_DB:-ajust_erp}
       POSTGRES_USER: ${POSTGRES_USER:-ajust}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-ajust123}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?defina POSTGRES_PASSWORD no .env}
     ports:
-      - "${POSTGRES_PORT:-8072}:5432"
+      - "127.0.0.1:${POSTGRES_PORT:-8072}:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
@@ -136,36 +139,30 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy ${REDIS_MAXMEMORY_POLICY:-volatile-lru} --appendonly yes --save 60 1
+    command: redis-server --requirepass "${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}" --maxmemory ${REDIS_MAXMEMORY:-512mb} --maxmemory-policy noeviction --appendonly yes --save 60 1
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?defina REDIS_PASSWORD no .env}
     volumes:
       - redis_data:/data
     ports:
-      - "${REDIS_PORT:-8073}:6379"
+      - "127.0.0.1:${REDIS_PORT:-8073}:6379"
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" --no-auth-warning ping | grep -q PONG"]
       interval: 5s
       timeout: 5s
       retries: 10
     restart: unless-stopped
 
 
-  pgadmin:
-    image: dpage/pgadmin4:8
-    environment:
-      PGADMIN_DEFAULT_EMAIL: admin@example.com
-      PGADMIN_DEFAULT_PASSWORD: admin123
-    ports:
-      - "${PGADMIN_PORT:-8077}:80"
-    depends_on:
-      - postgres
-    restart: unless-stopped
+  # pgAdmin removido em 04/11/2026 (auditoria C-046). Para acessar o banco use um túnel SSH:
+  #   ssh -L 8072:127.0.0.1:8072 app@168.194.13.18   e conecte em localhost:8072.
 
   # Centralized log aggregation — accessible at http://localhost:3100
   # Connect Grafana to http://loki:3100 as a Loki datasource to query logs.
   loki:
     image: grafana/loki:3.0.0
     ports:
-      - "${LOKI_PORT:-3100}:3100"
+      - "127.0.0.1:${LOKI_PORT:-3100}:3100"
     command: -config.file=/etc/loki/local-config.yaml
     volumes:
       - loki_data:/loki
