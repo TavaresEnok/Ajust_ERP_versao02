@@ -34,12 +34,18 @@ export class SecretsValidationService implements OnModuleInit {
       JWT_RESET_SECRET: process.env.JWT_RESET_SECRET,
       SECRETS_ENCRYPTION_KEY: process.env.SECRETS_ENCRYPTION_KEY,
       POSTGRES_PASSWORD: process.env.POSTGRES_PASSWORD,
-      ...(process.env.SMTP_HOST ? { SMTP_PASS: process.env.SMTP_PASS } : {}),
       MONITORING_WEBHOOK_TOKEN: process.env.MONITORING_WEBHOOK_TOKEN,
       CHAT_WEBHOOK_TOKEN: process.env.CHAT_WEBHOOK_TOKEN,
     };
 
     const unsafeSecrets: string[] = [];
+    // A senha do e-mail vem do provedor (não é gerada aqui): exige existir, ter 8+ caracteres
+    // e não ser um valor de exemplo, mas não os 32 caracteres dos segredos internos.
+    if (process.env.SMTP_HOST) {
+      const smtpPass = process.env.SMTP_PASS || '';
+      if (!smtpPass) unsafeSecrets.push('SMTP_PASS is missing');
+      else if (smtpPass.length < 8 || this.hasUnsafeWord(smtpPass)) unsafeSecrets.push('SMTP_PASS');
+    }
 
     for (const [name, value] of Object.entries(secrets)) {
       if (!value) {
@@ -66,13 +72,16 @@ export class SecretsValidationService implements OnModuleInit {
     }
   }
 
-  private isUnsafe(secret: string): boolean {
+  private hasUnsafeWord(secret: string): boolean {
     const lower = secret.toLowerCase();
     for (const unsafe of this.UNSAFE_SECRETS) {
-      if (lower.includes(unsafe.toLowerCase())) {
-        return true;
-      }
+      if (lower.includes(unsafe.toLowerCase())) return true;
     }
+    return false;
+  }
+
+  private isUnsafe(secret: string): boolean {
+    if (this.hasUnsafeWord(secret)) return true;
     // Check length for encryption keys (should be at least 64 chars for secure keys)
     if (secret.length < 32) {
       return true;
