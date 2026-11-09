@@ -1,4 +1,5 @@
 'use client';
+import { orderTypes } from '@/lib/erp/contracts';
 import { useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
@@ -317,7 +318,9 @@ export function CustomerDirectory({ id }: { id?: string }) {
                             <td className="p-3">
                               <p className="line-clamp-2">{o.description}</p>
                             </td>
-                            <td className="p-3">{o.type}</td>
+                            <td className="p-3">
+                              {orderTypes[o.type as keyof typeof orderTypes] || o.type}
+                            </td>
                             <td className="p-3">
                               <StatusBadge
                                 status={

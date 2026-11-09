@@ -87,9 +87,10 @@ export function SecurityWorkspace({
                       [
                         {
                           name: 'userId',
-                          label: 'UUID do colaborador',
+                          label: 'Colaborador',
                           type: 'uuid',
                           required: true,
+                          reference: { resource: 'users' },
                         },
                       ],
                       new FormData(event.currentTarget),
@@ -101,7 +102,14 @@ export function SecurityWorkspace({
                 }}
               >
                 <ContractFields
-                  fields={[{ name: 'userId', label: 'Selecionar colaborador', type: 'uuid' }]}
+                  fields={[
+                    {
+                      name: 'userId',
+                      label: 'Colaborador',
+                      type: 'uuid',
+                      reference: { resource: 'users' },
+                    },
+                  ]}
                 />
                 <div className="flex flex-wrap gap-3">
                   <Button type="submit" variant="outline">

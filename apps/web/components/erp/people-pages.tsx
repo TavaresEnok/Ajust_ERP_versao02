@@ -257,21 +257,18 @@ export function ProviderDetail({
             <Metric
               label="Ordens de serviço"
               value={String(provider.orders)}
-              change="ERP"
               foot="neste mês"
               icon={ClipboardList}
             />
             <Metric
               label="Em aberto"
               value={String(provider.active)}
-              change="ERP"
               foot="em atendimento"
               icon={Timer}
             />
             <Metric
               label="Cumprimento de SLA"
               value={String(provider.sla) === '—' ? '—' : provider.sla + '%'}
-              change="ERP"
               foot="neste mês"
               icon={ShieldCheck}
             />

@@ -13,12 +13,14 @@ export function AttendanceIntake({
   pending,
   connected,
   onSubmit,
+  onDirtyChange,
 }: {
   providerId?: string;
   occurrence?: IntakeOccurrence;
   pending: boolean;
   connected: boolean;
   onSubmit: (path: string, body: Record<string, unknown>) => Promise<void>;
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
   const { scope, transport } = useErp();
   const customers = useErpQuery<ErpRecord[]>('/customers');
@@ -120,6 +122,7 @@ export function AttendanceIntake({
         }}
         connected={connected}
         pending={pending}
+        onDirtyChange={onDirtyChange}
         label={
           completed
             ? 'Registrar atendimento concluído'

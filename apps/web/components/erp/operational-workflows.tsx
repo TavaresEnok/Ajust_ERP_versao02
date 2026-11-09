@@ -5,6 +5,14 @@ import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import { orderStatuses } from '@/lib/erp/contracts';
 import {
@@ -236,12 +244,15 @@ export function OperationalExecution({
   const query = useErpQuery<FlowInstance>(`${endpoint}/${id}`);
   const people = useErpQuery<Person[]>(`${endpoint}/assignees`);
   const action = useErpAction();
+  // Hora de referência para "prazo vencido"; atualiza junto com a consulta periódica.
+  const [now, setNow] = useState(() => Date.now());
   const instance = query.data;
   const status = instance?.status;
   const refresh = query.mutate;
   useEffect(() => {
     if (!status || !['ACTIVE', 'WAITING', 'FAILED'].includes(status)) return;
     const timer = setInterval(() => {
+      setNow(Date.now());
       void refresh();
     }, 10000);
     return () => clearInterval(timer);
@@ -303,6 +314,12 @@ export function OperationalExecution({
     return (
       <section className="panel p-5 space-y-4">
         <h2 className="section-title">Registrar trabalho</h2>
+        {instance.status === 'PAUSED' && (
+          <p className="rounded-lg border border-warning/30 bg-warning-surface p-3 text-sm text-warning">
+            Atendimento pausado pela gestão: o prazo está parado. A etapa poderá ser concluída
+            quando o processo for retomado.
+          </p>
+        )}
         {tasks.length === 0 && (
           <p className="text-sm text-muted-foreground">
             {['FECHADA', 'RESOLVIDA'].includes(current?.status || '')
@@ -467,6 +484,11 @@ export function OperationalExecution({
           <p className="text-xs font-semibold uppercase tracking-wide text-info">
             Onde está o atendimento agora?
           </p>
+          {instance.status === 'PAUSED' && (
+            <p className="mt-2 rounded-lg border border-warning/30 bg-warning-surface p-3 text-sm text-warning">
+              Processo pausado: o prazo está parado. Use “Retomar processo” abaixo para continuar.
+            </p>
+          )}
           {currentStages.length ? (
             <div className="mt-3 grid gap-3 md:grid-cols-2">
               {currentStages.map((step) => {
@@ -607,64 +629,35 @@ export function OperationalExecution({
           .map((step) => {
             const node = instance.definition.nodes.find((n) => n.id === step.nodeId)!;
             const order = links.find((l) => l.order.id === step.orderId)?.order;
+            const outcomes = Object.keys(node.routes);
+            const closes = outcomes.length > 0 && outcomes.every((v) => node.closeOn.includes(v));
+            const overdue = step.dueAt && new Date(step.dueAt).getTime() < now;
             return (
-              <div key={step.id} className="space-y-4 rounded-lg border border-info/30 p-4">
-                <h3 className="text-sm font-semibold">{node.name}</h3>
-                <p className="text-xs">
-                  {order?.protocol} · {node.sector} · responsável:{' '}
-                  {order?.analystName || 'Fila do setor'} · meta da etapa: {date(step.dueAt)} ·
-                  tentativa {step.attempt}
-                </p>
-                {['super_admin', 'gerente', 'analista'].includes(scope?.role || '') && (
-                  <form
-                    className="flex flex-wrap gap-3"
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      const form = new FormData(e.currentTarget);
-                      void perform({
-                        action: 'assign',
-                        stepId: step.id,
-                        assigneeUserId: form.get('assignee'),
-                        reason: form.get('reason'),
-                      });
-                    }}
+              <div
+                key={step.id}
+                className="flex flex-col gap-4 rounded-xl border border-info/30 p-5"
+              >
+                <header className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <p className="text-xs text-muted-foreground">Etapa atual</p>
+                    <h3 className="text-base font-semibold">{node.name}</h3>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {order?.protocol} · {node.sector} · {order?.analystName || 'Fila do setor'}
+                      {step.attempt > 1 ? ` · ${step.attempt}ª tentativa` : ''}
+                    </p>
+                  </div>
+                  <span
+                    className={`status-badge ${instance.status === 'PAUSED' ? 'status-warning' : overdue ? 'status-danger' : 'status-info'}`}
                   >
-                    <select
-                      className="native-select"
-                      name="assignee"
-                      aria-label={`Responsável: ${node.name}`}
-                      required
-                    >
-                      <option value="">Encaminhar a mesma O.S. para…</option>
-                      {people.data
-                        ?.filter((p) => node.roles.includes(p.role))
-                        .map((p) => (
-                          <option key={p.id} value={p.id}>
-                            {p.name}
-                            {p.accessBlocked ? ' · acesso bloqueado' : ''}
-                          </option>
-                        ))}
-                    </select>
-                    <input
-                      className="native-select"
-                      name="reason"
-                      placeholder="Motivo do encaminhamento"
-                      minLength={3}
-                      required
-                    />
-                    <Button
-                      type="submit"
-                      variant="outline"
-                      disabled={action.pending || instance.status !== 'ACTIVE'}
-                    >
-                      Encaminhar
-                    </Button>
-                  </form>
-                )}
+                    {instance.status === 'PAUSED'
+                      ? 'Pausada · prazo parado'
+                      : `Prazo da etapa ${date(step.dueAt)}`}
+                  </span>
+                </header>
                 {node.roles.includes(scope?.role || '') && (
                   <form
                     key={`${step.id}:${instance.version}`}
-                    className="space-y-3"
+                    className="flex flex-col gap-4"
                     onSubmit={(e) => {
                       e.preventDefault();
                       const form = new FormData(e.currentTarget);
@@ -684,79 +677,125 @@ export function OperationalExecution({
                     }}
                   >
                     {node.requiredFields.map((field, i) => (
-                      <label key={field} className="block text-xs">
+                      <label
+                        key={field}
+                        className="flex flex-col gap-1.5 text-xs text-muted-foreground"
+                      >
                         {field}
                         <textarea
-                          className="native-select mt-2 min-h-20 w-full"
+                          className="native-select min-h-20 w-full"
                           name={`field_${i}`}
                           required
                         />
                       </label>
                     ))}
-                    <div className="flex flex-wrap gap-3">
-                      <select
-                        className="native-select"
-                        name="outcome"
-                        aria-label={`Resultado: ${node.name}`}
-                        required
-                      >
-                        <option value="">Selecione o resultado</option>
-                        {Object.keys(node.routes).map((outcome) => (
-                          <option key={outcome}>{outcome}</option>
-                        ))}
-                      </select>
-                      <input
+                    <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+                      O que foi feito
+                      <textarea
                         name="reason"
-                        className="native-select"
-                        placeholder="Resumo da etapa"
+                        className="native-select min-h-20 w-full"
+                        placeholder="Resumo para o histórico da O.S."
                         required
                         minLength={3}
                       />
+                    </label>
+                    {outcomes.length === 1 ? (
+                      <input type="hidden" name="outcome" value={outcomes[0]} />
+                    ) : (
+                      <fieldset className="flex flex-col gap-2">
+                        <legend className="mb-1.5 text-xs text-muted-foreground">Resultado</legend>
+                        <div className="flex flex-wrap gap-2">
+                          {outcomes.map((outcome, i) => (
+                            <label
+                              key={outcome}
+                              className="flex cursor-pointer items-center gap-2 rounded-lg border border-border px-3 py-2 text-sm has-[:checked]:border-primary has-[:checked]:bg-primary/10"
+                            >
+                              <input
+                                type="radio"
+                                name="outcome"
+                                value={outcome}
+                                required={i === 0}
+                                className="accent-primary"
+                              />
+                              {outcome}
+                            </label>
+                          ))}
+                        </div>
+                      </fieldset>
+                    )}
+                    <div className="flex flex-wrap items-center gap-3">
                       <Button
                         type="submit"
                         disabled={action.pending || instance.status !== 'ACTIVE'}
                       >
-                        Registrar e avançar
+                        {closes ? 'Concluir etapa e a O.S.' : 'Concluir etapa'}
                       </Button>
+                      {instance.status === 'PAUSED' && (
+                        <span className="text-xs text-muted-foreground">
+                          Retome o processo para concluir a etapa.
+                        </span>
+                      )}
                     </div>
                   </form>
                 )}
+                <details className="rounded-lg border border-border px-4 py-3">
+                  <summary className="cursor-pointer text-sm text-muted-foreground">
+                    Encaminhar esta etapa para outra pessoa
+                  </summary>
+                  <form
+                    className="mt-3 flex flex-wrap gap-3"
+                    onSubmit={(e) => {
+                      e.preventDefault();
+                      const form = new FormData(e.currentTarget);
+                      void perform({
+                        action: 'assign',
+                        stepId: step.id,
+                        assigneeUserId: form.get('assignee'),
+                        reason: form.get('reason'),
+                      });
+                    }}
+                  >
+                    <select
+                      className="native-select"
+                      name="assignee"
+                      aria-label={`Responsável: ${node.name}`}
+                      required
+                    >
+                      <option value="">Escolha a pessoa…</option>
+                      {people.data
+                        ?.filter((p) => node.roles.includes(p.role) && !p.accessBlocked)
+                        .map((p) => (
+                          <option key={p.id} value={p.id}>
+                            {p.name}
+                          </option>
+                        ))}
+                    </select>
+                    <input
+                      className="native-select min-w-48 flex-1"
+                      name="reason"
+                      placeholder="Motivo do encaminhamento"
+                      minLength={3}
+                      required
+                    />
+                    <Button
+                      type="submit"
+                      variant="outline"
+                      disabled={action.pending || instance.status !== 'ACTIVE'}
+                    >
+                      Encaminhar
+                    </Button>
+                  </form>
+                </details>
               </div>
             );
           })}
       {!history && (
-        <form
-          className="flex flex-wrap gap-3 border-t border-border pt-5"
-          onSubmit={(e) => {
-            e.preventDefault();
-            const values = new FormData(e.currentTarget);
-            void perform({ action: values.get('action'), reason: values.get('reason') });
-          }}
-        >
-          <select name="action" className="native-select" aria-label="Ação do processo">
-            {instance.status === 'ACTIVE' && <option value="pause">Pausar processo</option>}
-            {instance.status === 'PAUSED' && <option value="resume">Retomar processo</option>}
-            {instance.status === 'FAILED' && manager && (
-              <option value="retry">Repetir comando que falhou</option>
-            )}
-            {['COMPLETED', 'CANCELED'].includes(instance.status) && manager && (
-              <option value="reopen">Reabrir reutilizando as O.S. existentes</option>
-            )}
-            {['ACTIVE', 'PAUSED', 'WAITING', 'FAILED'].includes(instance.status) && manager && (
-              <option value="cancel">Cancelar processo e ordens pendentes</option>
-            )}
-          </select>
-          <input
-            className="native-select"
-            name="reason"
-            placeholder="Justificativa obrigatória"
-            minLength={3}
-            required
-          />
-          <Button type="submit" variant="outline" disabled={action.pending}>
-            Aplicar ação
-          </Button>
-        </form>
+        <ProcessActions
+          status={instance.status}
+          manager={manager}
+          pending={action.pending}
+          onRun={(processAction, reason) => perform({ action: processAction, reason })}
+        />
       )}
       <details>
         <summary className="cursor-pointer text-sm font-medium">
@@ -766,8 +805,8 @@ export function OperationalExecution({
           {instance.steps.map((s) => (
             <div key={s.id} className="rounded-lg border border-border p-3 text-xs">
               <p className="font-medium">
-                {instance.definition.nodes.find((n) => n.id === s.nodeId)?.name} · {s.status} ·
-                tentativa {s.attempt}
+                {instance.definition.nodes.find((n) => n.id === s.nodeId)?.name} ·{' '}
+                {STEP_STATUS[s.status] || s.status} · tentativa {s.attempt}
               </p>
               <p className="my-2 text-muted-foreground">
                 {date(s.enteredAt)} → {date(s.completedAt)} · {s.outcome}
@@ -833,6 +872,139 @@ export function OperationalExecution({
         </details>
       )}
     </section>
+  );
+}
+
+const STEP_STATUS: Record<string, string> = {
+  ACTIVE: 'Em execução',
+  COMPLETED: 'Concluída',
+  WAITING: 'Aguardando',
+  FAILED: 'Falha',
+  CANCELED: 'Cancelada',
+  SKIPPED: 'Pulada',
+};
+const PROCESS_ACTIONS: Record<
+  string,
+  { label: string; title: string; help: string; danger?: boolean; primary?: boolean }
+> = {
+  pause: {
+    label: 'Pausar processo',
+    title: 'Pausar o processo?',
+    help: 'As etapas ficam paradas e o prazo deixa de correr até alguém retomar.',
+  },
+  resume: {
+    label: 'Retomar processo',
+    title: 'Retomar o processo?',
+    help: 'As etapas voltam a andar e o prazo volta a correr.',
+    primary: true,
+  },
+  retry: {
+    label: 'Repetir comando que falhou',
+    title: 'Repetir o comando que falhou?',
+    help: 'O ERP tenta de novo a última operação que deu erro.',
+    primary: true,
+  },
+  reopen: {
+    label: 'Reabrir processo',
+    title: 'Reabrir o processo?',
+    help: 'Reaproveita as O.S. existentes e volta o fluxo para execução.',
+  },
+  cancel: {
+    label: 'Cancelar processo',
+    title: 'Cancelar o processo e as O.S. pendentes?',
+    help: 'As O.S. ainda abertas deste processo são canceladas. Não dá para desfazer.',
+    danger: true,
+  },
+};
+
+/** Ações sobre o processo inteiro, em botões explícitos e sempre com justificativa. */
+function ProcessActions({
+  status,
+  manager,
+  pending,
+  onRun,
+}: {
+  status: string;
+  manager: boolean;
+  pending: boolean;
+  onRun: (action: string, reason: string) => Promise<void>;
+}) {
+  const [open, setOpen] = useState<string | null>(null);
+  const [reason, setReason] = useState('');
+  const available = [
+    status === 'ACTIVE' && 'pause',
+    status === 'PAUSED' && 'resume',
+    status === 'FAILED' && manager && 'retry',
+    ['COMPLETED', 'CANCELED'].includes(status) && manager && 'reopen',
+    ['ACTIVE', 'PAUSED', 'WAITING', 'FAILED'].includes(status) && manager && 'cancel',
+  ].filter(Boolean) as string[];
+  if (!available.length) return null;
+  const current = open ? PROCESS_ACTIONS[open] : null;
+  return (
+    <div className="flex flex-wrap items-center gap-2 border-t border-border pt-5">
+      <span className="mr-2 text-xs text-muted-foreground">Processo inteiro:</span>
+      {available.map((key) => (
+        <Button
+          key={key}
+          size="sm"
+          variant={
+            PROCESS_ACTIONS[key].primary
+              ? 'default'
+              : PROCESS_ACTIONS[key].danger
+                ? 'ghost'
+                : 'outline'
+          }
+          className={PROCESS_ACTIONS[key].danger ? 'text-danger hover:text-danger' : undefined}
+          disabled={pending}
+          onClick={() => {
+            setReason('');
+            setOpen(key);
+          }}
+        >
+          {PROCESS_ACTIONS[key].label}
+        </Button>
+      ))}
+      <Dialog open={!!open} onOpenChange={(value) => !value && setOpen(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{current?.title}</DialogTitle>
+            <DialogDescription>{current?.help}</DialogDescription>
+          </DialogHeader>
+          <form
+            className="flex flex-col gap-4"
+            onSubmit={async (e) => {
+              e.preventDefault();
+              const key = open!;
+              setOpen(null);
+              await onRun(key, reason.trim());
+            }}
+          >
+            <label className="flex flex-col gap-1.5 text-xs text-muted-foreground">
+              Justificativa (fica no histórico)
+              <textarea
+                className="native-select min-h-20"
+                value={reason}
+                onChange={(e) => setReason(e.target.value)}
+                required
+                minLength={3}
+              />
+            </label>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setOpen(null)}>
+                Voltar
+              </Button>
+              <Button
+                type="submit"
+                className={current?.danger ? 'bg-danger text-white hover:bg-danger/90' : undefined}
+                disabled={reason.trim().length < 3}
+              >
+                {current?.label}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }
 

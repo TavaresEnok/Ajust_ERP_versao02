@@ -1,5 +1,5 @@
 'use client';
-import { useId, useRef, useState, type ReactNode } from 'react';
+import { useEffect, useId, useRef, useState, type ReactNode } from 'react';
 import { Cable, Check, Info } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -235,6 +235,7 @@ export function ContractForm({
   label = 'Enviar ao ERP',
   children,
   draft = false,
+  onDirtyChange,
 }: {
   fields: FieldSpec[];
   values?: Record<string, unknown>;
@@ -244,7 +245,18 @@ export function ContractForm({
   label?: string;
   children?: ReactNode;
   draft?: boolean;
+  /** Avisa quem abriu o formulário que há algo digitado e ainda não enviado. */
+  onDirtyChange?: (dirty: boolean) => void;
 }) {
+  const [dirty, setDirty] = useState(false);
+  useEffect(() => {
+    onDirtyChange?.(dirty);
+    if (!dirty) return;
+    // Fechar ou recarregar a aba com o formulário preenchido pede confirmação do navegador.
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, onDirtyChange]);
   const [error, setError] = useState('');
   const [validated, setValidated] = useState(false);
   const [submitting, setSubmitting] = useState(false);
@@ -263,6 +275,7 @@ export function ContractForm({
         return;
       }
       await onSubmit(data);
+      setDirty(false);
     } catch (error) {
       setError(errorMessage(error));
     } finally {
@@ -271,7 +284,12 @@ export function ContractForm({
     }
   }
   return (
-    <form onSubmit={submit} className="flex flex-col gap-5">
+    <form
+      onSubmit={submit}
+      onInput={() => setDirty(true)}
+      onChange={() => setDirty(true)}
+      className="flex flex-col gap-5"
+    >
       <ContractFields fields={fields} values={values} />
       {children}
       {error && (
