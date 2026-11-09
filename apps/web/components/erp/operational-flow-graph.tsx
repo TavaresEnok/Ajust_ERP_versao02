@@ -20,6 +20,7 @@ export function OperationalFlowGraph({
   onChange,
   states,
   annotations,
+  className = 'h-[360px]',
 }: {
   definition: FlowDefinition;
   active?: string[];
@@ -28,6 +29,8 @@ export function OperationalFlowGraph({
   onSelect?: (id: string) => void;
   onChange?: (d: FlowDefinition) => void;
   states?: Record<string, TrackingStatus>;
+  /** Altura do quadro (o editor de fluxos usa um quadro maior). */
+  className?: string;
   annotations?: Record<string, string>;
 }) {
   const { dark } = useAppTheme();
@@ -57,13 +60,13 @@ export function OperationalFlowGraph({
           <small>
             {n.kind === 'task'
               ? n.orderKey === 'root'
-                ? 'ETAPA NA MESMA O.S.'
-                : 'O.S. DERIVADA'
+                ? 'ETAPA'
+                : 'ETAPA · O.S. SEPARADA'
               : n.kind === 'fork'
-                ? 'RAMOS PARALELOS'
+                ? 'DIVIDE EM PARALELO'
                 : n.kind === 'join'
-                  ? 'AGUARDAR CONCLUSÕES'
-                  : 'FIM DO PROCESSO'}
+                  ? 'ESPERA OS PARALELOS'
+                  : 'FIM'}
           </small>
           <div className="my-1 font-semibold">{n.name}</div>
           {states && (
@@ -72,7 +75,7 @@ export function OperationalFlowGraph({
           {annotations?.[n.id] && <p className="mb-2 text-xs">{annotations[n.id]}</p>}
           <small>
             {n.sector}
-            {n.kind === 'task' ? ` · ${n.slaMinutes} min (proposta)` : ''}
+            {n.kind === 'task' ? ` · ${n.slaMinutes} min` : ''}
           </small>
         </div>
       ),
@@ -139,7 +142,7 @@ export function OperationalFlowGraph({
   }
   return (
     <div
-      className="workflow-canvas h-[360px] min-w-0 rounded-xl border border-border"
+      className={`workflow-canvas min-w-0 rounded-xl border border-border ${className}`}
       aria-label="Diagrama do fluxo de atendimento"
     >
       <ReactFlow
@@ -147,7 +150,7 @@ export function OperationalFlowGraph({
         edges={edges}
         colorMode={dark ? 'dark' : 'light'}
         fitView
-        fitViewOptions={{ padding: 0.2, maxZoom: 0.9 }}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
         minZoom={0.1}
         maxZoom={2}
         nodesDraggable={!!onChange}
