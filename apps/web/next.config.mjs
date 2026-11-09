@@ -9,19 +9,26 @@ const securityHeaders = [
   { key: 'X-Content-Type-Options', value: 'nosniff' },
   { key: 'X-Frame-Options', value: 'DENY' },
   { key: 'Referrer-Policy', value: 'strict-origin-when-cross-origin' },
-  { key: 'Permissions-Policy', value: 'camera=(), microphone=(self), geolocation=()' },
-  ...(isDev ? [] : [{ key: 'Strict-Transport-Security', value: 'max-age=63072000' }]),
+  {
+    key: 'Permissions-Policy',
+    value: 'camera=(), microphone=(self), geolocation=(), payment=(), usb=(), display-capture=()',
+  },
+  // Isola a janela de abas abertas por outros sites (window.opener).
+  { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  { key: 'X-DNS-Prefetch-Control', value: 'off' },
+  // HSTS fica só no Caddy (borda), para não haver dois valores divergentes.
   {
     key: 'Content-Security-Policy',
     value:
       "default-src 'self'; script-src 'self' 'unsafe-inline'" +
       (isDev ? " 'unsafe-eval'" : '') +
-      "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self'; frame-ancestors 'none';",
+      "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self';",
   },
 ];
 
 const nextConfig = {
   devIndicators: false,
+  poweredByHeader: false,
   ...(isDev
     ? {
         allowedDevOrigins: ['localhost', '127.0.0.1', 'http://168.194.13.18:8070', '168.194.13.18'],

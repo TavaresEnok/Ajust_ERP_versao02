@@ -428,3 +428,4 @@ Abaixo estão os diffs exatos e compatíveis para implementação futura (sem ap
 1. **CSP com Nonce**: Viável no Next.js 16 via `proxy.ts`, mantendo a exceção do Draw.io (`/drawio/*`) com sua política isolada e preservando `style-src 'unsafe-inline'` ou `style-src-attr 'unsafe-inline'` para suportar estilos dinâmicos de gráficos e barras de progresso.
 2. **Rate Limiting**: Configurar rate limiting estrito por IP de forma ingênua causaria falsos positivos e indisponibilidade para equipes que compartilham o mesmo escritório/NAT. A estratégia recomendada é alocar **200 req/s (burst 300)** por IP na borda e cotas granulares por usuário autenticado no backend.
 3. **Integridade da Operação**: Nenhuma alteração foi persistida no código de produção ou na configuração de infraestrutura ativa durante esta análise.
+

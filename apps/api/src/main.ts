@@ -139,7 +139,8 @@ async function bootstrap() {
   // Rotas de API (JSON) não renderizam HTML, então o benefício real é proteger o Swagger.
   app.use(
     helmet({
-      crossOriginResourcePolicy: { policy: 'cross-origin' },
+      // A API só é chamada pelo BFF (servidor) e pelo Socket.IO na mesma origem (via Caddy).
+      crossOriginResourcePolicy: { policy: 'same-origin' },
       crossOriginEmbedderPolicy: false,
       contentSecurityPolicy: {
         directives: {
