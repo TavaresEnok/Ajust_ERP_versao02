@@ -37,13 +37,11 @@ export function ErpEmpty({ connected = false }: { connected?: boolean }) {
         <EmptyMedia variant="icon">
           <Cable />
         </EmptyMedia>
-        <EmptyTitle>
-          {connected ? 'Nenhum registro encontrado' : 'Aguardando conexão com o ERP'}
-        </EmptyTitle>
+        <EmptyTitle>{connected ? 'Nada cadastrado ainda' : 'Sem conexão com o ERP'}</EmptyTitle>
         <EmptyDescription>
           {connected
-            ? 'Revise os filtros ou crie um novo registro.'
-            : 'Os registros aparecerão aqui após a integração do backend original. Não há dados de demonstração nesta área.'}
+            ? 'Quando houver registros, eles aparecem aqui.'
+            : 'Entre novamente para carregar os dados. Nada é mostrado sem conexão.'}
         </EmptyDescription>
       </EmptyHeader>
     </Empty>
