@@ -145,7 +145,7 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
           ) : (
             <FieldDescription>
               {catalog.connected
-                ? 'Escolher um serviço sugere título, tipo e prioridade e define as etapas do atendimento. Os dados sugeridos podem ser editados antes da abertura.'
+                ? 'Sugere título, tipo, prioridade e as etapas. Tudo pode ser editado.'
                 : 'Os serviços aparecerão após conectar o ERP. O preenchimento manual continua disponível.'}
             </FieldDescription>
           )}

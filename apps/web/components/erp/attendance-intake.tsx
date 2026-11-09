@@ -48,47 +48,59 @@ export function AttendanceIntake({
               reference: { resource: 'customers' },
             },
           ];
-  const fields = [...selection, ...orderFields.filter((f) => f.name !== 'requester')];
+  const field = (name: string) => orderFields.find((f) => f.name === name)!;
+  const what = 'O que aconteceu';
+  const who = 'Para quem';
+  const owner = 'Quem cuida';
+  // Mesmos campos e regras de orderFields; só a ordem e o agrupamento mudam.
+  const fields: FieldSpec[] = [
+    { ...field('title'), section: what },
+    { ...field('type'), section: what },
+    { ...field('description'), section: what },
+    ...selection.map((f) => ({ ...f, section: who })),
+    { ...field('origin'), section: who },
+    { ...field('sector'), section: who },
+    { ...field('assigneeUserId'), section: owner },
+    { ...field('priority'), section: owner },
+    { ...field('ownerUserId'), advanced: true },
+    {
+      ...field('deadlineAt'),
+      label: 'Prazo excepcional',
+      hint: 'Opcional. Sem ele, vale o prazo do serviço.',
+      advanced: true,
+    },
+    { ...field('internalNotes'), advanced: true },
+  ];
   return (
     <div className="space-y-5">
       {!occurrence && !providerId && (
-        <fieldset className="flex flex-wrap gap-4 rounded-lg bg-muted/50 p-4 text-sm">
-          <legend className="sr-only">Destino da nova O.S.</legend>
-          <label className="flex gap-2">
-            <input
-              type="radio"
-              name="intake-mode"
-              checked={mode === 'new'}
-              onChange={() => setMode('new')}
-            />
-            Novo atendimento
-          </label>
-          <label className="flex gap-2">
-            <input
-              type="radio"
-              name="intake-mode"
-              checked={mode === 'existing'}
-              onChange={() => setMode('existing')}
-            />
-            Adicionar O.S. a uma ocorrência existente
-          </label>
-        </fieldset>
-      )}
-      {mode === 'new' && (
-        <label className="flex gap-3 rounded-lg border border-border p-4 text-sm leading-6">
-          <input
-            type="checkbox"
-            className="mt-1 size-4 accent-primary"
-            checked={completed}
-            onChange={(event) => setCompleted(event.target.checked)}
-          />
-          <span>
-            <strong>Registrar trabalho já realizado</strong>
-            <span className="block text-muted-foreground">
-              A O.S. nasce concluída. Descreva o resultado e os identificadores na descrição.
-            </span>
-          </span>
-        </label>
+        <div
+          role="radiogroup"
+          aria-label="Destino da nova O.S."
+          className="inline-flex w-fit rounded-lg border border-border p-0.5 text-sm"
+        >
+          {(
+            [
+              ['new', 'Novo atendimento'],
+              ['existing', 'Em ocorrência existente'],
+            ] as const
+          ).map(([value, text]) => (
+            <button
+              key={value}
+              type="button"
+              role="radio"
+              aria-checked={mode === value}
+              onClick={() => setMode(value)}
+              className={`rounded-md px-3 py-1.5 transition-colors ${
+                mode === value
+                  ? 'bg-muted font-medium text-foreground'
+                  : 'text-muted-foreground hover:text-foreground'
+              }`}
+            >
+              {text}
+            </button>
+          ))}
+        </div>
       )}
       {(occurrence || fixedCustomer) && (
         <p className="rounded-lg border border-border p-3 text-sm">
@@ -148,7 +160,20 @@ export function AttendanceIntake({
             });
           }
         }}
-      />
+      >
+        {mode === 'new' && (
+          <label className="flex items-center gap-2 text-sm text-muted-foreground">
+            <input
+              type="checkbox"
+              className="size-4 accent-primary"
+              checked={completed}
+              onChange={(event) => setCompleted(event.target.checked)}
+            />
+            Registrar trabalho já realizado
+            <span className="text-xs">(a O.S. já nasce concluída)</span>
+          </label>
+        )}
+      </OrderContractForm>
     </div>
   );
 }

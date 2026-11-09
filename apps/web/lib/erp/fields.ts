@@ -40,6 +40,10 @@ export type FieldSpec = {
   pattern?: string;
   hint?: string;
   defaultValue?: string | number | boolean;
+  /** Título do bloco a que o campo pertence (campos seguidos com o mesmo título ficam juntos). */
+  section?: string;
+  /** Fica recolhido em "Mais opções"; continua sendo enviado com o formulário. */
+  advanced?: boolean;
 };
 export function parseFields(specs: FieldSpec[], form: FormData) {
   const result: Record<string, unknown> = {};

@@ -102,6 +102,54 @@ export function ContractFields({
   values?: Record<string, unknown>;
 }) {
   const prefix = useId();
+  const grouped = fields.some((field) => field.section || field.advanced);
+  if (grouped) {
+    const main = fields.filter((field) => !field.advanced);
+    const extra = fields.filter((field) => field.advanced);
+    const sections: { title?: string; fields: FieldSpec[] }[] = [];
+    for (const field of main) {
+      const last = sections[sections.length - 1];
+      if (last && last.title === field.section) last.fields.push(field);
+      else sections.push({ title: field.section, fields: [field] });
+    }
+    return (
+      <div className="flex flex-col gap-5 [&_[data-slot=field-label]]:font-normal [&_[data-slot=field-label]]:text-muted-foreground">
+        {sections.map((section, index) => (
+          <section
+            key={section.title || index}
+            className={`flex flex-col gap-3 ${index ? 'border-t border-border pt-5' : ''}`}
+          >
+            {section.title && (
+              <h3 className="text-sm font-semibold text-foreground">{section.title}</h3>
+            )}
+            <ContractFieldGrid prefix={prefix} fields={section.fields} values={values} />
+          </section>
+        ))}
+        {extra.length > 0 && (
+          <details className="group rounded-lg border border-border">
+            <summary className="cursor-pointer select-none px-4 py-3 text-sm text-muted-foreground hover:text-foreground">
+              Mais opções
+            </summary>
+            <div className="border-t border-border p-4">
+              <ContractFieldGrid prefix={prefix} fields={extra} values={values} />
+            </div>
+          </details>
+        )}
+      </div>
+    );
+  }
+  return <ContractFieldGrid prefix={prefix} fields={fields} values={values} />;
+}
+
+function ContractFieldGrid({
+  prefix,
+  fields,
+  values,
+}: {
+  prefix: string;
+  fields: FieldSpec[];
+  values: Record<string, unknown>;
+}) {
   return (
     <FieldGroup className="form-grid">
       {fields.map((field) => {
