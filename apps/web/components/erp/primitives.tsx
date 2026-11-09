@@ -133,6 +133,17 @@ export function PanelHeading({
     </div>
   );
 }
+export type MetricTone = 'info' | 'success' | 'warning' | 'danger' | 'neutral';
+/** Tom pelo significado do indicador, para que o mesmo assunto tenha a mesma cor em todas as telas. */
+export function metricTone(label: string): MetricTone {
+  const text = label.toLowerCase();
+  if (/banco|cache|redis|sessões|verificação|configuraç/.test(text)) return 'neutral';
+  if (/atrasad|violaç|crític|falha/.test(text)) return 'danger';
+  if (/pendente|em aberto|abertas|ativas|vencem|próximas do prazo|pausad|impactad/.test(text))
+    return 'warning';
+  if (/entrega|concluíd|cumprimento|satisfação|resolvid/.test(text)) return 'success';
+  return 'info';
+}
 export function Metric({
   label,
   value,
@@ -140,6 +151,7 @@ export function Metric({
   foot,
   icon: Icon,
   warning = false,
+  tone,
   children,
 }: {
   label: string;
@@ -149,10 +161,12 @@ export function Metric({
   foot: string;
   icon: LucideIcon;
   warning?: boolean;
+  /** Sobrescreve o tom deduzido do rótulo. */
+  tone?: MetricTone;
   children?: ReactNode;
 }) {
   return (
-    <article className="panel metric-card">
+    <article className={cn('panel metric-card tone-surface', `tone-${tone ?? metricTone(label)}`)}>
       <div className="flex items-center justify-between gap-2">
         <p className="metric-label">{label}</p>
         <span className="metric-icon">
