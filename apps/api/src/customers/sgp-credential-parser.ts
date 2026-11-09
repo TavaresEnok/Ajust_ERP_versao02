@@ -1,10 +1,57 @@
 import { commentText } from '../service-processes/import-sgp-pilot';
 
+// Entidades nomeadas comuns nas anotações do SGP (acentos do português e pontuação).
+const NAMED_ENTITIES: Record<string, string> = {
+  mdash: '—',
+  ndash: '–',
+  hellip: '…',
+  bull: '•',
+  middot: '·',
+  deg: '°',
+  ordm: 'º',
+  ordf: 'ª',
+  lsquo: '‘',
+  rsquo: '’',
+  ldquo: '“',
+  rdquo: '”',
+  laquo: '«',
+  raquo: '»',
+  euro: '€',
+  copy: '©',
+  Aacute: 'Á',
+  aacute: 'á',
+  Agrave: 'À',
+  agrave: 'à',
+  Acirc: 'Â',
+  acirc: 'â',
+  Atilde: 'Ã',
+  atilde: 'ã',
+  Eacute: 'É',
+  eacute: 'é',
+  Ecirc: 'Ê',
+  ecirc: 'ê',
+  Iacute: 'Í',
+  iacute: 'í',
+  Oacute: 'Ó',
+  oacute: 'ó',
+  Ocirc: 'Ô',
+  ocirc: 'ô',
+  Otilde: 'Õ',
+  otilde: 'õ',
+  Uacute: 'Ú',
+  uacute: 'ú',
+  Uuml: 'Ü',
+  uuml: 'ü',
+  Ccedil: 'Ç',
+  ccedil: 'ç',
+};
 export function noteText(html: string) {
-  return commentText(html).replace(/&#(x[0-9a-f]+|\d+);/gi, (_, n: string) => {
-    const value = n[0].toLowerCase() === 'x' ? parseInt(n.slice(1), 16) : Number(n);
-    return value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '';
-  });
+  return commentText(html)
+    .replace(/&#(x[0-9a-f]+|\d+);/gi, (_, n: string) => {
+      const value = n[0].toLowerCase() === 'x' ? parseInt(n.slice(1), 16) : Number(n);
+      return value > 0 && value <= 0x10ffff ? String.fromCodePoint(value) : '';
+    })
+    .replace(/&([A-Za-z]+);/g, (whole, name: string) => NAMED_ENTITIES[name] ?? whole);
 }
 const labels =
   /^(?:login|usu[aá]rio|user(?:name)?|senha|password|pass|ip|host|url|porta|port|endere[cç]o)\s*[:=]?\s*$/i;
