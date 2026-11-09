@@ -1358,6 +1358,8 @@ model ServiceCatalogItem {
   category         ServiceOrderType @default(AUDITORIA)
   description      String?
   estimatedMinutes Int?             @default(120)
+  /// Prazo (SLA) do serviço em horas úteis do calendário (24 h = 1 dia útil). Vazio: vale a política de SLA.
+  slaHours         Int?
   defaultPriority  Priority         @default(NORMAL)
   checklist        Json             @default("[]")
   active           Boolean          @default(true)

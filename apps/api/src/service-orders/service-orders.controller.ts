@@ -34,6 +34,8 @@ import { ServiceOrdersService } from './service-orders.service';
 import { TenantRateLimit, TenantRateLimitGuard } from '../common/tenant-rate-limit.guard';
 
 const CreateOrderSchema = z.object({
+  // Serviço do catálogo escolhido na abertura: define o prazo quando o serviço tem SLA próprio.
+  serviceCatalogItemId: z.string().uuid().optional(),
   workflowTemplateCode: z
     .string()
     .regex(/^[A-Z0-9_]+$/)
@@ -78,6 +80,7 @@ const UpdateOrderSchema = z.object({
 
 const OccurrenceOrderSchema = z.object({
   recordCompleted: z.boolean().optional(),
+  serviceCatalogItemId: z.string().uuid().optional(),
   workflowTemplateCode: z
     .string()
     .regex(/^[A-Z0-9_]+$/)

@@ -31,6 +31,8 @@ const ServiceCatalogSchema = z.object({
   category: z.nativeEnum(ServiceOrderType).optional(),
   description: z.string().max(500).optional(),
   estimatedMinutes: z.number().int().min(5).max(1440).optional(),
+  // Prazo do serviço em horas úteis (até 60 dias úteis); null volta para a política de SLA.
+  slaHours: z.number().int().min(1).max(1440).nullable().optional(),
   defaultPriority: z.nativeEnum(Priority).optional(),
   checklist: z.array(z.string()).optional(),
   active: z.boolean().optional(),
