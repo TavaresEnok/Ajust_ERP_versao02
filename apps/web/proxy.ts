@@ -132,6 +132,7 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    '/((?!api/|drawio/|_next/|favicon.ico|icon|apple-icon|placeholder|.*\\.(?:png|svg|jpg|jpeg|webp|ico|txt)$).*)',
+    // Imagens públicas passam direto, exceto os prints do guia (/guia/*), que exigem login.
+    '/((?!api/|drawio/|_next/|favicon.ico|icon|apple-icon|placeholder|(?!guia/).*\\.(?:png|svg|jpg|jpeg|webp|ico|txt)$).*)',
   ],
 };

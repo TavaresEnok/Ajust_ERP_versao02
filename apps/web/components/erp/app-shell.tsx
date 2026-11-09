@@ -15,7 +15,6 @@ import {
   Command,
   ArrowUpRight,
   CheckCheck,
-  Headphones,
   LogOut,
   Sun,
   Moon,
@@ -75,7 +74,6 @@ export function AppShell({ children }: { children: ReactNode }) {
   const [notifications, setNotifications] = useState(false);
   const [read, setRead] = useState(false);
   const [profile, setProfile] = useState(false);
-  const [help, setHelp] = useState(false);
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
@@ -174,11 +172,14 @@ export function AppShell({ children }: { children: ReactNode }) {
           })}
         </nav>
         <div className="border-t border-border px-3 pt-2 pb-3">
-          <button className="nav-item w-full" onClick={() => setHelp(true)}>
+          <Link
+            className="nav-item w-full"
+            href={`${base === '/cliente' ? '/gerencia' : base}/guia`}
+          >
             <HelpCircle />
-            <span>Central de ajuda</span>
+            <span>Guia de uso</span>
             <ArrowUpRight className="ml-auto" />
-          </button>
+          </Link>
           <div className="mt-1 flex items-center gap-2.5 rounded-lg bg-muted/70 px-3 py-2.5">
             <span
               className={cn(
@@ -382,24 +383,6 @@ export function AppShell({ children }: { children: ReactNode }) {
               Marcar todas como lidas
             </Button>
           </div>
-        </DialogContent>
-      </Dialog>
-      <Dialog open={help} onOpenChange={setHelp}>
-        <DialogContent>
-          <DialogHeader>
-            <DialogTitle>Como podemos ajudar?</DialogTitle>
-            <DialogDescription>Encontre guias e informações para usar o Ajust.</DialogDescription>
-          </DialogHeader>
-          <Link href="/analista/ajustpedia" onClick={() => setHelp(false)} className="nav-item">
-            <Headphones />
-            Explorar a Ajustpedia
-            <ChevronRight className="ml-auto" />
-          </Link>
-          <p className="rounded-lg bg-secondary p-4 text-xs leading-relaxed text-primary">
-            O redesign é a interface operacional do Ajust ERP. Os formulários utilizam os contratos
-            originais e aguardam o transporte e a sessão do backend. Uma rota ou menu não substitui
-            autorização no servidor.
-          </p>
         </DialogContent>
       </Dialog>
       <Toaster position="bottom-right" richColors theme={dark ? 'dark' : 'light'} />

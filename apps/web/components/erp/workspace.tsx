@@ -62,6 +62,7 @@ const TenantAdministration = dynamic(() =>
 const IntegrationWorkspace = dynamic(() =>
   import('./integration-workspace').then((module) => module.IntegrationWorkspace),
 );
+const UserGuide = dynamic(() => import('./user-guide').then((module) => module.UserGuide));
 const RealtimeEventsWorkspace = dynamic(() =>
   import('./realtime-events-workspace').then((module) => module.RealtimeEventsWorkspace),
 );
@@ -191,6 +192,8 @@ export function Workspace({ path = '/' }: { path?: string }) {
         <CatalogPage key={path} kind="policies" id={id} editOnOpen={detailSection === 'editar'} />
       );
     if (section === 'workflows') return <WorkflowsHub id={id} />;
+    if (section === 'guia')
+      return <UserGuide audience={base === '/analista' ? 'analista' : 'gerencia'} />;
     if (section === 'seguranca') return <SecurityPage key={id} section={id} />;
     if (section === 'notificacoes') return <NotificationsConfigPage key={id} section={id} />;
     if (section === 'integracoes') return <IntegrationsPage key={id} section={id} />;

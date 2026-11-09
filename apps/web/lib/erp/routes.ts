@@ -46,6 +46,7 @@ const details: Record<string, string[]> = {
 };
 const sections = new Set([
   ...Object.keys(details),
+  'guia',
   'agenda',
   'sla',
   'saude',
