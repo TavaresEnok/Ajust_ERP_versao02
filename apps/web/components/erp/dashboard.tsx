@@ -33,31 +33,37 @@ const date = (value: unknown) =>
     : 'Sem data';
 const focuses = {
   active: {
+    tone: 'tone-info',
     label: 'Pendentes agora',
     metric: 'totalOpen',
     help: 'Inclui ordens antigas ainda em atendimento.',
   },
   overdue: {
+    tone: 'tone-danger',
     label: 'Atrasadas',
     metric: 'overdue',
     help: 'Prazo vencido; pausadas ficam fora desta contagem.',
   },
   soon: {
+    tone: 'tone-warning',
     label: 'Vencem em até 2h',
     metric: 'dueSoon',
     help: 'Prazos que exigem atenção nas próximas horas.',
   },
   unassigned: {
+    tone: 'tone-neutral',
     label: 'Sem responsável',
     metric: 'unassigned',
     help: 'Sem vínculo com um responsável no ERP.',
   },
   paused: {
+    tone: 'tone-neutral',
     label: 'Pausadas',
     metric: 'paused',
     help: 'Consulte o motivo para remover o impedimento.',
   },
   scheduled: {
+    tone: 'tone-success',
     label: 'Execuções agendadas',
     metric: 'scheduled',
     help: 'Com horário combinado e início ainda não registrado.',
@@ -182,11 +188,12 @@ export function Dashboard() {
                 setPage(0);
               }}
               className={cn(
-                'panel p-4 text-left focus-visible:outline-2 focus-visible:outline-primary',
+                'panel tone-surface p-4 text-left focus-visible:outline-2 focus-visible:outline-primary',
+                item.tone,
                 focus === key && 'border-primary',
               )}
             >
-              <span className="text-xs text-muted-foreground">{item.label}</span>
+              <span className="tone-dot text-xs text-muted-foreground">{item.label}</span>
               <strong className="mt-2 block text-3xl">
                 {overview?.operation[item.metric] ?? '—'}
               </strong>
