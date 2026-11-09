@@ -22,10 +22,10 @@ const labels = {
   CANCELED: 'Cancelada',
 };
 const tones = {
-  ACTIVE: 'border-sky-500 bg-sky-500/10',
-  COMPLETED: 'border-green-500 bg-green-500/10',
-  WAITING: 'border-amber-500 bg-amber-500/10',
-  FAILED: 'border-red-500 bg-red-500/10',
+  ACTIVE: 'border-info bg-info/10',
+  COMPLETED: 'border-success bg-success/10',
+  WAITING: 'border-warning bg-warning/10',
+  FAILED: 'border-danger bg-danger/10',
   PENDING: 'border-border',
   CANCELED: 'border-border',
 };
@@ -47,8 +47,8 @@ export function ImportedFlowSummary({
     : 'Não informado';
 
   return (
-    <div className="rounded-xl border-2 border-amber-500/50 bg-amber-500/5 p-5">
-      <p className="text-xs font-bold uppercase tracking-wide text-amber-700 dark:text-amber-300">
+    <div className="rounded-xl border-2 border-warning/50 bg-warning/5 p-5">
+      <p className="text-xs font-bold uppercase tracking-wide text-warning">
         {superseded ? 'Versão anterior' : 'Sem execução do fluxo registrada'}
       </p>
       <h3 className="mt-2 text-lg font-semibold">
@@ -235,7 +235,7 @@ export function ExecutionTracking({
       ) : (
         <>
           {instance.state.error && (
-            <p role="alert" className="rounded-lg border border-red-400 bg-red-500/10 p-4 text-sm">
+            <p role="alert" className="rounded-lg border border-danger bg-danger/10 p-4 text-sm">
               Bloqueio no atendimento: {instance.state.error}
             </p>
           )}

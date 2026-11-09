@@ -88,8 +88,8 @@ function RosterStatus({ pending }: { pending: boolean }) {
       className={cn(
         'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-semibold',
         pending
-          ? 'border-amber-500/20 bg-amber-500/10 text-amber-700 dark:text-amber-400'
-          : 'border-emerald-500/20 bg-emerald-500/10 text-emerald-700 dark:text-emerald-400',
+          ? 'border-warning/20 bg-warning/10 text-warning'
+          : 'border-success/20 bg-success/10 text-success',
       )}
     >
       {pending ? <AlertCircle className="size-3" /> : <Check className="size-3" />}
@@ -175,7 +175,7 @@ export function RosterSummary({
                 : 'Nenhum feriado cadastrado'}
             </p>
           </div>
-          <span className="rounded-xl bg-sky-500/10 p-2.5 text-sky-600 dark:text-sky-400">
+          <span className="rounded-xl bg-info/10 p-2.5 text-info">
             <CalendarDays className="size-4" />
           </span>
         </div>
@@ -230,7 +230,7 @@ export function RosterTable({
               className={cn(
                 'scroll-mt-24 transition-colors hover:bg-secondary/25',
                 day.date === today && 'bg-primary/5',
-                day.dayPending && day.date !== today && 'bg-amber-500/[0.025]',
+                day.dayPending && day.date !== today && 'bg-warning/[0.025]',
               )}
             >
               <td
@@ -249,7 +249,7 @@ export function RosterTable({
                     </span>
                   )}
                   {day.holidayName && (
-                    <span className="rounded border border-violet-500/20 bg-violet-500/10 px-1.5 py-0.5 text-[9px] font-medium text-violet-700 dark:text-violet-400">
+                    <span className="rounded border border-info/20 bg-info/10 px-1.5 py-0.5 text-[9px] font-medium text-info">
                       Feriado
                     </span>
                   )}
@@ -258,14 +258,12 @@ export function RosterTable({
                   {dateLabel(day.date, { weekday: 'long' })}
                 </p>
                 {day.holidayName && (
-                  <p className="mt-1 max-w-40 text-[10px] text-violet-700 dark:text-violet-400">
-                    {day.holidayName}
-                  </p>
+                  <p className="mt-1 max-w-40 text-[10px] text-info">{day.holidayName}</p>
                 )}
               </td>
               <td className="max-w-lg px-4 py-4 align-middle">
                 {day.dayPending ? (
-                  <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-amber-500/25 bg-amber-500/5 px-2.5 py-1.5 text-[11px] text-amber-700 dark:text-amber-400">
+                  <span className="inline-flex items-center gap-1.5 rounded-md border border-dashed border-warning/25 bg-warning/5 px-2.5 py-1.5 text-[11px] text-warning">
                     <AlertCircle className="size-3.5" />
                     Aguardando programação
                   </span>
@@ -284,7 +282,7 @@ export function RosterTable({
                   {canEdit && (
                     <Button
                       size="sm"
-                      variant={day.dayPending ? 'default' : 'outline'}
+                      variant="outline"
                       aria-label={`Programar equipe diurna de ${day.date}`}
                       onClick={() => onEdit(day)}
                     >
@@ -357,8 +355,8 @@ export function RosterBoard({
                   day.date === today
                     ? 'border-primary/50 ring-1 ring-primary/10'
                     : day.dayPending
-                      ? 'border-amber-500/20'
-                      : 'border-emerald-500/20',
+                      ? 'border-warning/20'
+                      : 'border-success/20',
                 )}
               >
                 <div className="flex items-start justify-between gap-1">
@@ -379,15 +377,11 @@ export function RosterBoard({
                   )}
                 </div>
                 {day.holidayName && (
-                  <p className="mt-2 text-[10px] font-medium text-violet-700 dark:text-violet-400">
-                    {day.holidayName}
-                  </p>
+                  <p className="mt-2 text-[10px] font-medium text-info">{day.holidayName}</p>
                 )}
                 <div className="my-3 min-h-10">
                   {day.dayPending ? (
-                    <p className="text-[11px] text-amber-700 dark:text-amber-400">
-                      Equipe a definir
-                    </p>
+                    <p className="text-[11px] text-warning">Equipe a definir</p>
                   ) : (
                     <MemberChips ids={day.dayUserIds} members={members} ownId={ownId} compact />
                   )}

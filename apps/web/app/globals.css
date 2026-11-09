@@ -48,6 +48,10 @@
   --color-warning: var(--warning);
   --color-danger: var(--danger);
   --color-info: var(--info);
+  --color-success-surface: var(--success-surface);
+  --color-warning-surface: var(--warning-surface);
+  --color-danger-surface: var(--danger-surface);
+  --color-info-surface: var(--info-surface);
   --radius-sm: 6px;
   --radius-md: 8px;
   --radius-lg: 10px;
@@ -67,10 +71,10 @@
   --muted: #f0f3f9;
   --muted-foreground: #64748b;
   --border: #e3e9f2;
-  --success: #188565;
-  --warning: #a8751b;
-  --danger: #c64c52;
-  --info: #2563eb;
+  --success: #2f7a5f;
+  --warning: #96702a;
+  --danger: #b4534f;
+  --info: #3c64b1;
   --success-surface: #eaf6ef;
   --warning-surface: #fff6e5;
   --danger-surface: #fff0ef;
@@ -101,10 +105,11 @@
   --muted: #222327;
   --muted-foreground: #a2a3ab;
   --border: #2b2c31;
-  --success: #64c59a;
-  --warning: #d6b374;
-  --danger: #df898c;
-  --info: #75aaf7;
+  /* Tons sóbrios: pouca saturação para não brilhar sobre o fundo escuro. */
+  --success: #7fae95;
+  --warning: #c4a676;
+  --danger: #c98580;
+  --info: #8aa9d6;
   --success-surface: #1b2b24;
   --warning-surface: #30291d;
   --danger-surface: #312124;

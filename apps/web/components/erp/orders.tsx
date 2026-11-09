@@ -154,9 +154,9 @@ export function OrdersTable({
                     className={cn(
                       'text-xs',
                       attention[o.id]?.tone === 'danger'
-                        ? 'text-rose-600 dark:text-rose-400'
+                        ? 'text-danger'
                         : attention[o.id]?.tone === 'warning'
-                          ? 'text-amber-600 dark:text-amber-300'
+                          ? 'text-warning'
                           : 'text-muted-foreground',
                     )}
                   >
@@ -179,9 +179,9 @@ export function OrdersTable({
                         className={cn(
                           'mt-1 block text-[11px]',
                           attention[o.id].tone === 'danger'
-                            ? 'text-rose-600 dark:text-rose-400'
+                            ? 'text-danger'
                             : attention[o.id].tone === 'warning'
-                              ? 'text-amber-600 dark:text-amber-400'
+                              ? 'text-warning'
                               : 'text-muted-foreground',
                         )}
                       >

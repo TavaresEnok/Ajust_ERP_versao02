@@ -177,7 +177,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
       <Star
         className={
           favorites.includes(articleId)
-            ? 'size-4 fill-amber-400 text-amber-500'
+            ? 'size-4 fill-warning text-warning'
             : 'size-4 text-muted-foreground'
         }
       />
@@ -185,10 +185,10 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
   );
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
-      <header className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-blue-950 p-6 text-white sm:p-8">
+      <header className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-info p-6 text-white sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.18em] text-blue-300">
+            <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.18em] text-info">
               <BookOpen className="size-4" />
               Base de conhecimento · Ajust
             </p>
@@ -204,7 +204,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
               onClick={() => setOnlyFavorites((v) => !v)}
               aria-pressed={onlyFavorites}
             >
-              <Star className="size-4 text-amber-300" />
+              <Star className="size-4 text-warning" />
               Favoritos
             </Button>
             {canManage && !id && (
@@ -220,7 +220,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
           ].map((stat) => (
             <div key={stat.label} className="flex items-center gap-3">
               <span className="rounded-xl border border-white/10 bg-white/5 p-2.5">
-                <stat.icon className="size-4 text-blue-300" />
+                <stat.icon className="size-4 text-info" />
               </span>
               <div>
                 <p className="text-[10px] uppercase tracking-wider text-slate-400">{stat.label}</p>
@@ -361,7 +361,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                   <span className="ml-2 rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">
                     {visible.length} artigos
                   </span>
-                  {onlyFavorites && <span className="ml-2 text-amber-600">Favoritos</span>}
+                  {onlyFavorites && <span className="ml-2 text-warning">Favoritos</span>}
                 </p>
                 <div className="flex rounded-lg border border-border bg-muted/30 p-1">
                   {(
@@ -436,7 +436,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                                 <Copy className="size-3.5" />
                               </button>
                             </div>
-                            <pre className="max-h-20 overflow-hidden whitespace-pre-wrap break-all font-mono text-xs leading-5 text-emerald-300">
+                            <pre className="max-h-20 overflow-hidden whitespace-pre-wrap break-all font-mono text-xs leading-5 text-success">
                               {parsed.command}
                             </pre>
                           </div>

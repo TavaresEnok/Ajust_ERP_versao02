@@ -32,10 +32,10 @@ export function OperationalFlowGraph({
 }) {
   const { dark } = useAppTheme();
   const colors = {
-    ACTIVE: '#0284c7',
-    COMPLETED: '#16a34a',
-    WAITING: '#d97706',
-    FAILED: '#dc2626',
+    ACTIVE: 'var(--info)',
+    COMPLETED: 'var(--success)',
+    WAITING: 'var(--warning)',
+    FAILED: 'var(--danger)',
     PENDING: '#64748b',
     CANCELED: '#64748b',
   };
@@ -81,7 +81,7 @@ export function OperationalFlowGraph({
       width: 225,
       padding: 12,
       borderRadius: 12,
-      border: `2px solid ${states ? colors[states[n.id] || 'PENDING'] : selected === n.id ? '#8b5cf6' : active.includes(n.id) ? '#0284c7' : completed.includes(n.id) ? '#16a34a' : dark ? '#475569' : '#cbd5e1'}`,
+      border: `2px solid ${states ? colors[states[n.id] || 'PENDING'] : selected === n.id ? 'var(--primary)' : active.includes(n.id) ? 'var(--info)' : completed.includes(n.id) ? 'var(--success)' : dark ? '#475569' : '#cbd5e1'}`,
       boxShadow:
         selected === n.id
           ? '0 0 0 3px #8b5cf655'

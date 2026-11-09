@@ -53,13 +53,13 @@ export function StructuredAccesses({ entries }: { entries: VaultAccess[] }) {
             </span>
           </div>
           {[
-            { label: 'Endereço', value: entry.host, color: 'text-amber-700 dark:text-amber-300' },
+            { label: 'Endereço', value: entry.host, color: 'text-warning' },
             {
               label: 'Porta',
               value: entry.port === null ? '' : String(entry.port),
               color: 'text-muted-foreground',
             },
-            { label: 'Usuário', value: entry.username, color: 'text-cyan-700 dark:text-cyan-300' },
+            { label: 'Usuário', value: entry.username, color: 'text-info' },
             { label: 'Senha', value: entry.secret, color: '', secret: true },
           ].map((field) => (
             <div key={field.label}>
@@ -241,7 +241,7 @@ export function VaultAccessEditor({
             <DialogDescription>Endereços, contas e orientações deste cadastro.</DialogDescription>
           </DialogHeader>
           {error ? (
-            <div role="alert" className="space-y-3 text-sm text-red-600">
+            <div role="alert" className="space-y-3 text-sm text-danger">
               <p>{error}</p>
               <Button variant="outline" onClick={() => void load()}>
                 Tentar novamente
@@ -281,7 +281,7 @@ export function VaultAccessEditor({
               {saveError && (
                 <p
                   role="alert"
-                  className="rounded-xl border border-red-500/20 bg-red-500/5 p-3 text-sm text-red-600"
+                  className="rounded-xl border border-danger/20 bg-danger/5 p-3 text-sm text-danger"
                 >
                   {saveError}
                 </p>

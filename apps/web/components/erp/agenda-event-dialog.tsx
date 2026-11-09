@@ -414,7 +414,7 @@ export function AgendaEventDialog({
             )}
             {conflicts.length > 0 && (
               <ul
-                className="space-y-2 rounded-lg border border-amber-500/30 p-3 text-xs"
+                className="space-y-2 rounded-lg border border-warning/30 p-3 text-xs"
                 aria-label="Compromissos em conflito"
               >
                 {conflicts.map((item) => (

@@ -8,7 +8,7 @@ export function OperationalAlerts() {
   const query = useErpQuery<ErpRecord[]>('/service-orders/operational-alerts');
   if (!query.data?.length) return null;
   return (
-    <section className="panel mb-5 p-5 border-amber-300">
+    <section className="panel mb-5 p-5 border-warning/30">
       <h2 className="section-title">Atenção aos atendimentos · {query.data.length}</h2>
       <div className="mt-3 max-h-56 overflow-auto space-y-3">
         {query.data.map((o) => (
