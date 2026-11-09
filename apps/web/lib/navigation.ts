@@ -1,5 +1,6 @@
 import { canAccessSection } from './erp/access';
 import {
+  LifeBuoy,
   LayoutDashboard,
   ClipboardList,
   CalendarDays,
@@ -293,6 +294,18 @@ export const advancedItems: NavItem[] = [
   },
 ];
 navigation.push({ label: 'Configuração operacional', items: advancedItems });
+// Guia de uso: aberto pelo botão do rodapé do menu; aqui só dá nome à página e entra na busca.
+navigation.push({
+  label: 'Ajuda',
+  items: [
+    {
+      title: 'Guia de uso',
+      path: '/gerencia/guia',
+      icon: LifeBuoy,
+      description: 'Passo a passo com prints: atendimentos, O.S., cofre, fluxos e gestão.',
+    },
+  ],
+});
 export const allNavigation = [...navigation.flatMap((g) => g.items), ...portalItems];
 export function getPortalNavigation(path: string, role?: import('./erp/contracts').RoleCode) {
   const portal =

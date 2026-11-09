@@ -28,3 +28,8 @@ backups/
 
 # Local immutable image snapshots used for rollback
 .deploy/
+
+# Prints do guia de uso: ficam só no servidor (mostram nomes e e-mails internos)
+apps/web/public/guia/
+# Relatórios e prints das análises externas (telas reais do sistema)
+docs/analises/prints/
