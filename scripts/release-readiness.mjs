@@ -13,10 +13,8 @@ const requiredSecrets = [
   'WORKER_API_TOKEN',
   'WEB_BASE_URL',
   'API_BASE_URL',
-  'SMTP_HOST',
-  'SMTP_USER',
-  'SMTP_PASS',
 ];
+if (process.env.SMTP_HOST) requiredSecrets.push('SMTP_USER', 'SMTP_PASS');
 const placeholderPattern = /change_me|your_|example|ajust123/i;
 const errors = [];
 
@@ -42,14 +40,14 @@ for (const name of [
 for (const file of ['docker-compose.staging.yml', 'docker-compose.prod.yml']) {
   const result = spawnSync('docker', ['compose', '-f', file, 'config', '--quiet'], {
     encoding: 'utf8',
-    env: process.env,
+    env: { ...process.env, STAGING_ENV_FILE: process.env.STAGING_ENV_FILE || '.env.staging.example' },
   });
   if (result.status !== 0) {
     errors.push(`${file} is invalid: ${(result.stderr || result.stdout).trim()}`);
   }
 }
 
-for (const file of ['scripts/db-backup.sh', 'scripts/db-rollback.sh', 'scripts/rollback.sh']) {
+for (const file of ['scripts/db-backup.sh', 'scripts/db-rollback.sh', 'scripts/rollback.sh', 'scripts/deploy-images.sh']) {
   if (!existsSync(file)) {
     errors.push(`${file} is missing.`);
     continue;

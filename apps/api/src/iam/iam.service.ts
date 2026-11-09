@@ -440,22 +440,54 @@ export class IamService {
         createdAt: 'desc',
       },
     });
-    const grouped = await this.prisma.serviceOrder.groupBy({
-      by: ['assigneeUserId', 'status'],
-      where: { tenantId, sourceSystem: 'SGP', deletedAt: null, assigneeUserId: { not: null } },
-      _count: { _all: true },
-    });
+    // Aggregate in one database snapshot, without loading the order history into memory.
+    // SLA measures technical resolution; later administrative closure does not change it.
+    const metrics = await this.prisma.$queryRaw<
+      {
+        assigneeUserId: string;
+        activeOrderCount: number;
+        completedOrderCount: number;
+        slaEvaluatedCount: number;
+        slaMetCount: number;
+      }[]
+    >`
+      WITH assigned AS (
+        SELECT *, COALESCE("resolvedAt", "closedAt") AS "finishedAt"
+        FROM "ServiceOrder"
+        WHERE "tenantId" = ${tenantId}
+          AND "deletedAt" IS NULL AND "assigneeUserId" IS NOT NULL
+          AND ("sourceMetadata"->'demonstration') IS DISTINCT FROM 'true'::jsonb
+      ), measured AS (
+        SELECT *, (
+          "status" IN ('RESOLVIDA', 'FECHADA') AND "slaEligible" = true
+          AND "deadlineAt" IS NOT NULL AND "finishedAt" >= "createdAt"
+          AND "finishedAt" <= CURRENT_TIMESTAMP
+        ) AS eligible
+        FROM assigned
+      )
+      SELECT "assigneeUserId",
+        (COUNT(*) FILTER (WHERE "status" NOT IN ('RESOLVIDA', 'FECHADA', 'CANCELADA')))::int AS "activeOrderCount",
+        (COUNT(*) FILTER (WHERE "status" IN ('RESOLVIDA', 'FECHADA')))::int AS "completedOrderCount",
+        (COUNT(*) FILTER (WHERE eligible))::int AS "slaEvaluatedCount",
+        (COUNT(*) FILTER (WHERE eligible AND "finishedAt" <= "deadlineAt"))::int AS "slaMetCount"
+      FROM measured GROUP BY "assigneeUserId"
+    `;
+    const byAssignee = new Map(metrics.map((row) => [row.assigneeUserId, row]));
     return members.map((member) => {
-      const stats = grouped.filter((row) => row.assigneeUserId === member.userId);
+      const stats = byAssignee.get(member.userId);
+      const slaEvaluatedCount = stats?.slaEvaluatedCount ?? 0;
+      const slaMetCount = stats?.slaMetCount ?? 0;
       return {
         ...member,
-        activeOrderCount: stats
-          .filter((row) => !['FECHADA', 'RESOLVIDA', 'CANCELADA'].includes(row.status))
-          .reduce((n, row) => n + row._count._all, 0),
-        completedOrderCount: stats
-          .filter((row) => ['FECHADA', 'RESOLVIDA'].includes(row.status))
-          .reduce((n, row) => n + row._count._all, 0),
-        metricsScope: 'IMPORTED_SGP_ORDERS',
+        activeOrderCount: stats?.activeOrderCount ?? 0,
+        completedOrderCount: stats?.completedOrderCount ?? 0,
+        slaEvaluatedCount,
+        slaMetCount,
+        slaPercentage: slaEvaluatedCount
+          ? Math.round((slaMetCount / slaEvaluatedCount) * 1000) / 10
+          : null,
+        metricsScope: 'ASSIGNED_ORDERS_WITHOUT_DEMONSTRATIONS',
+        slaScope: 'ALL_TIME_CURRENT_ASSIGNEE',
       };
     });
   }

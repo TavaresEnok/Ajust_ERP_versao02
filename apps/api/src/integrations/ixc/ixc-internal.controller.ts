@@ -2,7 +2,7 @@ import { Body, Controller, Headers, Inject, Post, UnauthorizedException } from '
 import { timingSafeEqual } from 'node:crypto';
 import { z } from 'zod';
 import { IxcService } from './ixc.service';
-const Input = z.object({ tenantId: z.string().uuid(), delta: z.record(z.unknown()) });
+const Input = z.object({ tenantId: z.string().uuid(), delta: z.record(z.string(), z.unknown()) });
 @Controller('integrations/ixc/internal')
 export class IxcInternalController {
   constructor(@Inject(IxcService) private readonly service: IxcService) {}

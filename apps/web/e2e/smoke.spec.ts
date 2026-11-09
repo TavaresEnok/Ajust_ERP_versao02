@@ -12,6 +12,7 @@ test.describe('Páginas públicas', () => {
   test('login não oferece navegação anônima', async ({ page }) => {
     await page.goto('/login');
     await expect(page.getByText(/explorar o sistema sem autenticação/i)).toHaveCount(0);
+    await expect(page.getByRole('region', { name: 'Acessos para demonstração' })).toBeVisible();
   });
 
   test('recuperação de senha carrega', async ({ page }) => {

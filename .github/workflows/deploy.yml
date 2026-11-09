@@ -20,7 +20,13 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
+  validate:
+    uses: ./.github/workflows/ci.yml
+    permissions:
+      contents: read
+
   build-and-push:
+    needs: validate
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -92,6 +98,15 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Upload validated staging configuration and scripts
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.STAGING_USER }}
+          key: ${{ secrets.STAGING_SSH_KEY }}
+          source: 'docker-compose.staging.yml,scripts/deploy-images.sh,scripts/db-backup.sh'
+          target: ${{ secrets.STAGING_DEPLOY_PATH }}
+
       - name: Deploy to staging via SSH
         uses: appleboy/ssh-action@v1
         with:
@@ -102,22 +117,10 @@ jobs:
             set -e
             cd ${{ secrets.STAGING_DEPLOY_PATH }}
 
-            # Pull latest images
-            IMAGE_TAG=${{ github.sha }}
-            export IMAGE_TAG
+            export IMAGE_TAG=${{ github.sha }}
             export REGISTRY=${{ env.REGISTRY }}
             export IMAGE_NAME=${{ env.IMAGE_NAME }}
-
-            docker compose -f docker-compose.staging.yml pull api worker web
-
-            # Run DB migrations before swapping containers
-            docker compose -f docker-compose.staging.yml run --rm api \
-              sh -c "npx prisma migrate deploy --schema prisma/schema.prisma"
-
-            # Rolling restart
-            docker compose -f docker-compose.staging.yml up -d --no-deps api worker web
-
-            echo "Deploy to staging complete — image $IMAGE_TAG"
+            DEPLOY_ID=${{ github.run_id }}-${{ github.run_attempt }} COMPOSE_FILE=docker-compose.staging.yml bash scripts/deploy-images.sh
 
       - name: Wait for staging to be healthy
         uses: nick-fields/retry@v3
@@ -155,9 +158,7 @@ jobs:
           key: ${{ secrets.STAGING_SSH_KEY }}
           script: |
             cd ${{ secrets.STAGING_DEPLOY_PATH }}
-            echo "Rolling back staging to previous containers..."
-            docker compose -f docker-compose.staging.yml up -d --no-deps --no-recreate api worker web || true
-            echo "Rollback attempted. Check containers manually."
+            DEPLOY_ID=${{ github.run_id }}-${{ github.run_attempt }} COMPOSE_FILE=docker-compose.staging.yml bash scripts/deploy-images.sh rollback
 
   deploy-production:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_production }}
@@ -170,6 +171,15 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+
+      - name: Upload validated production configuration and scripts
+        uses: appleboy/scp-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          source: 'docker-compose.prod.yml,scripts/deploy-images.sh,scripts/db-backup.sh'
+          target: ${{ secrets.PRODUCTION_DEPLOY_PATH }}
 
       - name: Deploy production via SSH
         uses: appleboy/ssh-action@v1
@@ -184,11 +194,7 @@ jobs:
             export REGISTRY=${{ env.REGISTRY }}
             export IMAGE_NAME=${{ env.IMAGE_NAME }}
 
-            ./scripts/db-backup.sh
-            docker compose -f docker-compose.prod.yml pull api worker web
-            docker compose -f docker-compose.prod.yml run --rm api \
-              sh -c "npx prisma migrate deploy --schema prisma/schema.prisma"
-            docker compose -f docker-compose.prod.yml up -d --no-deps api worker web
+            DEPLOY_ID=${{ github.run_id }}-${{ github.run_attempt }} COMPOSE_FILE=docker-compose.prod.yml bash scripts/deploy-images.sh
 
       - name: Wait for production health
         uses: nick-fields/retry@v3
@@ -197,3 +203,15 @@ jobs:
           max_attempts: 36
           retry_wait_seconds: 5
           command: curl -sf ${{ secrets.PRODUCTION_API_URL }}/monitoring/ready
+
+      - name: Rollback production on failure
+        if: failure()
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.PRODUCTION_HOST }}
+          username: ${{ secrets.PRODUCTION_USER }}
+          key: ${{ secrets.PRODUCTION_SSH_KEY }}
+          script: |
+            set -e
+            cd ${{ secrets.PRODUCTION_DEPLOY_PATH }}
+            DEPLOY_ID=${{ github.run_id }}-${{ github.run_attempt }} COMPOSE_FILE=docker-compose.prod.yml bash scripts/deploy-images.sh rollback

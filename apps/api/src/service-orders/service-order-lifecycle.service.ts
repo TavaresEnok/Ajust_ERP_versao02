@@ -1,5 +1,18 @@
-import { Inject, Injectable, Logger, Module, Optional, forwardRef } from '@nestjs/common';
-import type { AuditAction, ServiceOrder, ServiceOrderStatus } from '@prisma/client';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  Module,
+  OnModuleInit,
+  Optional,
+  forwardRef,
+} from '@nestjs/common';
+import type {
+  AuditAction,
+  ServiceOrder,
+  ServiceOrderStatus,
+  ServiceOrderLifecycleEvent,
+} from '@prisma/client';
 import { PrismaModule } from '../prisma/prisma.module';
 import { PrismaService } from '../prisma/prisma.service';
 import { EventsGateway } from '../events.gateway';
@@ -13,6 +26,7 @@ import { WorkflowsModule } from '../workflows/workflows.module';
 import { WorkflowsService } from '../workflows/workflows.service';
 import { syncOccurrenceStatus } from './occurrence-sync';
 import { isReopen } from './service-order-rules';
+import { LifecycleOutboxService, EffectRunner } from './lifecycle-outbox.service';
 
 export type StatusChange = {
   tenantId: string;
@@ -30,10 +44,10 @@ export type StatusChange = {
 
 /**
  * Efeitos únicos de mudança de status e de criação de O.S. (auditoria C-013/C-035).
- * Tudo aqui roda depois da gravação: uma falha é registrada em log e não desfaz o status.
+ * O outbox nasce na transação do banco. Cada efeito concluído é registrado e falhas são retentadas.
  */
 @Injectable()
-export class ServiceOrderLifecycleService {
+export class ServiceOrderLifecycleService implements OnModuleInit {
   private readonly logger = new Logger(ServiceOrderLifecycleService.name);
 
   constructor(
@@ -47,11 +61,65 @@ export class ServiceOrderLifecycleService {
     @Optional()
     @Inject(forwardRef(() => WorkflowsService))
     private readonly workflows?: WorkflowsService,
+    @Optional() @Inject(LifecycleOutboxService) private readonly outbox?: LifecycleOutboxService,
   ) {}
 
+  onModuleInit() {
+    this.outbox?.start((event, effect) => this.deliverStoredEvent(event, effect));
+  }
+
+  private async deliverStoredEvent(event: ServiceOrderLifecycleEvent, effect: EffectRunner) {
+    const payload = event.payload as unknown as { order: ServiceOrder; change?: StatusChange };
+    const order = { ...payload.order, deadlineAt: new Date(payload.order.deadlineAt) };
+    const current = await this.prisma.serviceOrder.findUnique({
+      where: { id: order.id },
+      select: { processInstanceId: true },
+    });
+    const instanceId = order.processInstanceId ?? current?.processInstanceId;
+    if (instanceId) {
+      const instance = await this.prisma.serviceProcessInstance.findUnique({
+        where: { id: instanceId },
+      });
+      if ((instance?.state as Record<string, unknown> | null)?.mode === 'DEMO') return;
+    }
+    if (event.kind === 'created') {
+      const firstNote = await this.prisma.serviceOrderOccurrence.findFirst({
+        where: { serviceOrderId: order.id },
+        orderBy: { createdAt: 'asc' },
+        select: { actorUserId: true },
+      });
+      await this.applyOrderCreated(order, firstNote?.actorUserId ?? null, {}, effect, event.id);
+    } else if (payload.change) {
+      await this.applyStatusChange(payload.change, effect, order, event.id);
+    } else throw new Error('Invalid lifecycle event payload.');
+  }
+
+  private async deliverForOrder(orderId: string) {
+    try {
+      await this.outbox!.deliver(orderId);
+    } catch (error) {
+      // The transaction already persisted the event; the background poller will retry it.
+      this.logger.warn(`Efeitos da O.S. ${orderId} pendentes: ${(error as Error).message}`);
+    }
+  }
+
   async afterStatusChange(change: StatusChange) {
+    if (this.outbox) {
+      void this.deliverForOrder(change.orderId);
+      return;
+    }
+    return this.applyStatusChange(change, (name, run) => this.safe(name, run));
+  }
+
+  private async applyStatusChange(
+    change: StatusChange,
+    effect: EffectRunner,
+    snapshot?: ServiceOrder,
+    eventId?: string,
+  ) {
     const { tenantId, orderId, from, to } = change;
-    const order = await this.prisma.serviceOrder.findFirst({ where: { id: orderId, tenantId } });
+    const order =
+      snapshot ?? (await this.prisma.serviceOrder.findFirst({ where: { id: orderId, tenantId } }));
     if (!order) return;
     const action: AuditAction =
       to === 'FECHADA'
@@ -62,54 +130,64 @@ export class ServiceOrderLifecycleService {
             ? 'OS_REOPEN'
             : 'OS_UPDATE';
 
-    await this.safe('auditoria', () =>
-      this.prisma.auditLog.create({
-        data: {
-          tenantId,
-          actorUserId: change.actorId,
-          action,
-          resourceType: 'service_order',
-          resourceId: orderId,
-          metadata: { from, to, reason: change.reason ?? null, source: change.source },
-        },
+    await effect('auditoria', () =>
+      this.writeAudit(eventId, {
+        tenantId,
+        actorUserId: change.actorId,
+        action,
+        resourceType: 'service_order',
+        resourceId: orderId,
+        metadata: { from, to, reason: change.reason ?? null, source: change.source },
       }),
     );
 
-    this.events.emitTenantEvent(tenantId, 'service_order.transitioned', {
-      tenantId,
-      orderId,
-      protocol: order.protocol,
-      from,
-      to,
-      byUserId: change.actorId,
-      at: new Date().toISOString(),
-    });
+    await effect('tempo real', async () =>
+      this.events.emitTenantEvent(tenantId, 'service_order.transitioned', {
+        eventId,
+        tenantId,
+        orderId,
+        protocol: order.protocol,
+        from,
+        to,
+        byUserId: change.actorId,
+        at: new Date().toISOString(),
+      }),
+    );
+
+    if (order.processInstanceId && (to === 'FECHADA' || to === 'CANCELADA'))
+      await effect('conclusão do processo', () =>
+        this.completeProcessIfDone(tenantId, order.processInstanceId!),
+      );
 
     if (change.syncOccurrence !== false)
-      await this.safe('sincronização da ocorrência', () =>
+      await effect('sincronização da ocorrência', () =>
         syncOccurrenceStatus(this.prisma, tenantId, order.occurrenceId),
-      );
-    if (order.processInstanceId && (to === 'FECHADA' || to === 'CANCELADA'))
-      await this.safe('conclusão do processo', () =>
-        this.completeProcessIfDone(tenantId, order.processInstanceId!),
       );
 
     // A pesquisa só sai no fechamento efetivo: RESOLVIDA ainda pode voltar (C-032).
     if (to === 'FECHADA' && this.csat)
-      await this.safe('CSAT', () => this.csat!.createForOrder(tenantId, orderId));
+      await effect('CSAT', () => this.csat!.createForOrder(tenantId, orderId, !!eventId));
 
     // Aviso próprio de fechamento (não o de escalonamento) e só no fechamento efetivo (C-033).
     if (to === 'FECHADA' && this.notifications)
-      void this.safe('aviso de fechamento', () =>
-        this.notifications!.notifyOrderClosed(tenantId, orderId),
+      await effect('aviso de fechamento', () =>
+        this.notifications!.notifyOrderClosed(
+          tenantId,
+          orderId,
+          eventId ? { eventId, effect } : undefined,
+        ),
       );
 
     if (change.workflows !== false && this.workflows)
-      void this.safe('workflow', () =>
-        this.workflows!.executeForEvent(tenantId, {
-          type: to === 'FECHADA' ? 'order_closed' : 'order_updated',
-          order: this.workflowPayload(order),
-        }),
+      await effect('workflow', () =>
+        this.workflows!.executeForEvent(
+          tenantId,
+          {
+            type: to === 'FECHADA' ? 'order_closed' : 'order_updated',
+            order: this.workflowPayload(order),
+          },
+          { eventKey: eventId, throwOnFailure: !!eventId },
+        ),
       );
   }
 
@@ -119,20 +197,32 @@ export class ServiceOrderLifecycleService {
     actorId: string | null,
     extra: Record<string, unknown> = {},
   ) {
-    await this.safe('auditoria', () =>
-      this.prisma.auditLog.create({
-        data: {
-          tenantId: order.tenantId,
-          actorUserId: actorId,
-          action: 'OS_CREATE',
-          resourceType: 'service_order',
-          resourceId: order.id,
-          metadata: {
-            protocol: order.protocol,
-            type: order.type,
-            priority: order.priority,
-            ...extra,
-          },
+    if (this.outbox) {
+      void this.deliverForOrder(order.id);
+      return;
+    }
+    return this.applyOrderCreated(order, actorId, extra, (name, run) => this.safe(name, run));
+  }
+
+  private async applyOrderCreated(
+    order: ServiceOrder,
+    actorId: string | null,
+    extra: Record<string, unknown>,
+    effect: EffectRunner,
+    eventId?: string,
+  ) {
+    await effect('auditoria', () =>
+      this.writeAudit(eventId, {
+        tenantId: order.tenantId,
+        actorUserId: actorId,
+        action: 'OS_CREATE',
+        resourceType: 'service_order',
+        resourceId: order.id,
+        metadata: {
+          protocol: order.protocol,
+          type: order.type,
+          priority: order.priority,
+          ...extra,
         },
       }),
     );
@@ -145,17 +235,24 @@ export class ServiceOrderLifecycleService {
       occurrenceId: order.occurrenceId,
       at: new Date().toISOString(),
     };
-    this.events.emitTenantEvent(order.tenantId, 'service_order.created', payload);
-    this.events.emitTenantEvent(order.tenantId, 'service_order_created', {
-      orderId: order.id,
-      protocol: order.protocol,
+    await effect('tempo real', async () => {
+      this.events.emitTenantEvent(order.tenantId, 'service_order.created', { ...payload, eventId });
+      this.events.emitTenantEvent(order.tenantId, 'service_order_created', {
+        orderId: order.id,
+        protocol: order.protocol,
+        eventId,
+      });
     });
     if (this.workflows)
-      void this.safe('workflow', () =>
-        this.workflows!.executeForEvent(order.tenantId, {
-          type: 'order_created',
-          order: this.workflowPayload(order),
-        }),
+      await effect('workflow', () =>
+        this.workflows!.executeForEvent(
+          order.tenantId,
+          {
+            type: 'order_created',
+            order: this.workflowPayload(order),
+          },
+          { eventKey: eventId, throwOnFailure: !!eventId },
+        ),
       );
   }
 
@@ -191,8 +288,22 @@ export class ServiceOrderLifecycleService {
       requester: order.requester,
       sector: order.sector,
       analystName: order.analystName,
+      approvalCompleted: order.approvalCompleted,
+      changeRequestId: order.changeRequestId,
       deadlineAt: order.deadlineAt?.toISOString(),
     };
+  }
+
+  private writeAudit(
+    eventId: string | undefined,
+    data: Parameters<PrismaService['auditLog']['create']>[0]['data'],
+  ) {
+    if (!eventId) return this.prisma.auditLog.create({ data });
+    return this.prisma.auditLog.upsert({
+      where: { id: eventId },
+      create: { ...data, id: eventId },
+      update: {},
+    });
   }
 
   private async safe(what: string, run: () => Promise<unknown>) {
@@ -212,7 +323,7 @@ export class ServiceOrderLifecycleService {
     OsProcessTemplatesModule,
     forwardRef(() => WorkflowsModule),
   ],
-  providers: [ServiceOrderLifecycleService],
+  providers: [LifecycleOutboxService, ServiceOrderLifecycleService],
   exports: [ServiceOrderLifecycleService],
 })
 export class ServiceOrderLifecycleModule {}

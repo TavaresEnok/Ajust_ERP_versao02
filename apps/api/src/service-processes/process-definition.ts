@@ -69,7 +69,7 @@ export function validateDefinition(value: unknown): ProcessDefinition {
     if (targets.some((id) => !ids.has(id))) throw new BadRequestException('Destino inexistente.');
   }
   const reachable = new Set<string>([def.start]);
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const node of def.nodes.filter((n) => reachable.has(n.id))) {
       for (const target of Object.values(node.routes)) {
@@ -81,7 +81,7 @@ export function validateDefinition(value: unknown): ProcessDefinition {
     }
   }
   const finishable = new Set(def.nodes.filter((n) => n.kind === 'end').map((n) => n.id));
-  for (let changed = true; changed; ) {
+  for (let changed = true; changed;) {
     changed = false;
     for (const node of def.nodes) {
       if (!finishable.has(node.id) && Object.values(node.routes).some((id) => finishable.has(id))) {

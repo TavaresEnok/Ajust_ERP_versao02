@@ -25,8 +25,9 @@ export type FieldSpec = {
       | 'tenants'
       | 'events'
       | 'sectors'
-      | 'origins';
-    value?: 'id' | 'name';
+      | 'origins'
+      | 'flowTemplates';
+    value?: 'id' | 'name' | 'code';
     /** Oculta registros encerrados (ex.: ocorrências que não aceitam nova O.S.). */
     hideClosed?: boolean;
   };

@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { IxcReconciliationService } from '../../integrations/ixc-reconciliation.service';
 import { QUEUE_IXC_RECONCILIATION } from '../queue.constants';
+import { JOB_RETENTION } from '../job-retention';
 import { redisConnection } from '../../common/redis-connection';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class IxcReconciliationProcessor {
   ) {
     this.worker = new Worker(QUEUE_IXC_RECONCILIATION, async (job: Job) => this.process(job), {
       connection: redisConnection,
+      ...JOB_RETENTION,
       concurrency: 1,
     });
 

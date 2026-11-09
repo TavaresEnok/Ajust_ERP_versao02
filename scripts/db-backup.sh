@@ -13,7 +13,9 @@ BACKUP_FILE="$BACKUP_DIR/${POSTGRES_DB}_$TIMESTAMP.dump"
 TEMP_FILE=$(mktemp "$BACKUP_DIR/.dump.XXXXXX")
 trap 'rm -f "$TEMP_FILE"' EXIT
 
-docker compose -f "$COMPOSE_FILE" exec -T postgres pg_dump \
+COMPOSE_ARGS=(-f "$COMPOSE_FILE")
+if [[ -n "${DEPLOY_ENV_FILE:-}" ]]; then COMPOSE_ARGS=(--env-file "$DEPLOY_ENV_FILE" "${COMPOSE_ARGS[@]}"); fi
+docker compose "${COMPOSE_ARGS[@]}" exec -T postgres pg_dump \
   --format=custom \
   --no-owner \
   --username="$POSTGRES_USER" \

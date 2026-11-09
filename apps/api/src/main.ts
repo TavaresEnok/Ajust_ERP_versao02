@@ -108,6 +108,7 @@ async function bootstrap() {
   if (process.env.NODE_ENV === 'production') validateVaultKey();
 
   const app = await NestFactory.create(AppModule, { rawBody: true });
+  app.enableShutdownHooks();
   // Confia só nos proxies da rede interna (contêiner web/BFF, Caddy no host): request.ip passa a
   // ser o IP real do usuário, e não o do contêiner web (auditoria C-049).
   app.getHttpAdapter().getInstance().set('trust proxy', 'loopback, linklocal, uniquelocal');

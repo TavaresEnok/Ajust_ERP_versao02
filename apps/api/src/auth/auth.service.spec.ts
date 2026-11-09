@@ -9,6 +9,11 @@ import { compare, hash } from 'bcryptjs';
 import { sign, verify } from 'jsonwebtoken';
 import { createHash, randomUUID } from 'crypto';
 
+jest.mock('../common/secrets.crypto', () => ({
+  encryptSecret: (value: string) => `enc:${value}`,
+  decryptSecret: (value: string) => value.slice(4),
+}));
+
 jest.mock('bcryptjs', () => ({
   compare: jest.fn(),
   hash: jest.fn(),
@@ -142,6 +147,8 @@ describe('AuthService', () => {
       },
     };
 
+    mockPrisma.$executeRaw = jest.fn().mockResolvedValue(1);
+    mockPrisma.$transaction = jest.fn((run: (tx: unknown) => unknown) => run(mockPrisma));
     createHashMock();
 
     service = new AuthService(
@@ -312,7 +319,24 @@ describe('AuthService', () => {
   // REFRESH
   // ──────────────────────────────────────────────────
 
+  it('does not bypass 2FA when an enabled account has lost its encrypted secret', async () => {
+    mockPrisma.user.findUnique.mockResolvedValue(
+      makeUser({ twoFactorEnabled: true, twoFactorSecretEnc: null }),
+    );
+    mockCompare.mockResolvedValue(true);
+    await expect(
+      service.login({ identifier: 'test@example.com', password: 'valid' }),
+    ).rejects.toThrow('duas etapas inválida');
+    expect(mockPrisma.session.create).not.toHaveBeenCalled();
+  });
+
   describe('refresh', () => {
+    beforeEach(() =>
+      mockPrisma.userTenant.findUnique.mockResolvedValue({
+        role: { code: 'gerente' },
+        tenant: { status: 'ACTIVE', deletedAt: null },
+      }),
+    );
     const refreshPayload = {
       sub: 'user-1',
       sid: 'session-1',
@@ -351,6 +375,55 @@ describe('AuthService', () => {
         }),
       );
       expect(mockSign).toHaveBeenCalledTimes(1);
+    });
+
+    it('shares a recent rotation result across API instances without rotating or revoking again', async () => {
+      mockVerify.mockReturnValue(refreshPayload);
+      mockPrisma.session.findUnique.mockResolvedValue(
+        makeSession({
+          refreshTokenHash: 'new-hash',
+          previousRefreshTokenHash: 'hashed-refresh-token',
+          refreshResponseEnc:
+            'enc:' +
+            JSON.stringify({
+              accessToken: 'cached-access',
+              refreshToken: 'cached-refresh',
+              sessionId: 'session-1',
+              tenantId: 'tenant-1',
+              role: 'super_admin',
+            }),
+          refreshResponseExpiresAt: new Date(Date.now() + 15_000),
+        }),
+      );
+      mockSign.mockReturnValue('access-with-current-role');
+      const result = await service.refresh({ refreshToken: 'previous-refresh' });
+      expect(result).toEqual(
+        expect.objectContaining({
+          refreshToken: 'cached-refresh',
+          role: 'gerente',
+          accessToken: 'access-with-current-role',
+        }),
+      );
+      expect(mockPrisma.session.updateMany).not.toHaveBeenCalled();
+      expect(mockPrisma.$executeRaw).toHaveBeenCalled();
+    });
+
+    it('revokes a replay after the grace period rather than replaying the cached response', async () => {
+      mockVerify.mockReturnValue(refreshPayload);
+      mockPrisma.session.findUnique.mockResolvedValue(
+        makeSession({
+          refreshTokenHash: 'new-hash',
+          previousRefreshTokenHash: 'hashed-refresh-token',
+          refreshResponseEnc: 'enc:{}',
+          refreshResponseExpiresAt: new Date(Date.now() - 1),
+        }),
+      );
+      await expect(service.refresh({ refreshToken: 'old-refresh' })).rejects.toThrow('mismatch');
+      expect(mockPrisma.session.updateMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: { revokedAt: expect.any(Date) },
+        }),
+      );
     });
 
     it('Refresh with valid refresh token returns new tokens', async () => {

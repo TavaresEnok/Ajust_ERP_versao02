@@ -173,6 +173,7 @@ const ROUTES: Record<string, Method[]> = {
 
   '/workflows': ['GET', 'POST'],
   '/workflows/:id': ['GET', 'PATCH', 'DELETE'],
+  '/workflows/:id/executions': ['GET'],
   '/workflows/:id/rollback': ['POST'],
   '/workflows/:id/toggle': ['PATCH'],
   '/workflows/status': ['GET'],
@@ -197,8 +198,7 @@ const COMPILED = Object.entries(ROUTES).map(([pattern, methods]) => ({
 }));
 
 export type AllowlistResult =
-  | { allowed: true; pattern: string }
-  | { allowed: false; status: 404 | 405 };
+  { allowed: true; pattern: string } | { allowed: false; status: 404 | 405 };
 
 export function matchAllowedRoute(method: string, path: string): AllowlistResult {
   const candidates = COMPILED.filter((route) => route.regex.test(path)).sort(

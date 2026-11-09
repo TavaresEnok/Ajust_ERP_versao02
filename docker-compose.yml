@@ -15,7 +15,7 @@ services:
     restart: unless-stopped
 
   web:
-    image: node:20-alpine
+    image: node:22-alpine
     working_dir: /workspace
     command: sh -c "corepack enable && corepack pnpm --filter @ajust/web dev"
     env_file:
@@ -45,7 +45,7 @@ services:
     restart: unless-stopped
 
   api:
-    image: node:20-alpine
+    image: node:22-alpine
     working_dir: /workspace
     command: sh -c "corepack enable && corepack pnpm --filter @ajust/api dev"
     env_file:
@@ -87,7 +87,7 @@ services:
     restart: unless-stopped
 
   worker:
-    image: node:20-alpine
+    image: node:22-alpine
     working_dir: /workspace
     command: sh -c "corepack enable && corepack pnpm --filter @ajust/worker dev"
     env_file:

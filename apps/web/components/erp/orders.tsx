@@ -950,12 +950,14 @@ export function OrderDetail({
                 </Link>
               )}
               {scope?.role !== 'cliente' && (
-                <Link
-                  className="text-link mt-2 block text-xs"
-                  href={`${base}/credenciais?provider=${encodeURIComponent(String(order.provider))}`}
-                >
-                  Acessos e orientações técnicas →
-                </Link>
+                <div className="mt-2">
+                  <Link
+                    className="text-link text-xs"
+                    href={`${base}/credenciais?provider=${encodeURIComponent(String(order.provider))}`}
+                  >
+                    Acessos e orientações técnicas →
+                  </Link>
+                </div>
               )}
             </div>
             <div>

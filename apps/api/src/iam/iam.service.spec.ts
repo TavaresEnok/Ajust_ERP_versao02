@@ -16,6 +16,67 @@ function makeService(prisma: any) {
   return new IamService(prisma, { log: jest.fn().mockResolvedValue(undefined) } as any);
 }
 
+describe('IamService.listUsersByTenant workload', () => {
+  it('maps aggregate results to the right members and distinguishes zero SLA from no sample', async () => {
+    const prisma = makePrisma({
+      userTenant: {
+        findMany: jest
+          .fn()
+          .mockResolvedValue([
+            { userId: 'analyst-a' },
+            { userId: 'analyst-b' },
+            { userId: 'analyst-c' },
+          ]),
+      },
+      $queryRaw: jest.fn().mockResolvedValue([
+        {
+          assigneeUserId: 'analyst-b',
+          activeOrderCount: 1,
+          completedOrderCount: 2,
+          slaEvaluatedCount: 2,
+          slaMetCount: 0,
+        },
+        {
+          assigneeUserId: 'analyst-a',
+          activeOrderCount: 2,
+          completedOrderCount: 4,
+          slaEvaluatedCount: 3,
+          slaMetCount: 2,
+        },
+      ]),
+    });
+    const rows = await makeService(prisma).listUsersByTenant('tenant-1');
+    expect(rows[0]).toMatchObject({
+      activeOrderCount: 2,
+      completedOrderCount: 4,
+      slaEvaluatedCount: 3,
+      slaMetCount: 2,
+      slaPercentage: 66.7,
+    });
+    expect(rows[1]).toMatchObject({
+      activeOrderCount: 1,
+      completedOrderCount: 2,
+      slaEvaluatedCount: 2,
+      slaMetCount: 0,
+      slaPercentage: 0,
+    });
+    expect(rows[2]).toMatchObject({
+      activeOrderCount: 0,
+      completedOrderCount: 0,
+      slaEvaluatedCount: 0,
+      slaMetCount: 0,
+      slaPercentage: null,
+    });
+    // Tenant is bound as a SQL parameter, never interpolated into SQL text.
+    expect(prisma.$queryRaw.mock.calls[0].slice(1)).toEqual(['tenant-1']);
+    expect(prisma.userTenant.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { tenantId: 'tenant-1', user: { deletedAt: null } },
+      }),
+    );
+  });
+});
+
 describe('IamService.saveSlaPolicy', () => {
   it('updates only tenant-owned SLA policies', async () => {
     const prisma = makePrisma({

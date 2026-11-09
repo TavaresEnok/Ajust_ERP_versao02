@@ -364,6 +364,9 @@ model Session {
   userId           String
   tenantId         String?
   refreshTokenHash String
+  previousRefreshTokenHash String?
+  refreshResponseEnc String?
+  refreshResponseExpiresAt DateTime?
   device           String?
   ip               String?
   userAgent        String?
@@ -1205,6 +1208,7 @@ model ApiKey {
 // ─── CSAT (Satisfaction Survey) ────────────────────────────────────────────
 
 model SatisfactionResponse {
+  emailSentAt DateTime?
   id         String    @id @default(uuid())
   tenantId   String
   orderId    String    @unique
@@ -1378,4 +1382,25 @@ model ExternalImportLink {
 
   @@unique([tenantId, kind, externalKey])
   @@index([tenantId, kind, localId])
+}
+
+/// Filled by database triggers in the same transaction as order creation/status history.
+/// No FK: pending delivery and audit survive a physical deletion of the business row.
+model ServiceOrderLifecycleEvent {
+  id               String    @id
+  tenantId         String
+  orderId          String
+  kind             String
+  payload          Json
+  completedEffects Json      @default("[]")
+  attempts         Int       @default(0)
+  availableAt      DateTime  @default(now())
+  claimedAt        DateTime?
+  claimToken       String?
+  processedAt      DateTime?
+  error            String?
+  createdAt        DateTime  @default(now())
+
+  @@index([processedAt, availableAt])
+  @@index([orderId, createdAt])
 }

@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { MonthlyHealthReportService } from '../../reports/monthly-health-report.service';
 import { QUEUE_MONTHLY_HEALTH_REPORT } from '../queue.constants';
+import { JOB_RETENTION } from '../job-retention';
 import { redisConnection } from '../../common/redis-connection';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class MonthlyReportProcessor {
   ) {
     this.worker = new Worker(QUEUE_MONTHLY_HEALTH_REPORT, async (job: Job) => this.process(job), {
       connection: redisConnection,
+      ...JOB_RETENTION,
       concurrency: 1,
     });
 

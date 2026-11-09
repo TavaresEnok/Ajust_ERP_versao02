@@ -106,12 +106,7 @@ export interface HealthSummaryResponse {
 // === Sprint 4.2 — tipos compartilhados adicionais ===
 
 export type AssetCategory =
-  | 'SERVIDOR'
-  | 'SWITCH'
-  | 'ROTEADOR'
-  | 'LINK_TRANSIT'
-  | 'FIREWALL'
-  | 'OUTRO';
+  'SERVIDOR' | 'SWITCH' | 'ROTEADOR' | 'LINK_TRANSIT' | 'FIREWALL' | 'OUTRO';
 
 export type AssetStatus = 'ATIVO' | 'INATIVO' | 'MANUTENCAO' | 'DESATIVADO';
 
@@ -167,12 +162,7 @@ export interface ChangeRequest {
 }
 
 export type CalendarEventType =
-  | 'REUNIAO'
-  | 'REUNIAO_ONLINE'
-  | 'PLANTAO'
-  | 'FERIADO'
-  | 'LEMBRETE'
-  | 'OUTRO';
+  'REUNIAO' | 'REUNIAO_ONLINE' | 'PLANTAO' | 'FERIADO' | 'LEMBRETE' | 'OUTRO';
 
 export interface CalendarEvent {
   id: string;

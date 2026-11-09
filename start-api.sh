@@ -8,7 +8,4 @@ echo "[start-api] Running Prisma migrations..."
   exit 1
 }
 echo "[start-api] Starting API server..."
-# O tsc gera dist/src/main.js quando a pasta test entra na compilação.
-MAIN=apps/api/dist/src/main.js
-[ -f "$MAIN" ] || MAIN=apps/api/dist/main.js
-exec node "$MAIN"
+exec node apps/api/dist/main.js

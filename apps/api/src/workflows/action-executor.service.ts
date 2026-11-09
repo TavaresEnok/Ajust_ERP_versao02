@@ -79,7 +79,7 @@ export class WorkflowActionExecutor {
       ],
     });
 
-    await this.postWebhook(webhookUrl, body);
+    await this.postWebhook(webhookUrl, body, 'POST', this.deliveryKey(node, ctx));
     return base;
   }
 
@@ -98,7 +98,7 @@ export class WorkflowActionExecutor {
       order: ctx.order,
     });
 
-    await this.postWebhook(url, body, method);
+    await this.postWebhook(url, body, method, this.deliveryKey(node, ctx));
     return base;
   }
 
@@ -110,11 +110,13 @@ export class WorkflowActionExecutor {
     if (!ctx.order?.id) return { ...base, status: 'SKIPPED', error: 'Missing order id' };
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: ctx.order.id, tenantId: ctx.tenantId, deletedAt: null },
-      select: { id: true },
+      select: { id: true, status: true },
     });
     if (!order) throw new Error('Order not found in workflow tenant');
+    if (order.status !== 'FECHADA')
+      return { ...base, status: 'SKIPPED', error: 'CSAT aguarda o fechamento efetivo da O.S.' };
 
-    await this.csat.createForOrder(ctx.tenantId, order.id);
+    await this.csat.createForOrder(ctx.tenantId, order.id, !!ctx.eventKey);
     this.logger.log(`CSAT created for order ${ctx.order.protocol}`);
     return base;
   }
@@ -127,7 +129,16 @@ export class WorkflowActionExecutor {
       .replace(/\{\{event\}\}/g, ctx.event.type);
   }
 
-  private async postWebhook(url: string, body: string, method = 'POST'): Promise<void> {
+  private deliveryKey(node: WorkflowNode, ctx: WorkflowContext) {
+    return ctx.eventKey ? `${ctx.eventKey}:${ctx.workflow?.ruleId || ''}:${node.id}` : undefined;
+  }
+
+  private async postWebhook(
+    url: string,
+    body: string,
+    method = 'POST',
+    deliveryKey?: string,
+  ): Promise<void> {
     await assertSafeUrl(url);
     const normalizedMethod = method.toUpperCase();
     if (!['POST', 'PUT', 'PATCH'].includes(normalizedMethod)) {
@@ -136,7 +147,10 @@ export class WorkflowActionExecutor {
     try {
       const response = await safeFetch(url, {
         method: normalizedMethod,
-        headers: { 'content-type': 'application/json' },
+        headers: {
+          'content-type': 'application/json',
+          ...(deliveryKey ? { 'idempotency-key': deliveryKey } : {}),
+        },
         body,
         signal: AbortSignal.timeout(10_000),
       });

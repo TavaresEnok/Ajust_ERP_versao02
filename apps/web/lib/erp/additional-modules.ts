@@ -377,12 +377,8 @@ export const additionalModules: Record<string, ResourceDefinition> = {
       {
         name: 'workflowTemplateCode',
         label: 'Fluxo de atendimento',
-        options: {
-          AJUST_SIMPLES: 'Atendimento simples',
-          AJUST_EQUIPAMENTO: 'Equipamento + monitoramento, backup e diagrama',
-          AJUST_TOPOLOGIA: 'Topologia + monitoramento e diagrama',
-          AJUST_MUDANCA: 'Preparação e execução agendada',
-        },
+        reference: { resource: 'flowTemplates', value: 'code' },
+        hint: 'Selecione um fluxo publicado. Novas O.S. deste serviço seguirão suas etapas.',
       },
       { name: 'description', label: 'Descrição', type: 'textarea', max: 500 },
       {

@@ -98,6 +98,7 @@ describe('IxcService.receiveWebhook — regras do ERP (C-045)', () => {
       serviceOrderOccurrence: { create: jest.fn() },
       serviceOrderStatusEvent: { create: jest.fn() },
     };
+    prisma.$transaction = jest.fn((run: (tx: unknown) => unknown) => run(prisma));
     const lifecycle = { afterStatusChange: jest.fn() };
     const service = new IxcService(
       prisma,

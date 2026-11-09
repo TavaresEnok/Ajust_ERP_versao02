@@ -42,6 +42,7 @@ async function bootstrap() {
   validateEnv();
 
   const app = await NestFactory.create(AppModule);
+  app.enableShutdownHooks();
   const port = Number(process.env.PORT || 3002);
 
   await app.listen(port, process.env.WORKER_HOST || '0.0.0.0');

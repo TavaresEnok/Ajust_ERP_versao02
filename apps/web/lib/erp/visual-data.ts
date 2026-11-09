@@ -114,7 +114,14 @@ export function visualRecord(key: string, record: ErpRecord): ErpRecord {
       role: text(r.roleCode),
       active: text(r.activeOrderCount),
       done: text(r.completedOrderCount),
-      sla: text(r.slaPercentage),
+      sla:
+        typeof r.slaPercentage === 'number'
+          ? `${r.slaPercentage.toLocaleString('pt-BR', { maximumFractionDigits: 1 })}%`
+          : 'Sem base',
+      slaSummary:
+        Number(r.slaEvaluatedCount) > 0
+          ? `${Number(r.slaMetCount)} de ${Number(r.slaEvaluatedCount)} O.S. no prazo`
+          : 'Nenhuma O.S. elegível concluída',
       status: text(r.availability || common.status),
     };
   if (key === 'articles')

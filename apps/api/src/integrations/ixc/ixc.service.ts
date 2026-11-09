@@ -301,38 +301,42 @@ export class IxcService {
         }
         if (target === existing.status) target = null;
       }
-      const changed = await this.prisma.serviceOrder.updateMany({
-        where: { id: existing.id, version: existing.version },
-        data: {
-          ...(typeof incoming === 'string'
-            ? { sourceMetadata: { ...previous, ixcUpdatedAt: incoming } as Prisma.InputJsonValue }
-            : {}),
-          ...(target ? { ...statusDates(existing, target), status: target } : {}),
-          title: input.title || existing.title,
-          description: input.description || existing.description,
-          version: { increment: 1 },
-        },
-      });
-      if (changed.count !== 1)
-        throw new ConflictException('O.S. alterada durante a sincronização.');
-      await this.prisma.serviceOrderOccurrence.create({
-        data: {
-          serviceOrderId: existing.id,
-          sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
-          message: `Webhook IXC recebido (${input.eventType})${input.status ? ` status=${input.status}` : ''}.${note}`,
-        },
-      });
-      if (target) {
-        await this.prisma.serviceOrderStatusEvent.create({
+      await this.prisma.$transaction(async (tx) => {
+        const changed = await tx.serviceOrder.updateMany({
+          where: { id: existing.id, version: existing.version },
           data: {
-            tenantId: input.tenantId,
-            serviceOrderId: existing.id,
-            fromStatus: existing.status,
-            toStatus: target,
-            reason: `IXC ${input.eventType}`,
-            metadata: { source: 'ixc-webhook' },
+            ...(typeof incoming === 'string'
+              ? { sourceMetadata: { ...previous, ixcUpdatedAt: incoming } as Prisma.InputJsonValue }
+              : {}),
+            ...(target ? { ...statusDates(existing, target), status: target } : {}),
+            title: input.title || existing.title,
+            description: input.description || existing.description,
+            version: { increment: 1 },
           },
         });
+        if (changed.count !== 1)
+          throw new ConflictException('O.S. alterada durante a sincronização.');
+        await tx.serviceOrderOccurrence.create({
+          data: {
+            serviceOrderId: existing.id,
+            sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
+            message: `Webhook IXC recebido (${input.eventType})${input.status ? ` status=${input.status}` : ''}.${note}`,
+          },
+        });
+        if (target) {
+          await tx.serviceOrderStatusEvent.create({
+            data: {
+              tenantId: input.tenantId,
+              serviceOrderId: existing.id,
+              fromStatus: existing.status,
+              toStatus: target,
+              reason: `IXC ${input.eventType}`,
+              metadata: { source: 'ixc-webhook' },
+            },
+          });
+        }
+      });
+      if (target) {
         await this.lifecycle?.afterStatusChange({
           tenantId: input.tenantId,
           orderId: existing.id,

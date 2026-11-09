@@ -3,6 +3,8 @@ import { NotificationChannel, NotificationTrigger, Prisma } from '@prisma/client
 import { PrismaService } from '../prisma/prisma.service';
 import { assertSafeUrl, safeFetch } from '../common/ssrf-guard';
 import { EmailService } from '../common/email.service';
+import type { EffectRunner } from '../service-orders/lifecycle-outbox.service';
+type DeliveryOptions = { eventId: string; effect: EffectRunner };
 
 export type NotificationConfigInput = {
   name?: string;
@@ -80,73 +82,95 @@ export class NotificationsService {
   }
 
   /** Called internally by other services when events occur */
-  async dispatch(tenantId: string, trigger: string, payload: Record<string, string>) {
+  async dispatch(
+    tenantId: string,
+    trigger: string,
+    payload: Record<string, string>,
+    delivery?: DeliveryOptions,
+  ) {
     try {
       const configs = await this.prisma.notificationConfig.findMany({
         where: { tenantId, trigger: trigger as NotificationTrigger, active: true },
       });
       for (const cfg of configs) {
-        if (cfg.channel === 'WEBHOOK' || cfg.channel === 'SLACK') {
-          const body = JSON.stringify({
-            trigger,
-            tenantId,
-            ...payload,
-            timestamp: new Date().toISOString(),
-          });
-          try {
-            await assertSafeUrl(cfg.target);
-            const response = await safeFetch(cfg.target, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body,
-              signal: AbortSignal.timeout(10_000),
+        const send = async () => {
+          if (cfg.channel === 'WEBHOOK' || cfg.channel === 'SLACK') {
+            const body = JSON.stringify({
+              trigger,
+              tenantId,
+              ...payload,
+              timestamp: new Date().toISOString(),
             });
-            if (!response.ok) {
-              throw new Error(`Webhook returned HTTP ${response.status}`);
+            try {
+              await assertSafeUrl(cfg.target);
+              const response = await safeFetch(cfg.target, {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  ...(delivery ? { 'idempotency-key': `${delivery.eventId}:${cfg.id}` } : {}),
+                },
+                body,
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!response.ok) {
+                throw new Error(`Webhook returned HTTP ${response.status}`);
+              }
+            } catch (err) {
+              if (delivery) throw err;
+              this.logger.warn(`Webhook dispatch failed for ${cfg.id}: ${(err as Error).message}`);
             }
-          } catch (err) {
-            this.logger.warn(`Webhook dispatch failed for ${cfg.id}: ${(err as Error).message}`);
           }
-        }
-        if (cfg.channel === 'EMAIL') {
-          this.emailService.sendEmail(
-            cfg.target,
-            `Ajust ERP - ${trigger}`,
-            `Evento: ${trigger}\nTenant: ${tenantId}\nProtocolo: ${payload.protocol || '-'}\n\n${JSON.stringify(payload, null, 2)}`,
-          );
-        }
-        if ((cfg.channel as string) === 'WHATSAPP') {
-          // Despacho para Gateway WhatsApp (Evolution API / Z-API / Webhook)
-          const messageText =
-            payload.message ||
-            `*🚨 [AJUST ERP - ${trigger}]*\n` +
-              `*Protocolo:* ${payload.protocol || '-'}\n` +
-              `*Provedor:* ${payload.provider || '-'}\n` +
-              `*Título:* ${payload.title || '-'}\n` +
-              (payload.pdfUrl ? `\n*📄 Relatório PDF:* ${payload.pdfUrl}` : '');
+          if (cfg.channel === 'EMAIL') {
+            const email = delivery
+              ? this.emailService.sendEmailConfirmed.bind(this.emailService)
+              : this.emailService.sendEmail.bind(this.emailService);
+            await email(
+              cfg.target,
+              `Ajust ERP - ${trigger}`,
+              `Evento: ${trigger}\nTenant: ${tenantId}\nProtocolo: ${payload.protocol || '-'}\n\n${JSON.stringify(payload, null, 2)}`,
+            );
+          }
+          if ((cfg.channel as string) === 'WHATSAPP') {
+            // Despacho para Gateway WhatsApp (Evolution API / Z-API / Webhook)
+            const messageText =
+              payload.message ||
+              `*🚨 [AJUST ERP - ${trigger}]*\n` +
+                `*Protocolo:* ${payload.protocol || '-'}\n` +
+                `*Provedor:* ${payload.provider || '-'}\n` +
+                `*Título:* ${payload.title || '-'}\n` +
+                (payload.pdfUrl ? `\n*📄 Relatório PDF:* ${payload.pdfUrl}` : '');
 
-          const waBody = JSON.stringify({
-            number: payload.targetNumber || payload.groupJid || cfg.target,
-            textMessage: { text: messageText },
-            message: messageText,
-            pdfUrl: payload.pdfUrl,
-            metadata: payload,
-          });
-
-          try {
-            await assertSafeUrl(cfg.target);
-            await safeFetch(cfg.target, {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: waBody,
-              signal: AbortSignal.timeout(10_000),
+            const waBody = JSON.stringify({
+              number: payload.targetNumber || payload.groupJid || cfg.target,
+              textMessage: { text: messageText },
+              message: messageText,
+              pdfUrl: payload.pdfUrl,
+              metadata: payload,
             });
-          } catch (err) {
-            this.logger.warn(`WhatsApp dispatch failed for ${cfg.id}: ${(err as Error).message}`);
+
+            try {
+              await assertSafeUrl(cfg.target);
+              const response = await safeFetch(cfg.target, {
+                method: 'POST',
+                headers: {
+                  'content-type': 'application/json',
+                  ...(delivery ? { 'idempotency-key': `${delivery.eventId}:${cfg.id}` } : {}),
+                },
+                body: waBody,
+                signal: AbortSignal.timeout(10_000),
+              });
+              if (!response.ok) throw new Error(`WhatsApp returned HTTP ${response.status}`);
+            } catch (err) {
+              if (delivery) throw err;
+              this.logger.warn(`WhatsApp dispatch failed for ${cfg.id}: ${(err as Error).message}`);
+            }
           }
-        }
+        };
+        if (delivery) await delivery.effect(`notificação:${cfg.id}`, send);
+        else await send();
       }
     } catch (err) {
+      if (delivery) throw err;
       this.logger.error('Notification dispatch error', err);
     }
   }
@@ -212,7 +236,7 @@ export class NotificationsService {
    * Aviso de O.S. fechada no gatilho próprio ORDER_CLOSED (C-033): não usa o canal de
    * escalonamento, não leva descrição interna e mostra o horário no fuso do tenant.
    */
-  async notifyOrderClosed(tenantId: string, orderId: string) {
+  async notifyOrderClosed(tenantId: string, orderId: string, delivery?: DeliveryOptions) {
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId },
       include: { occurrence: { select: { provider: true } } },
@@ -226,13 +250,18 @@ export class NotificationsService {
       `*Título:* ${order.title}\n` +
       `*Responsável:* ${order.analystName || 'Equipe Ajust'}\n` +
       `*Fechada em:* ${closedAt}`;
-    await this.dispatch(tenantId, 'ORDER_CLOSED', {
-      orderId: order.id,
-      protocol: order.protocol,
-      provider,
-      title: order.title,
-      message,
-    });
+    await this.dispatch(
+      tenantId,
+      'ORDER_CLOSED',
+      {
+        orderId: order.id,
+        protocol: order.protocol,
+        provider,
+        title: order.title,
+        message,
+      },
+      delivery,
+    );
   }
 
   private async formatInTenantZone(tenantId: string, date: Date) {

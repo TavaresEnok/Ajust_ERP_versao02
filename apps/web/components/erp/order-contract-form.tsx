@@ -145,12 +145,20 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
           ) : (
             <FieldDescription>
               {catalog.connected
-                ? 'Escolher um serviço sugere título, tipo e prioridade. Você pode editar tudo depois.'
+                ? 'Escolher um serviço sugere título, tipo e prioridade e define as etapas do atendimento. Os dados sugeridos podem ser editados antes da abertura.'
                 : 'Os serviços aparecerão após conectar o ERP. O preenchimento manual continua disponível.'}
             </FieldDescription>
           )}
         </Field>
       )}
+      {service &&
+        typeof service.workflowTemplateCode === 'string' &&
+        service.workflowTemplateCode && (
+          <p role="note" className="text-sm text-muted-foreground">
+            O atendimento seguirá as etapas configuradas para este serviço. As evidências
+            necessárias aparecerão em cada etapa.
+          </p>
+        )}
       <QueryState
         loading={catalog.isLoading}
         error={catalog.error}

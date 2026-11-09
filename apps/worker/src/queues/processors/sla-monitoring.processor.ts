@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger, OnModuleDestroy } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { SlaMonitoringService } from '../../sla/sla-monitoring.service';
 import { QUEUE_SLA_MONITORING } from '../queue.constants';
+import { JOB_RETENTION } from '../job-retention';
 import { redisConnection } from '../../common/redis-connection';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class SlaMonitoringProcessor implements OnModuleDestroy {
   ) {
     this.worker = new Worker(QUEUE_SLA_MONITORING, async (job: Job) => this.process(job), {
       connection: redisConnection,
+      ...JOB_RETENTION,
       concurrency: 1,
     });
 

@@ -40,10 +40,10 @@ describe('fila de eventos do motor de processos', () => {
     expect(workflows.executeForEvent).toHaveBeenCalledTimes(1);
   });
 
-  it('nova tentativa só reenvia os workflows', async () => {
+  it('nova tentativa retoma efeitos pendentes pelo outbox e reenvia workflows', async () => {
     const { service, lifecycle, workflows } = setup(1);
     await service.deliverEvents();
-    expect(lifecycle.afterStatusChange).not.toHaveBeenCalled();
+    expect(lifecycle.afterStatusChange).toHaveBeenCalledTimes(1);
     expect(workflows.executeForEvent).toHaveBeenCalledTimes(1);
   });
 });

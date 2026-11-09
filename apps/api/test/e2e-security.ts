@@ -5,7 +5,7 @@
  * Run with: npm run test:e2e
  */
 
-import { createHmac } from 'crypto';
+import { createHmac, randomUUID } from 'crypto';
 
 const API_URL = process.env.API_URL || 'http://localhost:8071';
 const ADMIN_EMAIL = 'admin@ajust.local';
@@ -18,13 +18,16 @@ interface TestContext {
   clientSessionId?: string;
   tenantId: string;
   otherTenantId: string;
+  adminRefreshToken?: string;
+  enrollmentAccessToken?: string;
+  twoFactorEnabled?: boolean;
 }
 
 const context: TestContext = {
   adminAccessToken: '',
   adminSessionId: '',
   tenantId: '',
-  otherTenantId: '',
+  otherTenantId: randomUUID(),
 };
 
 let loginIpSequence = 10;
@@ -141,7 +144,10 @@ async function testTenantIsolationBypass() {
       },
     });
 
-    if (response.status === 403 && response.data.message?.includes('tenantId')) {
+    const baseline = await api.get('/service-orders', {
+      headers: { Authorization: `Bearer ${context.adminAccessToken}` },
+    });
+    if (response.status === 403 && baseline.status === 200) {
       console.log('  ✅ PASS: Query parameter tenantId rejected with 403');
       return true;
     } else {
@@ -206,8 +212,6 @@ async function testRateLimiting() {
 async function testTwoFAWorkflow() {
   console.log('\n✓ TEST 3: 2FA Workflow (Setup → Verify → Login)');
 
-  let verifiedAccessToken = '';
-  let twoFactorEnabled = false;
   try {
     const initialStatusResponse = await api.get('/auth/2fa/status', {
       headers: {
@@ -278,7 +282,7 @@ async function testTwoFAWorkflow() {
       console.log(`  ❌ FAIL: 2FA confirmation failed (status: ${confirmResponse.status})`);
       return false;
     }
-    twoFactorEnabled = true;
+    context.twoFactorEnabled = true;
     console.log(`  ✅ Step 3: TOTP confirmed and 2FA enabled`);
 
     const challengeResponse = await api.post(
@@ -324,31 +328,14 @@ async function testTwoFAWorkflow() {
       return false;
     }
 
-    verifiedAccessToken = verificationResponse.data.accessToken;
+    context.adminAccessToken = verificationResponse.data.accessToken;
+    context.adminSessionId = verificationResponse.data.sessionId;
+    context.adminRefreshToken = verificationResponse.data.refreshToken;
     console.log(`  ✅ Step 5: Valid TOTP completed login and issued full tokens`);
     return true;
   } catch (error) {
     console.log(`  ❌ ERROR: ${error}`);
     return false;
-  } finally {
-    if (twoFactorEnabled) {
-      const disableResponse = await api.post(
-        '/auth/2fa/disable',
-        { password: ADMIN_PASSWORD },
-        {
-          headers: {
-            Authorization: `Bearer ${verifiedAccessToken || context.adminAccessToken}`,
-          },
-        },
-      );
-      if ([200, 201].includes(disableResponse.status)) {
-        console.log(`  ✅ Cleanup: 2FA disabled for subsequent test runs`);
-      } else {
-        console.log(
-          `  ❌ Cleanup failed: could not disable 2FA (status: ${disableResponse.status})`,
-        );
-      }
-    }
   }
 }
 
@@ -360,24 +347,8 @@ async function testRefreshTokenRotation() {
   console.log('\n✓ TEST 4: Refresh Token Rotation');
 
   try {
-    // Login first
-    const loginResponse = await api.post(
-      '/auth/login',
-      {
-        identifier: ADMIN_EMAIL,
-        password: ADMIN_PASSWORD,
-      },
-      { headers: nextLoginHeaders() },
-    );
-
-    if (![200, 201].includes(loginResponse.status)) {
-      console.log(`  ❌ FAIL: Login failed (status: ${loginResponse.status})`);
-      return false;
-    }
-
-    const firstRefreshToken = loginResponse.data.refreshToken;
-    const firstAccessToken = loginResponse.data.accessToken;
-    console.log(`  ✅ Login successful`);
+    const firstRefreshToken = context.adminRefreshToken;
+    if (!firstRefreshToken) throw new Error('2FA login must complete before refresh tests.');
 
     // Refresh token
     const refreshResponse1 = await api.post('/auth/refresh', {
@@ -400,18 +371,25 @@ async function testRefreshTokenRotation() {
       console.log(`  ✅ Token rotated: old token !== new token`);
     }
 
-    // Try to use old token (should fail)
-    const oldTokenResponse = await api.post('/auth/refresh', {
-      refreshToken: firstRefreshToken,
-    });
-
-    if (oldTokenResponse.status === 401) {
-      console.log(`  ✅ Old refresh token invalidated (401 Unauthorized)`);
-      return true;
-    } else {
-      console.log(`  ❌ FAIL: Old token should be invalid, got ${oldTokenResponse.status}`);
+    // A concurrent BFF retry inside the grace window must return the SAME rotation.
+    const repeated = await api.post('/auth/refresh', { refreshToken: firstRefreshToken });
+    if (repeated.status !== 200 || repeated.data.refreshToken !== secondRefreshToken) {
+      console.log('  ❌ FAIL: Concurrent refresh did not reuse the committed rotation');
       return false;
     }
+    const nextRotation = await api.post('/auth/refresh', { refreshToken: secondRefreshToken });
+    if (nextRotation.status !== 200) return false;
+    // A token two generations old is never covered by the grace window.
+    const replay = await api.post('/auth/refresh', { refreshToken: firstRefreshToken });
+    const revoked = await api.get('/auth/me', {
+      headers: { Authorization: `Bearer ${nextRotation.data.accessToken}` },
+    });
+    if (replay.status === 401 && revoked.status === 401) {
+      console.log('  ✅ Concurrent refresh is idempotent; an older replay revokes the session');
+      return true;
+    }
+    console.log('  ❌ FAIL: Refresh replay did not revoke the session');
+    return false;
   } catch (error) {
     console.log(`  ❌ ERROR: ${error}`);
     return false;
@@ -452,7 +430,11 @@ async function testObservabilityMetrics() {
   console.log('\n✓ TEST 6: Observability Metrics Collection');
 
   try {
-    const metricsResponse = await api.get('/monitoring/metrics');
+    const anonymous = await api.get('/monitoring/metrics');
+    if (anonymous.status !== 401) return false;
+    const metricsResponse = await api.get('/monitoring/metrics', {
+      headers: { Authorization: `Bearer ${context.adminAccessToken}` },
+    });
 
     if (metricsResponse.status === 200) {
       const metrics = metricsResponse.data;
@@ -484,6 +466,14 @@ async function testObservabilityMetrics() {
 // ═════════════════════════════════════════════════════════════════════════════
 
 async function runAllTests() {
+  const target = new URL(API_URL);
+  const database = new URL(process.env.DATABASE_URL || 'invalid');
+  if (
+    !['localhost', '127.0.0.1'].includes(target.hostname) ||
+    !['localhost', '127.0.0.1'].includes(database.hostname) ||
+    database.pathname !== '/ajust_ci'
+  )
+    throw new Error('Security E2E requires the isolated localhost ajust_ci environment.');
   console.log('╔═══════════════════════════════════════════════════════════╗');
   console.log('║          Sprint 1 Security E2E Tests                      ║');
   console.log('║     Tenant Isolation, Rate Limiting, 2FA, Observability   ║');
@@ -513,21 +503,23 @@ async function runAllTests() {
     if (![200, 201].includes(loginResponse.status)) {
       console.log(`❌ Login failed: ${loginResponse.status}`);
       console.log(`   Is API running on ${API_URL}?`);
-      process.exit(1);
+      process.exitCode = 1;
+      return;
     }
 
     context.adminAccessToken = loginResponse.data.accessToken;
+    context.enrollmentAccessToken = loginResponse.data.accessToken;
     context.adminSessionId = loginResponse.data.sessionId;
     context.tenantId = loginResponse.data.user.tenantId;
     console.log(`✅ Authenticated as ${ADMIN_EMAIL}`);
 
     // Run tests
+    results.twoFA = await testTwoFAWorkflow();
     results.tenantIsolation = await testTenantIsolationBypass();
     results.rateLimiting = await testRateLimiting();
-    results.twoFA = await testTwoFAWorkflow();
+    results.observability = await testObservabilityMetrics();
     results.refreshTokenRotation = await testRefreshTokenRotation();
     results.secretsValidation = await testSecretsValidation();
-    results.observability = await testObservabilityMetrics();
 
     // Summary
     console.log('\n╔═══════════════════════════════════════════════════════════╗');
@@ -546,14 +538,23 @@ async function runAllTests() {
 
     if (passed === total) {
       console.log('\n🎉 All security tests passed!');
-      process.exit(0);
+      process.exitCode = 0;
     } else {
       console.log(`\n⚠️  ${total - passed} test(s) failed`);
-      process.exit(1);
+      process.exitCode = 1;
     }
   } catch (error) {
     console.log(`\n❌ FATAL ERROR: ${error}`);
-    process.exit(1);
+    process.exitCode = 1;
+  } finally {
+    if (context.twoFactorEnabled && context.enrollmentAccessToken) {
+      const cleanup = await api.post(
+        '/auth/2fa/disable',
+        { password: ADMIN_PASSWORD },
+        { headers: { Authorization: `Bearer ${context.enrollmentAccessToken}` } },
+      );
+      if (![200, 201].includes(cleanup.status)) process.exitCode = 1;
+    }
   }
 }
 

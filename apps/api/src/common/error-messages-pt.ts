@@ -171,10 +171,15 @@ export function translateZodIssue(issue: { code: string; message: string; path?:
   const field = fieldLabel(issue.path);
   if (issue.message === 'Required') return `Preencha ${field}.`;
   if (issue.code === 'invalid_type') return `Valor inválido em ${field}.`;
-  if (issue.code === 'invalid_string' || /Invalid (email|uuid|datetime)/i.test(issue.message))
+  if (
+    issue.code === 'invalid_string' ||
+    issue.code === 'invalid_format' ||
+    /Invalid (email|uuid|datetime)/i.test(issue.message)
+  )
     return `Formato inválido em ${field}.`;
   if (issue.code === 'too_small') return `Valor curto demais em ${field}.`;
   if (issue.code === 'too_big') return `Valor longo demais em ${field}.`;
-  if (issue.code === 'invalid_enum_value') return `Opção inválida em ${field}.`;
+  if (issue.code === 'invalid_enum_value' || issue.code === 'invalid_value')
+    return `Opção inválida em ${field}.`;
   return issue.message;
 }

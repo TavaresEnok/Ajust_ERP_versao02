@@ -81,7 +81,7 @@ export class OperationalProcessesController {
         stepId: z.string().uuid().optional(),
         outcome: z.string().max(200).optional(),
         evidence: z
-          .record(z.string().max(8000))
+          .record(z.string(), z.string().max(8000))
           .refine((x) => Object.keys(x).length <= 20)
           .optional(),
         assigneeUserId: z.string().uuid().optional(),

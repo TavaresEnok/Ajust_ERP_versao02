@@ -20,6 +20,9 @@ export class EmailService implements OnModuleInit {
         host: process.env.SMTP_HOST,
         port: Number(process.env.SMTP_PORT) || 587,
         secure: process.env.SMTP_SECURE === 'true',
+        connectionTimeout: 10_000,
+        greetingTimeout: 15_000,
+        socketTimeout: 30_000,
         auth: {
           user: process.env.SMTP_USER,
           pass: process.env.SMTP_PASS,
@@ -73,6 +76,12 @@ export class EmailService implements OnModuleInit {
 
     // Dispara e NÃO aguarda — o chamador é imediatamente liberado
     void send();
+  }
+
+  /** Durable consumers must receive SMTP failures instead of treating a log as delivery. */
+  async sendEmailConfirmed(to: string, subject: string, text: string, html?: string) {
+    if (!this.transporter || !process.env.SMTP_HOST) throw new Error('SMTP is not configured.');
+    await this.sendEmailSync(to, subject, text, html);
   }
 
   /**
