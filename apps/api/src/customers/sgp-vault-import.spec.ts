@@ -1,5 +1,6 @@
 import {
   buildSgpVaultEntries,
+  safeTitle,
   categoryOf,
   numberRepeatedNames,
   titleFrom,
@@ -58,5 +59,14 @@ describe('importação do cofre a partir das anotações do SGP', () => {
         (e) => e.equipmentName,
       ),
     ).toEqual(['ZABBIX', 'zabbix (2)']);
+  });
+
+  it('a senha nunca vai parar no nome do equipamento', () => {
+    expect(safeTitle('VPN Abc123!xyz', ['Abc123!xyz'])).toBe('VPN');
+    expect(safeTitle('192.141.106.50/Segr3do', ['Segr3do'])).toBe('192.141.106.50');
+    expect(safeTitle('P@ss1234!x', [])).toBe('');
+    const [entry] = buildSgpVaultEntries('Zq9#kLm2$vXp<br>Login: noc<br>Senha: Zq9#kLm2$vXp', ids);
+    expect(entry.equipmentName).not.toContain('Zq9#kLm2$vXp');
+    expect(entry.secret).toBe('Zq9#kLm2$vXp');
   });
 });
