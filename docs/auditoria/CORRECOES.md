@@ -93,9 +93,9 @@
 | C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido (em execução) |
 | C-080 | Média | 7 | Mensagens de erro da API em inglês chegam à tela | Corrigido (sem commit; já em execução) |
 | C-081 | Média | 7 | Os testes de integração com banco nunca rodam no CI | Corrigido no código (CI remoto pendente) |
-| C-082 | Média | 7 | Lacunas de teste exatamente onde estão os achados críticos e altos | Corrigido em parte |
+| C-082 | Média | 7 | Lacunas de teste exatamente onde estão os achados críticos e altos | Corrigido |
 | C-083 | Baixa | 7 | Cópia antiga do front-end e arquivos compactados versionados dentro de `docs/` | Corrigido no repositório (sem commit) |
-| C-084 | Baixa | 7 | Arquivos muito grandes e módulos declarados dentro de controllers | Corrigido em parte |
+| C-084 | Baixa | 7 | Arquivos muito grandes e módulos declarados dentro de controllers | Corrigido em parte (resto sob demanda) |
 | C-085 | Baixa | 7 | Avisos de lint pendentes no web e no back-end | Corrigido (em execução) |
 | C-086 | Alta | 4 | Worker ficou 22 horas parado porque a validação de ambiente exigia SMTP | Corrigido (sem commit; já em execução) |
 | C-087 | Crítica | 5 | Código em execução dependia de 4 migrations não aplicadas: login fora do ar | Corrigido (aplicado) |
@@ -1182,7 +1182,8 @@
 - **Onde:** nenhum teste para `iam.service` (`createUser`, `updateUserInTenant`, `removeUserFromTenant`: C-020, C-021), `auth.service.updateMe` (C-048), feriado no motor de SLA (C-026), `dispatchWhatsAppOrder` (C-033); o teste do webhook de chat mocka `ServiceOrdersService` e por isso não percebeu que a integração sempre falha (C-043); o web não tem testes de componente (só 3 arquivos e2e com Playwright)
 - **Correção proposta:** cada correção dos lotes 1 a 4 entra com o teste que falharia antes (já indicado em "Como validar" de cada achado); para integrações, ao menos um teste com o serviço real e Prisma mockado no nível do banco; testes de componente para o formulário de abertura e a tela de transição.
 - **Continuação do lote 6 (04/11):** Regressões do lote 6 cobrem SSRF nos dois serviços, métricas sem autenticação, motivo/senha do cofre, concorrência real no limite, chave ausente em produção, negações na auditoria, conteúdo/quota/visibilidade dos anexos e trava dos scripts. Cobertura das suítes API/worker acima dos mínimos configurados. Testes de componente/navegador dos fluxos de abertura, transição e confirmação do cofre continuam pendentes.
-- **Status:** Corrigido em parte
+- **Conclusão (09/11):** a web ganhou testes de componente (Vitest + Testing Library, `apps/web/vitest.config.mts`), rodando em `pnpm test:unit` e portanto no CI: abertura com catálogo (preenche sem aviso bloqueante, preserva o que foi digitado, troca de serviço, Desfazer, envio do workflow) e confirmação do cofre (motivo e senha obrigatórios, cancelamento devolve nulo). A tela de transição continua coberta pelos testes de API e pelas jornadas Playwright de analista e gerência.
+- **Status:** Corrigido
 
 ### C-083 · Cópia antiga do front-end e arquivos compactados versionados dentro de `docs/`
 - **Severidade:** Baixa
@@ -1200,7 +1201,8 @@
 - **O problema:** revisões difíceis e conflitos frequentes; é onde os caminhos duplicados de C-013/C-035 se esconderam.
 - **Correção proposta:** a divisão sai naturalmente do Lote 2 (o serviço de ciclo de vida tira boa parte do `service-orders.service.ts`); mover os módulos para `*.module.ts`.
 - **Continuação do lote 6 (04/11):** CustomersModule, CustomerPortalModule, ShiftReportsModule e NetworkTopologiesModule movidos para `*.module.ts`, com imports atualizados. Validação dos anexos e diálogo de confirmação do cofre extraídos para arquivos próprios; serviço de ciclo de vida dos lotes anteriores preservado. A divisão dos demais arquivos grandes permanece como refatoração posterior.
-- **Status:** Corrigido em parte
+- **Continuação (09/11):** `service-orders.service.ts` de 2.440 para cerca de 2.170 linhas: tipos em `service-orders.types.ts` e filtros/ordenação/visibilidade em `service-order-queries.ts` (funções puras, com teste próprio). Comportamento igual: as 687 verificações da API seguem passando. Os demais arquivos grandes (`operational-workflows.tsx`, `credentials-vault.tsx`, `operational-processes.service.ts`, `knowledge.service.ts`, `auth.service.ts`) ficam para quando forem alterados por outro motivo; dividir sem mudança funcional não compensa o risco.
+- **Status:** Corrigido em parte (o essencial feito; resto sob demanda)
 
 ### C-085 · Avisos de lint pendentes no web e no back-end
 - **Severidade:** Baixa
@@ -1405,3 +1407,12 @@ do BFF e recusa token ausente ou inválido. Nenhum pedido real ao IXC foi enviad
 - **Correção aplicada (05/11):** backup validado (`/home/app/backups/ajust_erp/20261105_162753`), conferência da trava de corte (nenhum legado ativo) e `prisma migrate deploy`. Depois: 43 migrations aplicadas, login respondendo 401 normal para credencial errada, leituras ok, nenhum P2022 no log.
 - **Lição:** com o servidor em modo `watch`, toda migration nova precisa ser aplicada junto com o código; o caminho certo é o deploy de produção (`start-api.sh` roda `migrate deploy` antes de subir), ver C-078.
 - **Status:** Corrigido (aplicado)
+
+### Dependências (Dependabot, 09/11)
+- **Aplicadas:** `express` 5.2 (o NestJS 11 já roda Express 5; a dependência direta ainda era a 4), `bcryptjs` 3 (traz os próprios tipos; hashes compatíveis), `eslint-config-prettier` 10, `globals` 17, `@types/supertest` 7 e as ações do CI (`checkout` v7, `setup-node` v7, `pnpm/action-setup` v6). Typecheck, lint e testes passando.
+- **Já superadas pela atualização de 06/11:** `next`, `react-dom`, `zod`, `lucide-react`, `axios`, `postcss`, `autoprefixer` (removido).
+- **Não aplicadas, de propósito:** `prisma` 7 (exige migração de configuração e de geração do cliente; fazer em tarefa própria), `typescript` 6 (major com remoções), `@types/node` 25 (o runtime é Node 22; os tipos devem acompanhar).
+- Os PRs do Dependabot correspondentes podem ser fechados no GitHub.
+
+### Limpeza do outbox do ciclo da O.S. (09/11)
+- Eventos de `ServiceOrderLifecycleEvent` já processados são removidos depois de 90 dias (`LIFECYCLE_EVENT_RETENTION_DAYS`, mínimo 7) pelo job diário de retenção de sessões do worker. Pendentes e com erro nunca são apagados. Sugestão vinda da análise externa (Gemini).

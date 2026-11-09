@@ -26,11 +26,10 @@ import {
   Optional,
 } from '@nestjs/common';
 import { csvCell, compactRecord, reduceCountRows } from './service-orders.helpers';
-import { deadlineWhere, type DeadlineFilter } from './service-order-deadlines';
+import { deadlineWhere } from './service-order-deadlines';
 import {
   ApprovalStatus,
   AuditAction,
-  OccurrenceStatus,
   Prisma,
   Priority,
   ServiceOrderStatus,
@@ -60,173 +59,28 @@ import {
 import { ServiceOrderLifecycleService } from './service-order-lifecycle.service';
 import { syncOccurrenceStatus } from './occurrence-sync';
 import { nextOrderProtocol } from './order-protocol';
-
-export type AttachmentDownloadResult = {
-  fileName: string;
-  mimeType: string;
-  sizeBytes: number;
-  filePath: string;
-};
-
-type CreateOrderInput = {
-  workflowTemplateCode?: string;
-  tenantId: string;
-  occurrenceId?: string;
-  type: ServiceOrderType;
-  priority: Priority;
-  title: string;
-  description: string;
-  requester?: string;
-  sector?: string;
-  origin?: string;
-  ownerUserId?: string;
-  ownerName?: string;
-  assigneeUserId?: string;
-  analystName?: string;
-  deadlineAt?: string;
-  tags?: string[];
-  internalNotes?: string;
-};
-
-type CreateOccurrenceInput = {
-  customerId?: string;
-  tenantId: string;
-  provider: string;
-  type: string;
-  status?: OccurrenceStatus;
-  sector: string;
-  origin: string;
-  openedByName: string;
-  analystResponsible: string;
-  description: string;
-  createdAt?: string;
-  /** Origem externa (integrações): deduplicada por @@unique(tenantId, sourceSystem, externalId). */
-  sourceSystem?: 'WEBHOOK' | 'POLLING';
-  externalId?: string;
-  sourceMetadata?: Prisma.InputJsonValue;
-  firstOrder: {
-    recordCompleted?: boolean;
-    workflowTemplateCode?: string;
-    ownerUserId?: string;
-    assigneeUserId?: string;
-    type: ServiceOrderType;
-    status?: ServiceOrderStatus;
-    priority?: Priority;
-    title?: string;
-    description: string;
-    requester?: string;
-    sector?: string;
-    origin?: string;
-    analystName?: string;
-    deadlineAt?: string;
-    tags?: string[];
-    internalNotes?: string;
-  };
-};
-
-type UpdateOccurrenceInput = {
-  type?: string;
-  status?: OccurrenceStatus;
-  sector?: string;
-  origin?: string;
-  analystResponsible?: string;
-  description?: string;
-};
-
-type ListOccurrencesInput = {
-  customerId?: string;
-  provider?: string;
-  search?: string;
-  status?: OccurrenceStatus;
-  limit?: number;
-  offset?: number;
-  includeOrders?: boolean;
-};
-
-type CreateOccurrenceOrderInput = {
-  workflowTemplateCode?: string;
-  ownerUserId?: string;
-  assigneeUserId?: string;
-  type: ServiceOrderType;
-  status?: ServiceOrderStatus;
-  priority?: Priority;
-  title?: string;
-  description: string;
-  requester?: string;
-  sector?: string;
-  origin?: string;
-  analystName?: string;
-  deadlineAt?: string;
-  tags?: string[];
-  internalNotes?: string;
-};
-
-type UpdateOrderInput = {
-  ownerUserId?: string;
-  assigneeUserId?: string;
-  type?: ServiceOrderType;
-  priority?: Priority;
-  title?: string;
-  description?: string;
-  requester?: string | null;
-  sector?: string | null;
-  origin?: string | null;
-  analystName?: string | null;
-  ownerName?: string | null;
-  deadlineAt?: string;
-  deadlineReason?: string;
-  tags?: string[];
-  internalNotes?: string | null;
-  expectedVersion?: number;
-};
-
-type TransitionInput = {
-  toStatus: ServiceOrderStatus;
-  reason: string;
-  expectedVersion?: number;
-};
-
-type ListInput = {
-  customerId?: string;
-  situation?: 'active' | 'completed' | 'all';
-  deadline?: DeadlineFilter;
-  provider?: string;
-  /** Internal scope resolved from the authenticated user, never a public user-ID filter. */
-  responsibleUserId?: string;
-  status?: ServiceOrderStatus;
-  priority?: Priority;
-  type?: ServiceOrderType;
-  search?: string;
-  from?: string;
-  to?: string;
-  limit?: number;
-  offset?: number;
-  orderBy?: 'createdAt' | 'updatedAt' | 'deadlineAt' | 'protocol' | 'priority' | 'status';
-  orderDir?: 'asc' | 'desc';
-};
-
-type CsvExportResult = {
-  fileName: string;
-  content: string;
-  rowCount: number;
-  truncated: boolean;
-};
-type ExportHistoryItem = {
-  id: string;
-  reportType: string;
-  status: string;
-  createdAt: string;
-  fileAvailable: boolean;
-  actor: {
-    id: string;
-    name: string;
-    email: string;
-  } | null;
-};
-type ExportDownloadResult = {
-  fileName: string;
-  content: string;
-};
+import {
+  andOrderWhere,
+  buildOrderOrderBy,
+  buildOrderWhere,
+  isCustomerRole,
+  sanitizeOrderForRole,
+} from './service-order-queries';
+import type {
+  CreateOrderInput,
+  CreateOccurrenceInput,
+  UpdateOccurrenceInput,
+  ListOccurrencesInput,
+  CreateOccurrenceOrderInput,
+  UpdateOrderInput,
+  TransitionInput,
+  ListInput,
+  CsvExportResult,
+  ExportHistoryItem,
+  ExportDownloadResult,
+} from './service-orders.types';
+export type { AttachmentDownloadResult } from './service-orders.types';
+import type { AttachmentDownloadResult } from './service-orders.types';
 
 const ROLE_SET = ['super_admin', 'gerente', 'analista'] as const;
 const ATTACHMENT_LIMIT = 10;
@@ -2301,114 +2155,15 @@ export class ServiceOrdersService {
     return this.andWhere(where, deadlineWhere(input.deadline, new Date(), tenant.timezone));
   }
 
-  private buildWhere(
-    tenantId: string,
-    input: ListInput,
-    role?: string | null,
-  ): Prisma.ServiceOrderWhereInput {
-    const where: Prisma.ServiceOrderWhereInput = {
-      tenantId,
-      deletedAt: null,
-    };
+  private buildWhere = buildOrderWhere;
 
-    if (this.isCustomerRole(role)) {
-      where.isCustomerVisible = true;
-    }
+  private andWhere = andOrderWhere;
 
-    if (input.status) where.status = input.status;
-    if (input.situation && input.situation !== 'all') {
-      where.AND = [
-        {
-          status:
-            input.situation === 'active'
-              ? { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] }
-              : { in: ['RESOLVIDA', 'FECHADA'] },
-        },
-      ];
-    }
-    if (input.priority) where.priority = input.priority;
-    if (input.type) where.type = input.type;
+  private isCustomerRole = isCustomerRole;
 
-    if (input.responsibleUserId) {
-      where.AND = [
-        ...(Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : []),
-        {
-          OR: [
-            { ownerUserId: input.responsibleUserId },
-            { assigneeUserId: input.responsibleUserId },
-          ],
-        },
-      ];
-    }
+  private sanitizeOrderForRole = sanitizeOrderForRole;
 
-    if (input.from || input.to) {
-      where.createdAt = {
-        ...(input.from ? { gte: new Date(input.from) } : {}),
-        ...(input.to ? { lte: new Date(input.to) } : {}),
-      };
-    }
-
-    if (input.customerId) where.occurrence = { customerId: input.customerId, tenantId };
-    if (input.provider && !input.customerId) {
-      const restrictions = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
-      where.AND = [
-        ...restrictions,
-        {
-          OR: [
-            { requester: { equals: input.provider, mode: 'insensitive' } },
-            { occurrence: { provider: { equals: input.provider, mode: 'insensitive' } } },
-          ],
-        },
-      ];
-    }
-    if (input.search) {
-      where.OR = [
-        { protocol: { contains: input.search, mode: 'insensitive' } },
-        { title: { contains: input.search, mode: 'insensitive' } },
-        { description: { contains: input.search, mode: 'insensitive' } },
-        { externalProtocol: { contains: input.search, mode: 'insensitive' } },
-        { requester: { contains: input.search, mode: 'insensitive' } },
-        { occurrence: { provider: { contains: input.search, mode: 'insensitive' } } },
-      ];
-    }
-
-    return where;
-  }
-
-  private andWhere(
-    base: Prisma.ServiceOrderWhereInput,
-    extra: Prisma.ServiceOrderWhereInput,
-  ): Prisma.ServiceOrderWhereInput {
-    return { AND: [base, extra] };
-  }
-
-  private isCustomerRole(role?: string | null): boolean {
-    return role === 'cliente';
-  }
-
-  private sanitizeOrderForRole<T>(order: T, role?: string | null): T {
-    if (!this.isCustomerRole(role) || !order || typeof order !== 'object') {
-      return order;
-    }
-
-    const record = order as Record<string, unknown>;
-    const sanitized: Record<string, unknown> = {
-      ...record,
-      internalNotes: null,
-    };
-
-    if ('approvals' in sanitized) {
-      sanitized.approvals = [];
-    }
-
-    return sanitized as T;
-  }
-
-  private buildOrderBy(input: ListInput): Prisma.ServiceOrderOrderByWithRelationInput[] {
-    const orderBy = input.orderBy || 'createdAt';
-    const orderDir: Prisma.SortOrder = input.orderDir || 'desc';
-    return [{ [orderBy]: orderDir }, { id: 'asc' }];
-  }
+  private buildOrderBy = buildOrderOrderBy;
 
   /**
    * Aliases para funções extraídas em `service-orders.helpers.ts`.

@@ -31,6 +31,8 @@ export class SessionRetentionProcessor {
 
   async process(_job: Job): Promise<void> {
     await this.retentionService.runOnce();
+    const outbox = await this.retentionService.purgeLifecycleEvents();
+    if (outbox.removed) this.logger.log(`Outbox: ${outbox.removed} eventos processados removidos`);
   }
 
   async onModuleDestroy() {
