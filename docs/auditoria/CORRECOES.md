@@ -18,7 +18,7 @@
 | C-004 | Alta | 1.1 | A abertura aceita O.S. já nascendo resolvida, fechada ou cancelada | Corrigido (sem commit; já em execução) |
 | C-005 | Alta | 1.1 | Prazo (`deadlineAt`) livre na abertura e na edição, sem motivo nem auditoria de SLA | Corrigido (sem commit; já em execução) |
 | C-006 | Média | 1.1 | Data de abertura retroativa (`createdAt`) aceita do cliente e inconsistente com o prazo | Corrigido (sem commit; já em execução) |
-| C-007 | Média | 1.1 | "Aberto por" e responsáveis aceitam qualquer pessoa e, em `create`, até usuários do perfil cliente | Corrigido no código (implantação pendente) |
+| C-007 | Média | 1.1 | "Aberto por" e responsáveis aceitam qualquer pessoa e, em `create`, até usuários do perfil cliente | Corrigido (em execução) |
 | C-008 | Média | 1.1 | Abertura sem `customerId` cria ocorrência com provedor só em texto | Corrigido no código (não implantado) |
 | C-009 | Alta | 1.1 | Serviço do catálogo com modelo de processo inexistente ou não publicado bloqueia toda abertura | Corrigido (sem commit; já em execução) |
 | C-010 | Alta | 1.1 | O evento `order_created` dos workflows não dispara na abertura principal | Corrigido (sem commit; já em execução) |
@@ -27,7 +27,7 @@
 | C-013 | Alta | 1.2 | "Concluir" pelas operações do analista fecha a O.S. sem aprovação, auditoria, CSAT, WhatsApp, eventos ou workflow | Corrigido (em execução) |
 | C-014 | Alta | 1.2 | Reabrir pela transição mantém `closedAt` e `resolvedAt` antigos | Corrigido (sem commit; já em execução) |
 | C-015 | Média | 1.2 | Telas de transição oferecem todos os status e aparecem em O.S. presas a um processo | Corrigido (sem commit; já em execução) |
-| C-016 | Média | 1.2 | Concluir a ocorrência inteira não é atômico | Corrigido no código (implantação pendente) |
+| C-016 | Média | 1.2 | Concluir a ocorrência inteira não é atômico | Corrigido (em execução) |
 | C-017 | Baixa | 1.2 | `expectedVersion` opcional na edição e na transição | Corrigido (sem commit; já em execução) |
 | C-018 | Baixa | 1.2 | Analista pode operar O.S. de outro analista sem registro de "assumir" | Resolvido por decisão de negócio (colaboração permitida) |
 | C-019 | Crítica | 1.3 | Usuário "cliente" sem provedor vinculado enxerga atendimentos de todos os provedores | Corrigido (sem commit; já em execução) |
@@ -41,11 +41,11 @@
 | C-027 | Média | 1.4 | Monitor de SLA calcula 75% e 90% em tempo corrido, não em horas úteis | Corrigido (sem commit; já em execução) |
 | C-028 | Média | 1.4 | Alertas de SLA não voltam a disparar depois que o prazo muda e podem se perder quando falham | Corrigido (sem commit; já em execução) |
 | C-029 | Média | 1.4 | Mensagens de alerta de SLA com cliente e horário errados | Corrigido (sem commit; já em execução) |
-| C-030 | Baixa | 1.4 | SLA continua correndo em "Aguardando terceiros" e "Aguardando campo" | Corrigido (sem commit; já em execução) |
+| C-030 | Baixa | 1.4 | SLA continua correndo em "Aguardando terceiros" e "Aguardando campo" | Corrigido (em execução) |
 | C-031 | Baixa | 1.4 | Código morto e caminhos padrão divergentes no motor de SLA | Corrigido no código (não implantado) |
 | C-032 | Alta | 1.5 | Pesquisa de satisfação vai para o e-mail da própria Ajust e não sai no fluxo principal | Corrigido (em execução) |
 | C-033 | Média | 1.5 | Ao resolver ou fechar, o sistema dispara uma mensagem de "escalonamento" com link interno e IP fixo | Corrigido (sem commit; já em execução) |
-| C-034 | Alta | 1.5 | Modelos de processo de O.S. criam O.S. filhas sem SLA, sem vínculo, em laço e depois de a ocorrência encerrar | Corrigido no código (legado desativado; implantação pendente) |
+| C-034 | Alta | 1.5 | Modelos de processo de O.S. criam O.S. filhas sem SLA, sem vínculo, em laço e depois de a ocorrência encerrar | Corrigido (em execução) |
 | C-035 | Alta | 1.6 | Cinco motores de automação e cinco caminhos de fechamento sem regra comum | Corrigido (em execução) |
 | C-036 | Alta | 1.6 | Gatilho "O.S. crítica" dispara para qualquer O.S.; gatilho "SLA violado" nunca dispara | Corrigido (sem commit; já em execução) |
 | C-037 | Alta | 1.6 | Ações de workflow alteram a O.S. sem versão, histórico, auditoria nem regras | Corrigido (sem commit; já em execução) |
@@ -61,11 +61,11 @@
 | C-047 | Crítica | 2.6 | Instância pública usando segredos de desenvolvimento e sem os segredos obrigatórios | Corrigido (aplicado) |
 | C-048 | Alta | 2.1 | Troca de e-mail da própria conta sem confirmar a senha atual | Corrigido (sem commit; já em execução) |
 | C-049 | Média | 2.1 | Rate limit de login usa o IP do proxy e permite bloquear a conta de outra pessoa | Corrigido (aplicado) |
-| C-050 | Média | 2.1 | Login por nome ou prefixo do e-mail é ambíguo; login por CNPJ procura no tenant | Corrigido no código (implantação pendente) |
-| C-051 | Média | 2.1 | 2FA não é obrigatório para super_admin e o código TOTP pode ser reutilizado | Corrigido no código (migration e implantação pendentes) |
+| C-050 | Média | 2.1 | Login por nome ou prefixo do e-mail é ambíguo; login por CNPJ procura no tenant | Corrigido (em execução) |
+| C-051 | Média | 2.1 | 2FA não é obrigatório para super_admin e o código TOTP pode ser reutilizado | Corrigido (em execução) |
 | C-052 | Baixa | 2.1 | Reuso do refresh token não é detectado | Corrigido no código (não implantado) |
 | C-053 | Média | 2.3 | WebSocket: conexões continuam recebendo eventos depois de revogar a sessão ou remover o usuário | Corrigido no código (não implantado nesta continuação) |
-| C-054 | Média | 2.4 | Cofre: qualquer analista revela qualquer senha, sem motivo, sem reautenticação e sem limite | Corrigido no código (implantação pendente) |
+| C-054 | Média | 2.4 | Cofre: qualquer analista revela qualquer senha, sem motivo, sem reautenticação e sem limite | Corrigido (em execução) |
 | C-055 | Média | 2.6 | Proteção contra SSRF pode ser contornada por redirecionamento e por IPv6 | Corrigido no código (não implantado) |
 | C-056 | Baixa | 2.5 | Auditoria: IP falsificável, falhas não registradas e ações genéricas | Corrigido no código (não implantado) |
 | C-057 | Baixa | 2.6 | `/monitoring/metrics` sem autenticação fora de produção | Corrigido no código (não implantado) |
@@ -73,8 +73,8 @@
 | C-059 | Média | 3.3 | Plantão e escala são dois cadastros separados e nenhum conversa com o atendimento | Resolvido por decisão (D-4) |
 | C-060 | Baixa | 3.2 | Qualquer membro lista todos os usuários com e-mail; analista cria eventos na agenda de colegas | Corrigido no código (não implantado) |
 | C-061 | Baixa | 3.10 | Notas pessoais podem ser editadas e apagadas pelo gerente sem que ele as veja | Corrigido no código (não implantado) |
-| C-062 | Baixa | 3.8 | Apontamento de horas aceita data futura, O.S. encerrada e lista sem paginação | Corrigido no código (implantação pendente) |
-| C-063 | Baixa | 3.7 | Transição de RFC sem controle de versão, sem auditoria própria e com autoaprovação | Corrigido no código (migration e implantação pendentes) |
+| C-062 | Baixa | 3.8 | Apontamento de horas aceita data futura, O.S. encerrada e lista sem paginação | Corrigido (em execução) |
+| C-063 | Baixa | 3.7 | Transição de RFC sem controle de versão, sem auditoria própria e com autoaprovação | Corrigido (em execução) |
 | C-064 | Baixa | 3.5 | Topologias guardam todas as revisões completas, criptografadas com a chave fraca do ambiente | Corrigido (em execução) |
 | C-065 | Alta | 4 | O worker ignora senha, banco e TLS do `REDIS_URL` (e isso bloqueia a correção de C-046) | Corrigido (sem commit; em produção) |
 | C-066 | Média | 4 | Reconciliação periódica do IXC repete os problemas do webhook e chama a URL configurada sem proteção | Corrigido (em execução) |
@@ -82,13 +82,13 @@
 | C-068 | Baixa | 4 | A trilha de auditoria some da tela depois de 90 dias | Corrigido no código (não implantado) |
 | C-069 | Baixa | 4 | Worker: varredura completa de SLA a cada minuto, CORS aberto e validação de ambiente só em produção | Corrigido (em execução) |
 | C-070 | Média | 5 | Responsáveis, provedor, setor e origem gravados como texto, não como referência | Corrigido (em execução) |
-| C-071 | Baixa | 5 | Faltam índices para "Meu trabalho", portal e notas | Corrigido no código (migration pendente) |
+| C-071 | Baixa | 5 | Faltam índices para "Meu trabalho", portal e notas | Corrigido (em execução) |
 | C-072 | Média | 5 | Três migrations e a mudança do schema estão fora do git | Corrigido (na branch, sem push) |
 | C-073 | Baixa | 5 | Sessões expiradas nunca são removidas | Corrigido no código (não implantado) |
-| C-074 | Baixa | 5 | Algumas exclusões em cascata apagam histórico que deveria ficar | Corrigido no código (migration pendente) |
+| C-074 | Baixa | 5 | Algumas exclusões em cascata apagam histórico que deveria ficar | Corrigido (em execução) |
 | C-075 | Alta | 6 | O ERP é acessado por HTTP puro, sem TLS | Corrigido (aplicado) |
 | C-076 | Alta | 6 | Backups: sem agendamento, só do banco, sem a chave do cofre e no mesmo disco | Em correção (falta só o destino externo) |
-| C-077 | Média | 6 | Redis de produção descarta chaves das filas e do rate limit quando enche | Corrigido nos arquivos de compose (produção pendente) |
+| C-077 | Média | 6 | Redis de produção descarta chaves das filas e do rate limit quando enche | Corrigido (em execução) |
 | C-078 | Média | 6 | O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro | Corrigido (em execução) |
 | C-079 | Média | 6 | Scripts de manutenção que apagam ou reescrevem dados não têm trava de ambiente | Corrigido (em execução) |
 | C-080 | Média | 7 | Mensagens de erro da API em inglês chegam à tela | Corrigido (sem commit; já em execução) |
@@ -96,7 +96,7 @@
 | C-082 | Média | 7 | Lacunas de teste exatamente onde estão os achados críticos e altos | Corrigido em parte |
 | C-083 | Baixa | 7 | Cópia antiga do front-end e arquivos compactados versionados dentro de `docs/` | Corrigido no repositório (sem commit) |
 | C-084 | Baixa | 7 | Arquivos muito grandes e módulos declarados dentro de controllers | Corrigido em parte |
-| C-085 | Baixa | 7 | Avisos de lint pendentes no web e no back-end | Corrigido no código (sem commit) |
+| C-085 | Baixa | 7 | Avisos de lint pendentes no web e no back-end | Corrigido (em execução) |
 | C-086 | Alta | 4 | Worker ficou 22 horas parado porque a validação de ambiente exigia SMTP | Corrigido (sem commit; já em execução) |
 | C-087 | Crítica | 5 | Código em execução dependia de 4 migrations não aplicadas: login fora do ar | Corrigido (aplicado) |
 
@@ -210,7 +210,8 @@
 - **Correção proposta:** `ownerUserId` = usuário autenticado (gerente pode sobrescrever ao registrar em nome de outro, com registro no histórico); aplicar o filtro de papel da equipe em `create` e `updateOrder`, reaproveitando uma função única de validação de membros.
 - **Como validar:** teste: `assigneeUserId` de usuário cliente → 400 nos três caminhos.
 - **Lote 2 (04/11):** `teamMemberNames`: `create` e `updateOrder` só aceitam responsáveis com papel de equipe (mesma regra da abertura). "Aberto por" escolhido à mão continua (decisão de produto).
-- **Status:** Corrigido no código (implantação pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Continuação sem nova autorização (04/11):** Abertura autenticada usa o próprio usuário como autor por padrão; analista não substitui o autor. Gestão pode registrar em nome de membro ativo da equipe, conservando o ator autenticado no histórico. Edição por analista não altera autoria; nomes sem IDs correspondentes não são aceitos para substituir os snapshots. Abertura principal valida também status e exclusão dos membros.
 
 ### C-008 · Abertura sem `customerId` cria ocorrência com provedor só em texto
@@ -321,7 +322,8 @@
 - **Correção proposta:** validar todas as O.S. antes de fechar qualquer uma (pausa, versão, processo com resultado único, evidências) e executar o conjunto numa transação; ou, se não der, devolver a lista do que foi e do que não foi concluído.
 - **Como validar:** teste com 3 O.S. em que a última exige resultado → nenhuma é fechada.
 - **Lote 2 (04/11):** a conclusão conjunta valida antes todas as O.S. com processo (etapa ativa e resultado único) e, se alguma não puder, não conclui nenhuma e lista o motivo. Cada O.S. ainda é gravada numa transação própria.
-- **Status:** Corrigido no código (implantação pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Continuação sem nova autorização (04/11):** Conclusão conjunta usa uma única transação Serializable, compartilhada com o motor operacional v2. Toda validação e gravação ocorre nessa transação; efeitos de fechamento só rodam depois do commit. Teste provoca conflito na segunda ordem e confirma rollback da primeira, da ocorrência e dos históricos, sem efeitos externos. Colaboração sem assumir permitida conforme D-5.
 
 ### C-017 · `expectedVersion` opcional na edição e na transição
@@ -490,7 +492,8 @@
 - **O problema:** a única pausa é a manual das operações. Pela transição, mover para "Aguardando terceiros" não para o relógio, e o analista precisa lembrar de pausar separadamente. São dois conceitos parecidos sem ligação.
 - **Correção proposta:** decidir se esses status pausam o SLA automaticamente (com motivo) ou deixar explícito na tela que não pausam.
 - **Lote 4 (04/11):** decisão D-3: entrar em "Aguardando terceiros" pausa o SLA (motivo da transição, `SlaAuditEvent PAUSED`); sair retoma e estende o prazo pelo tempo útil parado (`RESUMED`). "Aguardando campo" continua contando. Pausa manual anterior não é mexida.
-- **Status:** Corrigido (sem commit; já em execução)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 
 ### C-031 · Código morto e caminhos padrão divergentes no motor de SLA
 - **Severidade:** Baixa
@@ -542,7 +545,8 @@
 - **Correção proposta:** decidir se o recurso continua (ver C-035, unificação das automações). Se continuar: impedir laço (não disparar para O.S. com tag `template:`/`parentOrderId`), idempotência por origem + modelo, criar as filhas antes de sincronizar a ocorrência e na mesma transação, usar o motor de SLA, protocolo normal e `parentOrderId`.
 - **Como validar:** teste: fechar a filha não cria neta; fechar a origem duas vezes cria uma leva só.
 - **Lote 3 (04/11):** sem laço (O.S. com `parentOrderId` ou tag `template:` não dispara modelo), sem segunda leva para a mesma origem, filhas com protocolo da sequência e `parentOrderId`/`rootOrderId`, e a ocorrência é sincronizada depois. Pendente: prazo das filhas ainda em horas corridas e a decisão D-2 (manter ou desativar o recurso).
-- **Status:** Corrigido no código (legado desativado; implantação pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 
 ---
 - **Fechamento de pendências (04/11):** Decisão D-2: processos v2 oficiais. API antiga de modelos retorna 410 nas mutações; fechamento não chama mais executeForOrder. Tela antiga é somente consulta. Inventário somente leitura confirmou zero OsProcessTemplate nesta instância; não houve dados para migrar.
@@ -768,7 +772,8 @@
 - **Onde:** `auth.service.ts:login` (`findFirst` por `name equals` ou `email startsWith '<x>@'`; fallback por `Tenant.taxId` escolhendo o primeiro usuário cliente)
 - **O problema:** (a) dois usuários com o mesmo nome, ou com e-mails `joao@ajust` e `joao@provedor`, fazem o login cair em quem o banco devolver primeiro; o outro nunca entra por nome; (b) o fallback por CNPJ procura o CNPJ do **tenant** (a Ajust), não do provedor (`Customer.taxId`), e escolhe "o primeiro usuário cliente" do tenant. No modelo atual (vários provedores num workspace), digitar o CNPJ da Ajust tenta logar num cliente qualquer.
 - **Correção proposta:** aceitar só e-mail (ou um `username` único); para clientes, resolver CNPJ → `Customer` → usuário vinculado; se houver mais de um, pedir o e-mail.
-- **Status:** Corrigido no código (implantação pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Fechamento de pendências (04/11):** Login não resolve nome nem prefixo. Documento resolve Customer → UserTenant ativo → usuário; nunca o CNPJ do Tenant. Mais de um candidato é recusado. Primeiro acesso usa CNPJ+e-mail no pedido/validação de OTP e no login imediato, incluindo encaminhamento no BFF. E-mail completo mantém login normal. Testes cobrem ambiguidade e inconsistência de tenant.
 
 ### C-051 · 2FA não é obrigatório para super_admin e o código TOTP pode ser reutilizado
@@ -778,7 +783,8 @@
 - **O problema:** a conta mais poderosa entra só com senha. Um código de 6 dígitos observado pode ser reusado dentro da janela de validade.
 - **Correção proposta:** exigir 2FA para super_admin e gerente (bloquear o login até configurar, com fluxo guiado); guardar o último contador TOTP aceito por usuário e recusar repetição.
 - **Lote 1 (04/11):** `REQUIRE_2FA_ROLES` (padrão `super_admin`): perfil obrigado e sem 2FA só acessa a configuração do 2FA, `GET /auth/me` e logout. O único super admin já usa 2FA. **Os 2 gerentes ainda não usam**: depois que configurarem, colocar `REQUIRE_2FA_ROLES=super_admin,gerente` no `.env`. Reuso do código TOTP continua pendente.
-- **Status:** Corrigido no código (migration e implantação pendentes)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Fechamento de pendências (04/11):** User.twoFactorLastCounter armazena o passo TOTP aceito. Consumo do passo, remoção condicional da sessão temporária e criação da sessão completa ocorrem em uma transação. Confirmação de configuração também consome o passo e usa atualização condicional. Padrão exige super_admin/gerente; compose de produção explicita ambos. Login de perfil ainda sem 2FA sinaliza configuração obrigatória e BFF redireciona a Segurança/2FA. Teste PostgreSQL prova uma única vitória em verificações concorrentes e rejeição de reuso em outra sessão pendente.
 
 ### C-052 · Reuso do refresh token não é detectado
@@ -810,7 +816,8 @@
 - **Como validar:** teste: `reveal` sem motivo → 400; sem a chave → a API não sobe.
 - **Lote 6 (04/11):** limite de revelações por pessoa e hora (`VAULT_REVEALS_PER_HOUR`, padrão 30; gerente o dobro), motivo opcional gravado no histórico, e em produção a chave do cofre não é mais criada sozinha (`VAULT_KEY_AUTOCREATE=true` só na instalação). Pendente: motivo obrigatório na tela, reautenticação, chave fora do volume de uploads.
 - **Continuação do lote 6 (04/11):** Motivo obrigatório e senha atual para senha, dados adicionais e TOTP, com diálogo na interface. TOTP deixa de renovar sem nova confirmação. Limite por pessoa/hora inclui TOTP e usa trava transacional no PostgreSQL para contar e auditar atomicamente entre instâncias. O teste com duas consultas concorrentes comprova uma única liberação quando resta uma vaga. Em produção, a API valida a chave no início, fora de uploads, e nunca a recria, mesmo com o antigo `VAULT_KEY_AUTOCREATE`. Compose preparado para montagem somente leitura da chave existente. Falta executar a mudança física da chave no servidor; nenhuma chave real foi movida ou substituída.
-- **Status:** Corrigido no código (implantação pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 
 ### C-055 · Proteção contra SSRF pode ser contornada por redirecionamento e por IPv6
 - **Severidade:** Média
@@ -903,7 +910,8 @@
 - **Área / item do plano:** 3.8 · Horas
 - **Onde:** `apps/api/src/time-tracking/time-tracking.service.ts` → `create` (`loggedAt` livre; não olha o status da O.S.), `listByTenant` (sem limite; todos os analistas veem as horas de todos)
 - **Correção proposta:** recusar `loggedAt` no futuro e muito no passado (sem gerente); apontar em O.S. fechada/cancelada só com gerente; paginação; analista vê as próprias horas e o total da O.S.
-- **Status:** Corrigido no código (implantação pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Continuação do lote 7 (04/11):** Datas futuras são recusadas; analista não registra há mais de 30 dias nem em O.S. fechada/cancelada. Gerente pode registrar histórico. Listas aceitam limit/offset (padrão 50, máximo 200), e analista só consulta seus apontamentos/resumo. Pendente: total agregado da O.S. sem expor apontamentos dos colegas e navegação de páginas na interface; resposta permanece array compatível.
 - **Fechamento de pendências (04/11):** Complementada paginação visual, ordenação estável por loggedAt/id, resumo agregado no banco e endpoint de total da O.S. isolado por tenant. Tela da O.S. mostra somente o total da equipe; detalhes continuam limitados ao próprio analista. Testes conferem agregação, escopo e recusa de O.S. de outro tenant/excluída.
 
@@ -913,7 +921,8 @@
 - **Onde:** `apps/api/src/change-management/change.service.ts:transition` (atualiza por `id` sem `version`; registra `approvedById` igual ao solicitante, se ele for gerente)
 - **O problema:** dois gerentes aprovando e rejeitando ao mesmo tempo: vale o último. O gerente que pediu a mudança aprova a própria RFC. O histórico das transições fica só no interceptor genérico.
 - **Correção proposta:** versão otimista; aprovador diferente do solicitante (ou registro explícito de autoaprovação); evento de histórico por transição.
-- **Status:** Corrigido no código (migration e implantação pendentes)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Continuação do lote 7 (04/11):** RFC exige expectedVersion no backend e na tela; transição usa compare-and-swap, incrementa version e grava auditoria na mesma transação. Solicitante não aprova a própria RFC. Concorrência obsoleta retorna conflito.
 
 ### C-064 · Topologias guardam todas as revisões completas, criptografadas com a chave fraca do ambiente
@@ -984,6 +993,8 @@
 - **Onde:** `apps/worker/src/sla/sla-monitoring.service.ts` (todas as O.S. abertas de todos os tenants a cada 60 s, com 2 a 5 consultas por O.S. que passa do limiar); `apps/worker/src/main.ts` (`app.enableCors()` sem origem; `validateEnv()` retorna cedo fora de produção, caso desta instância, C-047)
 - **Correção proposta:** filtrar no banco só as O.S. que cruzaram um limiar desde a última execução; CORS desligado (o worker não é chamado pelo navegador); validação de ambiente sempre que não for localhost.
 - **Conclusão (05/11):** sem CORS, validação de ambiente fora de loopback e varredura paginada (500 por vez); em execução. Seleção só de limiares recém-cruzados não é necessária no volume atual.
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Complemento (09/11):** o cliente Redis da checagem de SLA nunca conectava (`lazyConnect` sem `connect()`); cada alerta consultava o banco e o log avisava a cada minuto. Corrigido em `sla-monitoring.service.ts`; sem avisos depois da troca do worker.
 - **Status:** Corrigido (em execução)
 
 ---
@@ -1017,7 +1028,8 @@
 - **Onde:** `ServiceOrder` não tem índice com `assigneeUserId` nem `ownerUserId` (usados por `scope=mine`); `Occurrence` não tem índice em `customerId` (usado pelo portal e pela contagem de ocorrências abertas por provedor); `Note` não tem índice em `authorUserId` (toda listagem filtra por ele)
 - **Impacto:** hoje irrelevante (volume pequeno); vira lentidão com o histórico importado do SGP.
 - **Correção proposta:** `@@index([tenantId, assigneeUserId, status])`, `@@index([tenantId, ownerUserId])`, `Occurrence @@index([tenantId, customerId, status])`, `Note @@index([tenantId, authorUserId, updatedAt])`.
-- **Status:** Corrigido no código (migration pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 - **Continuação do lote 7 (04/11):** Migration history_integrity adiciona índices para responsável, proprietário, cliente da ocorrência e autor da nota, além de índices de expiração/revogação de sessões.
 
 ### C-072 · Três migrations e a mudança do schema estão fora do git
@@ -1043,7 +1055,8 @@
 - **Onde:** `TimeEntry.user` (`Cascade`: apagar o usuário apaga as horas trabalhadas, inclusive faturáveis); `NetworkTopology.customer` (`Cascade`: apagar o provedor apaga a topologia e todas as revisões); `SatisfactionResponse.order` e `TimeEntry.order` (`Cascade` com a O.S.)
 - **O problema:** hoje usuários e O.S. são excluídos de forma lógica, então o risco é baixo, mas qualquer exclusão física (script, limpeza de demonstração como `scripts/clean-nonproduction-os-fixtures.ts`) leva junto histórico de faturamento e de rede.
 - **Correção proposta:** `Restrict` (ou `SetNull` com nome guardado) para horas e topologias; revisar os scripts de limpeza para não tocar em dados reais (ver Fase 6).
-- **Status:** Corrigido no código (migration pendente)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 
 ---
 - **Continuação do lote 7 (04/11):** Migration troca Cascade por Restrict em TimeEntry.order/user, NetworkTopology.customer e SatisfactionResponse.order. Exclusão lógica permanece disponível; exclusão física com histórico falha. Teste em PostgreSQL confirma preservação de horas e topologia.
@@ -1097,7 +1110,8 @@
 - **Correção proposta:** `--maxmemory-policy noeviction` (e memória dimensionada), ou separar o Redis das filas do de cache; `requirepass` (depois de C-065).
 - **Andamento (04/11):** `noeviction` no `docker-compose.yml`. Falta o mesmo no `docker-compose.prod.yml`.
 - **Aplicado (04/11, 16:26):** Redis recriado com `noeviction`.
-- **Status:** Corrigido nos arquivos de compose (produção pendente)
+- **Implantação (09/11):** Redis de produção roda com `--maxmemory-policy noeviction` (conferido no contêiner).
+- **Status:** Corrigido (em execução)
 - **Fechamento de pendências (04/11):** Complemento da continuação anterior: compose de produção também usa noeviction, autenticação e AOF. Não foi reiniciado Redis nesta etapa.
 
 ### C-078 · O servidor roda a configuração de desenvolvimento, que lê `.env.example` e monta o repositório inteiro
@@ -1194,7 +1208,8 @@
 - **Onde:** 10 avisos no web (2 `react-hooks/exhaustive-deps`, que podem causar dados desatualizados na tela; 2 `no-location-assign-relative-destination`; `no-img-element`…), 1 no back-end (`no-unused-vars`)
 - **Correção proposta:** resolver junto com C-001 e transformar avisos em erro no CI, para não voltarem.
 - **Continuação do lote 6 (04/11):** Avisos corrigidos sem desativar regras: dependências/limpeza dos efeitos, estado inicial de relógio, navegação pelo router, hidratação e imagem do logo. Lint agora executa com `--max-warnings=0` em todos os pacotes. Formatação pendente normalizada; arquivos locais de sessão Playwright excluídos do formatador.
-- **Status:** Corrigido no código (sem commit)
+- **Implantação (09/11):** no ar desde a troca para as imagens `202611091425` (commit `0b1dcab`); as 44 migrations aplicadas no banco em uso.
+- **Status:** Corrigido (em execução)
 
 
 ## Continuação do lote 6 — 04/11/2026

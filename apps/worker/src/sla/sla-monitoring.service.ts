@@ -56,6 +56,11 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
       this.redisClient.on('error', (err) => {
         this.logger.warn(`Redis connection warning in SlaMonitoringService: ${err.message}`);
       });
+      // Com lazyConnect e sem fila offline, o cliente nunca conectava sozinho: todo GET falhava
+      // e a checagem caía no banco a cada minuto. Conecta já; o retryStrategy cuida das quedas.
+      this.redisClient.connect().catch((err: Error) => {
+        this.logger.warn(`Redis unavailable for SLA monitoring, using DB: ${err.message}`);
+      });
     } catch (err) {
       this.logger.warn(
         `Failed to initialize Redis client for SLA monitoring: ${(err as Error).message}`,
