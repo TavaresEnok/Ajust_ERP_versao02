@@ -59,6 +59,20 @@ const CATEGORY_RULES: [RegExp, string][] = [
   ],
 ];
 
+/** Texto de uma palavra só, com letras, números e símbolos misturados: parece senha, não nome. */
+const looksLikeSecret = (text: string) =>
+  /^\S{8,}$/.test(text) && /\d/.test(text) && /[A-Za-z]/.test(text) && /[^\w\s.\-/()+]/.test(text);
+
+/** Nunca deixa uma senha (ou usuário longo) escapar para o nome, que aparece em listas sem revelação. */
+export function safeTitle(title: string, secrets: string[]) {
+  let result = title;
+  for (const secret of secrets) {
+    if (secret.length >= 6 && result.includes(secret)) result = result.split(secret).join('');
+  }
+  result = result.replace(/[\s/:\-–]+$/g, '').trim();
+  return looksLikeSecret(result) ? '' : result;
+}
+
 export function categoryFor(text: string) {
   return CATEGORY_RULES.find(([re]) => re.test(text))?.[1] ?? 'OUTROS';
 }
@@ -112,7 +126,7 @@ export function buildSgpVaultEntries(
   return parts.map((part) => {
     const lines = part.sourceText.split('\n');
     const own = titleFrom(lines);
-    const title = own || noteTitle;
+    const title = safeTitle(own || noteTitle, [part.secret, part.username]);
     const hasCredential = Boolean(part.username || part.secret);
     const detected = categoryOf(title, part.sourceText);
     const informative = !part.host && !hasCredential && !part.ambiguous;
