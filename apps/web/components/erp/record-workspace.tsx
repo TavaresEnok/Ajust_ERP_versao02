@@ -220,7 +220,7 @@ export function RecordWorkspace({
         onRetry={() => void query.mutate()}
       />
       {record?.processInstanceId && !embedded && scope?.role !== 'analista' && (
-        <div className="mb-4 rounded-xl border border-blue-300 p-4 text-xs">
+        <div className="mb-4 rounded-xl border border-info/30 p-4 text-xs">
           Esta O.S. está vinculada a um processo de atendimento.{' '}
           <Link
             href={`${base}/processos/${String(record.processInstanceId)}`}

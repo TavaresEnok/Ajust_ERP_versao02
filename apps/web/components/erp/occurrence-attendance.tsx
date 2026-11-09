@@ -124,7 +124,7 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
             {pendingOrders.length > 0 && (
               <div
                 role="status"
-                className="mt-4 rounded-lg border border-amber-500/20 bg-amber-500/10 p-4 text-sm text-amber-800 dark:text-amber-300"
+                className="mt-4 rounded-lg border border-warning/20 bg-warning/10 p-4 text-sm text-warning"
               >
                 <p className="font-medium">
                   Este atendimento tem {pendingOrders.length} O.S. pendente(s).

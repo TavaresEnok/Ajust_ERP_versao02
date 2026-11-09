@@ -329,7 +329,7 @@ function FlowEditor({
       {error && (
         <p
           role="alert"
-          className="rounded-lg border border-red-300 bg-red-50 p-4 text-sm text-red-800"
+          className="rounded-lg border border-danger/30 bg-danger-surface p-4 text-sm text-danger"
         >
           {error}
         </p>
@@ -374,7 +374,7 @@ function FlowEditor({
         )}
       </div>
       {preview && (
-        <div className="rounded-lg border border-blue-300 p-4 text-sm">
+        <div className="rounded-lg border border-info/30 p-4 text-sm">
           <strong>Simulação visual · nenhuma gravação operacional</strong>
           <p className="my-3 text-xs">
             Escolha os resultados. A execução real exige evidências, responsáveis e validações do
@@ -1202,7 +1202,7 @@ export function OperationalExecution({
       </div>
       {!history && (
         <div
-          className={`rounded-lg border p-4 text-sm ${instance.state.mode === 'DEMO' ? 'border-amber-300 bg-amber-50 text-amber-950' : 'border-border'}`}
+          className={`rounded-lg border p-4 text-sm ${instance.state.mode === 'DEMO' ? 'border-warning/30 bg-warning-surface text-warning' : 'border-border'}`}
         >
           {instance.state.mode === 'DEMO'
             ? 'DEMONSTRAÇÃO: ordens e evidências deste processo são simuladas para experimentar o fluxo. Avisos externos não são enviados.'
@@ -1210,7 +1210,7 @@ export function OperationalExecution({
         </div>
       )}
       {instance.state.error && (
-        <div role="alert" className="rounded-lg border border-red-300 p-4 text-sm text-red-700">
+        <div role="alert" className="rounded-lg border border-danger/30 p-4 text-sm text-danger">
           {instance.state.error}
         </div>
       )}
@@ -1261,9 +1261,9 @@ export function OperationalExecution({
       {!history && (
         <section
           aria-label="Etapa atual do atendimento"
-          className="rounded-xl border-2 border-sky-500/50 bg-sky-500/5 p-5"
+          className="rounded-xl border-2 border-info/50 bg-info/5 p-5"
         >
-          <p className="text-xs font-semibold uppercase tracking-wide text-sky-700">
+          <p className="text-xs font-semibold uppercase tracking-wide text-info">
             Onde está o atendimento agora?
           </p>
           {currentStages.length ? (
@@ -1407,7 +1407,7 @@ export function OperationalExecution({
             const node = instance.definition.nodes.find((n) => n.id === step.nodeId)!;
             const order = links.find((l) => l.order.id === step.orderId)?.order;
             return (
-              <div key={step.id} className="space-y-4 rounded-lg border border-blue-300 p-4">
+              <div key={step.id} className="space-y-4 rounded-lg border border-info/30 p-4">
                 <h3 className="text-sm font-semibold">{node.name}</h3>
                 <p className="text-xs">
                   {order?.protocol} · {node.sector} · responsável:{' '}

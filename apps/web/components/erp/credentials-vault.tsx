@@ -53,29 +53,29 @@ type TypeMeta = { icon: ComponentType<{ className?: string }>; chip: string };
 const TYPE_META: Record<string, TypeMeta> = {
   DNS: {
     icon: Globe,
-    chip: 'border-purple-500/25 bg-purple-500/10 text-purple-600 dark:text-purple-300',
+    chip: 'border-info/25 bg-info/10 text-info',
   },
   OLT: {
     icon: Network,
-    chip: 'border-blue-500/25 bg-blue-500/10 text-blue-600 dark:text-blue-300',
+    chip: 'border-info/25 bg-info/10 text-info',
   },
   FIREWALL: {
     icon: Shield,
-    chip: 'border-red-500/25 bg-red-500/10 text-red-600 dark:text-red-300',
+    chip: 'border-danger/25 bg-danger/10 text-danger',
   },
   ROUTER: {
     icon: Server,
-    chip: 'border-emerald-500/25 bg-emerald-500/10 text-emerald-600 dark:text-emerald-300',
+    chip: 'border-success/25 bg-success/10 text-success',
   },
   SW: {
     icon: ArrowRightLeft,
-    chip: 'border-cyan-500/25 bg-cyan-500/10 text-cyan-600 dark:text-cyan-300',
+    chip: 'border-info/25 bg-info/10 text-info',
   },
   SISTEMA: {
     icon: AppWindow,
-    chip: 'border-pink-500/25 bg-pink-500/10 text-pink-600 dark:text-pink-300',
+    chip: 'border-info/25 bg-info/10 text-info',
   },
-  VM: { icon: Cpu, chip: 'border-amber-500/25 bg-amber-500/10 text-amber-600 dark:text-amber-300' },
+  VM: { icon: Cpu, chip: 'border-warning/25 bg-warning/10 text-warning' },
   OUTROS: { icon: KeyRound, chip: 'border-border bg-muted text-muted-foreground' },
 };
 
@@ -700,7 +700,7 @@ export function CredentialsPage() {
             </div>
           </div>
           <div className="flex items-center gap-3">
-            <span className="hidden items-center gap-1.5 rounded-full border border-emerald-500/20 bg-emerald-500/5 px-3 py-1.5 text-xs text-emerald-700 dark:text-emerald-300 md:flex">
+            <span className="hidden items-center gap-1.5 rounded-full border border-success/20 bg-success/5 px-3 py-1.5 text-xs text-success md:flex">
               <ShieldCheck className="size-3.5" />
               Consultas auditadas
             </span>
@@ -892,10 +892,8 @@ export function CredentialsPage() {
                 <div className="min-w-[640px]">
                   <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,.75fr)_90px] gap-4 bg-muted/30 px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
                     <span className="text-primary">Ativo / Equipamento</span>
-                    <span className="text-amber-700 dark:text-amber-300">
-                      Host / Endereço IP / URL
-                    </span>
-                    <span className="text-cyan-700 dark:text-cyan-300">Usuário Autenticado</span>
+                    <span className="text-warning">Host / Endereço IP / URL</span>
+                    <span className="text-info">Usuário Autenticado</span>
                     <span className="text-right">Detalhes</span>
                   </div>
                   {grouped.map(([group, rows]) => {
@@ -1199,13 +1197,13 @@ export function CredentialsPage() {
                       {
                         label: 'Host / IP / URL de acesso',
                         value: text(selected.host, 'Não informado'),
-                        color: 'text-amber-700 dark:text-amber-300',
+                        color: 'text-warning',
                         copy: 'Copiar host',
                       },
                       {
                         label: 'Usuário / login',
                         value: text(selected.username, 'Não informado'),
-                        color: 'text-cyan-700 dark:text-cyan-300',
+                        color: 'text-info',
                         copy: 'Copiar usuário',
                       },
                     ].map((field) => (
@@ -1359,7 +1357,7 @@ export function CredentialsPage() {
 
                 <Button
                   variant="outline"
-                  className="w-full border-red-500/20 text-red-600 hover:bg-red-500/5"
+                  className="w-full border-danger/20 text-danger hover:bg-danger/5"
                   onClick={() => {
                     const bytes = new Uint32Array(1);
                     crypto.getRandomValues(bytes);
@@ -1407,7 +1405,7 @@ export function CredentialsPage() {
             </Button>
             <Button
               disabled={deleteInput !== deleteChallenge || action.pending}
-              className="bg-red-600 text-white hover:bg-red-700"
+              className="bg-danger text-white hover:bg-danger"
               onClick={async () => {
                 if (!selected || deleteInput !== deleteChallenge) return;
                 try {

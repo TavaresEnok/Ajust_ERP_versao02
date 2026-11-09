@@ -500,7 +500,7 @@ function DayEditor({
             </label>
           )}
           {day.holidayName && !override?.holidayName && (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
+            <p className="text-xs text-warning">
               Feriado cadastrado no calendário: {day.holidayName}
             </p>
           )}
@@ -1003,14 +1003,14 @@ export function TeamRosterPage() {
                   Hoje
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="size-1.5 rounded-full bg-emerald-500" />
+                  <span className="size-1.5 rounded-full bg-success" />
                   Programada
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="size-1.5 rounded-full bg-amber-500" />A definir
+                  <span className="size-1.5 rounded-full bg-warning" />A definir
                 </span>
                 <span className="inline-flex items-center gap-1.5">
-                  <span className="size-1.5 rounded-full bg-violet-500" />
+                  <span className="size-1.5 rounded-full bg-info" />
                   Feriado
                 </span>
               </div>

@@ -250,7 +250,7 @@ export function AnalystOrderWork({
         )}
       </div>
       {awaitingApproval && (
-        <p role="status" className="rounded-lg border border-amber-300 p-3 text-sm">
+        <p role="status" className="rounded-lg border border-warning/30 p-3 text-sm">
           Aguardando aprovação da gestão. O resultado já foi registrado; o fechamento depende da
           aprovação do prazo excedido. Você pode acompanhar o atendimento e adicionar anotações.
         </p>
@@ -368,7 +368,7 @@ export function AnalystOrderWork({
               String(
                 (order.sourceMetadata as Record<string, unknown> | undefined)?.slaBasis || '',
               ).includes('validar política')) && (
-              <p className="mt-1 text-xs text-amber-600">
+              <p className="mt-1 text-xs text-warning">
                 Prazo padrão provisório; política do serviço pendente.
               </p>
             )}
@@ -378,17 +378,17 @@ export function AnalystOrderWork({
               Execução agendada · Fortaleza
             </span>
             {format(order.scheduledAt)}
-            {lateSchedule && <p className="text-amber-600">Horário passou sem início registrado</p>}
+            {lateSchedule && <p className="text-warning">Horário passou sem início registrado</p>}
           </div>
         </div>
       )}
       {compact && lateSchedule && (
-        <p className="rounded-lg border border-amber-500/20 bg-amber-500/10 p-3 text-xs text-amber-700 dark:text-amber-300">
+        <p className="rounded-lg border border-warning/20 bg-warning/10 p-3 text-xs text-warning">
           O horário agendado passou sem início registrado.
         </p>
       )}
       {paused && (
-        <p className="rounded-lg border border-amber-300 p-3 text-sm">
+        <p className="rounded-lg border border-warning/30 p-3 text-sm">
           Pausada desde {format(order.pausedAt)}: {String(order.pauseReason)}
         </p>
       )}
@@ -423,7 +423,7 @@ export function AnalystOrderWork({
       {confirmation && (
         <p
           role="status"
-          className="rounded-lg border border-emerald-500/20 bg-emerald-500/5 p-3 text-sm text-emerald-700 dark:text-emerald-300"
+          className="rounded-lg border border-success/20 bg-success/5 p-3 text-sm text-success"
         >
           {confirmation}
         </p>

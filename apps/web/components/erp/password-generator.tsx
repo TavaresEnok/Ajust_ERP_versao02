@@ -83,7 +83,7 @@ export function PasswordGenerator() {
               <Copy className="size-4" />
             </Button>
           </div>
-          <p className="text-center text-xs font-medium text-emerald-600">
+          <p className="text-center text-xs font-medium text-success">
             Aleatoriedade criptográfica · {length} caracteres
           </p>
           <label className="mt-3 text-sm">

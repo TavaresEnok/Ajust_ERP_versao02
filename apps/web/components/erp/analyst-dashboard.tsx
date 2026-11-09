@@ -228,8 +228,8 @@ function AnalystHistory() {
             icon: ClipboardList,
             foot: 'pendências de todo o histórico',
             focus: 'active',
-            color: 'text-blue-600 dark:text-blue-300',
-            bg: 'bg-blue-500/10',
+            color: 'text-info',
+            bg: 'bg-info/10',
           },
           {
             label: `${prefix} atrasadas`,
@@ -237,8 +237,8 @@ function AnalystHistory() {
             icon: AlertTriangle,
             foot: 'ativas com prazo de SLA excedido',
             focus: 'overdue',
-            color: 'text-rose-600 dark:text-rose-400',
-            bg: 'bg-rose-500/10',
+            color: 'text-danger',
+            bg: 'bg-danger/10',
           },
           {
             label: mine ? 'Minhas que vencem hoje' : 'Da Ajust · vencem hoje',
@@ -246,8 +246,8 @@ function AnalystHistory() {
             icon: Timer,
             foot: 'prazos de hoje, inclusive já vencidos',
             focus: 'today',
-            color: 'text-amber-600 dark:text-amber-300',
-            bg: 'bg-amber-500/10',
+            color: 'text-warning',
+            bg: 'bg-warning/10',
           },
           {
             label: mine ? 'Minhas concluídas no período' : 'Da Ajust · concluídas no período',
@@ -255,8 +255,8 @@ function AnalystHistory() {
             icon: CheckCircle2,
             foot: 'pela data de resolução ou encerramento',
             focus: 'closed',
-            color: 'text-emerald-600 dark:text-emerald-300',
-            bg: 'bg-emerald-500/10',
+            color: 'text-success',
+            bg: 'bg-success/10',
           },
         ].map((m) => (
           <button
@@ -266,14 +266,16 @@ function AnalystHistory() {
             aria-pressed={focus === m.focus}
           >
             <div className="flex items-center justify-between gap-3">
-              <span className={`text-[10px] font-semibold uppercase tracking-wider ${m.color}`}>
-                {m.label}
-              </span>
+              <span className="text-xs font-medium text-muted-foreground">{m.label}</span>
               <span className={`rounded-xl p-2 ${m.color} ${m.bg}`}>
                 <m.icon className="size-4" />
               </span>
             </div>
-            <p className={`metric-value mt-3 text-3xl font-semibold tabular-nums ${m.color}`}>
+            <p
+              className={`metric-value mt-3 text-3xl font-semibold tabular-nums ${
+                m.focus === 'overdue' && m.count > 0 ? 'text-danger' : 'text-foreground'
+              }`}
+            >
               {value(m.count)}
             </p>
             <p className="mt-2 text-[11px] text-muted-foreground">{m.foot}</p>
@@ -292,7 +294,7 @@ function AnalystHistory() {
                 Abertas
               </span>
               <span className="flex items-center gap-1">
-                <i className="size-2 rounded-full bg-emerald-500" />
+                <i className="size-2 rounded-full bg-success" />
                 Concluídas
               </span>
             </div>
@@ -301,7 +303,7 @@ function AnalystHistory() {
             <ChartContainer
               config={{
                 opened: { label: 'Abertas', color: 'var(--chart-1)' },
-                closed: { label: 'Concluídas', color: '#10b981' },
+                closed: { label: 'Concluídas', color: 'var(--success)' },
               }}
               className="h-[235px] w-full aspect-auto px-3"
             >

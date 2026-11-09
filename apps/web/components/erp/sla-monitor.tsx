@@ -230,7 +230,7 @@ export function SlaPage() {
                       </td>
                       <td>
                         <span
-                          className={`text-xs font-medium ${situation === 'Atrasada' ? 'text-rose-600 dark:text-rose-400' : situation === 'Vence em até 2h' ? 'text-amber-600 dark:text-amber-400' : 'text-muted-foreground'}`}
+                          className={`text-xs font-medium ${situation === 'Atrasada' ? 'text-danger' : situation === 'Vence em até 2h' ? 'text-warning' : 'text-muted-foreground'}`}
                         >
                           {situation}
                         </span>
