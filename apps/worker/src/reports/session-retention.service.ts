@@ -24,4 +24,28 @@ export class SessionRetentionService {
       removed += result.count;
     }
   }
+
+  /**
+   * Eventos do outbox do ciclo da O.S. já processados saem depois de N dias (padrão 90),
+   * para a busca de pendentes continuar leve. Pendentes e com erro nunca são apagados.
+   */
+  async purgeLifecycleEvents(now = new Date()) {
+    const configured = Number(process.env.LIFECYCLE_EVENT_RETENTION_DAYS || 90);
+    const days = Number.isInteger(configured) && configured >= 7 ? configured : 90;
+    const cutoff = new Date(now.getTime() - days * 86400000);
+    let removed = 0;
+    while (true) {
+      const batch = await this.prisma.serviceOrderLifecycleEvent.findMany({
+        where: { processedAt: { lt: cutoff } },
+        orderBy: { id: 'asc' },
+        take: 500,
+        select: { id: true },
+      });
+      if (!batch.length) return { removed };
+      const result = await this.prisma.serviceOrderLifecycleEvent.deleteMany({
+        where: { processedAt: { lt: cutoff }, id: { in: batch.map((row) => row.id) } },
+      });
+      removed += result.count;
+    }
+  }
 }
