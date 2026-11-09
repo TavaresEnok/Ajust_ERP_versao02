@@ -318,7 +318,10 @@ function WorkflowDraft({
                   </article>
                 ))
               ) : (
-                <ErpEmpty />
+                <p className="rounded-lg border border-dashed border-border p-6 text-center text-sm text-muted-foreground">
+                  Nenhum evento ou ação ainda. Use “Adicionar evento, condição ou ação” ou comece
+                  pela automação pronta acima.
+                </p>
               )}
               <div className="flex items-center justify-between border-t border-border pt-4">
                 <h3 className="section-title">Conexões</h3>
@@ -365,7 +368,7 @@ function WorkflowDraft({
             </div>
           </section>
           <section
-            className="panel h-fit p-5"
+            className="panel h-fit p-5 [&_.form-grid]:grid-cols-1!"
             onChangeCapture={(event) => {
               const target = event.target;
               if (

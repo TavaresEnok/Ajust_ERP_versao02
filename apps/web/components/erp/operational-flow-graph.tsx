@@ -21,6 +21,7 @@ export function OperationalFlowGraph({
   states,
   annotations,
   className = 'h-[360px]',
+  minFitZoom,
 }: {
   definition: FlowDefinition;
   active?: string[];
@@ -31,6 +32,8 @@ export function OperationalFlowGraph({
   states?: Record<string, TrackingStatus>;
   /** Altura do quadro (o editor de fluxos usa um quadro maior). */
   className?: string;
+  /** Zoom mínimo ao enquadrar: no editor, prioriza ler os nomes em vez de ver tudo de uma vez. */
+  minFitZoom?: number;
   annotations?: Record<string, string>;
 }) {
   const { dark } = useAppTheme();
@@ -68,7 +71,7 @@ export function OperationalFlowGraph({
                   ? 'ESPERA OS PARALELOS'
                   : 'FIM'}
           </small>
-          <div className="my-1 font-semibold">{n.name}</div>
+          <div className="my-1 text-[15px] leading-snug font-semibold">{n.name}</div>
           {states && (
             <p className="my-2 text-xs font-semibold">{labels[states[n.id] || 'PENDING']}</p>
           )}
@@ -150,7 +153,7 @@ export function OperationalFlowGraph({
         edges={edges}
         colorMode={dark ? 'dark' : 'light'}
         fitView
-        fitViewOptions={{ padding: 0.15, maxZoom: 1 }}
+        fitViewOptions={{ padding: 0.15, maxZoom: 1, minZoom: minFitZoom }}
         minZoom={0.1}
         maxZoom={2}
         nodesDraggable={!!onChange}

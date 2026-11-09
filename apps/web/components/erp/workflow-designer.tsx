@@ -5,13 +5,21 @@
  * (próxima etapa, entregas paralelas, validação, simulação e publicação) são as mesmas
  * do editor anterior; só a apresentação mudou.
  */
-import { useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
 import { toast } from 'sonner';
 import { ArrowLeft, GitBranch, Plus, Trash2, Workflow } from 'lucide-react';
 import { Button } from '@/components/ui/button';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '@/components/ui/dialog';
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import { orderTypes } from '@/lib/erp/contracts';
 import {
@@ -113,6 +121,8 @@ const ROLE_LABEL: Record<string, string> = {
 
 export function WorkflowsHub({ id }: { id?: string }) {
   const [tab, setTab] = useState(id && !/^(ATEND_|AJUST_)/.test(id) ? 'events' : 'operational');
+  const [dirty, setDirty] = useState(false);
+  const [pendingTab, setPendingTab] = useState<string | null>(null);
   return (
     <>
       <div
@@ -131,7 +141,7 @@ export function WorkflowsHub({ id }: { id?: string }) {
             type="button"
             role="tab"
             aria-selected={tab === value}
-            onClick={() => setTab(value)}
+            onClick={() => (dirty && value !== tab ? setPendingTab(value) : setTab(value))}
             className={`rounded-md px-3 py-1.5 transition-colors ${
               tab === value
                 ? 'bg-muted font-medium text-foreground'
@@ -143,21 +153,36 @@ export function WorkflowsHub({ id }: { id?: string }) {
         ))}
       </div>
       {tab === 'operational' ? (
-        <OperationalTemplates code={id && /^(ATEND_|AJUST_)/.test(id) ? id : undefined} />
+        <OperationalTemplates
+          code={id && /^(ATEND_|AJUST_)/.test(id) ? id : undefined}
+          onDirtyChange={setDirty}
+        />
       ) : (
-        <>
-          <p className="mb-5 text-sm text-muted-foreground">
-            Automatize respostas a eventos, como solicitar uma pesquisa após fechar uma O.S. As
-            etapas de trabalho da equipe ficam em Fluxos de atendimento.
-          </p>
-          <WorkflowsPage id={id?.startsWith('ATEND_') ? undefined : id} />
-        </>
+        <WorkflowsPage id={id?.startsWith('ATEND_') ? undefined : id} />
       )}
+      <ConfirmDialog
+        open={pendingTab !== null}
+        title="Sair sem salvar?"
+        description="As alterações deste fluxo ainda não foram salvas e serão perdidas."
+        confirm="Sair sem salvar"
+        onCancel={() => setPendingTab(null)}
+        onConfirm={() => {
+          setDirty(false);
+          setTab(pendingTab!);
+          setPendingTab(null);
+        }}
+      />
     </>
   );
 }
 
-function OperationalTemplates({ code }: { code?: string }) {
+function OperationalTemplates({
+  code,
+  onDirtyChange,
+}: {
+  code?: string;
+  onDirtyChange: (dirty: boolean) => void;
+}) {
   const { scope } = useErp();
   const router = useRouter();
   const manager = ['super_admin', 'gerente'].includes(scope?.role || '');
@@ -178,8 +203,13 @@ function OperationalTemplates({ code }: { code?: string }) {
         template={row}
         revision={row?.version || 0}
         manager={manager}
-        services={(catalog.data || []).filter((s) => s.workflowTemplateCode === (row?.code || ''))}
-        onBack={() => open()}
+        catalog={catalog.data || []}
+        onCatalogChanged={async () => void (await catalog.mutate())}
+        onDirtyChange={onDirtyChange}
+        onBack={() => {
+          onDirtyChange(false);
+          open();
+        }}
         onSaved={async (savedCode) => {
           await query.mutate();
           if (fresh) open(savedCode);
@@ -295,7 +325,9 @@ function FlowEditor({
   template,
   revision,
   manager,
-  services,
+  catalog,
+  onCatalogChanged,
+  onDirtyChange,
   onBack,
   onSaved,
 }: {
@@ -303,7 +335,9 @@ function FlowEditor({
   template?: FlowTemplate;
   revision: number;
   manager: boolean;
-  services: CatalogItem[];
+  catalog: CatalogItem[];
+  onCatalogChanged: () => Promise<void>;
+  onDirtyChange: (dirty: boolean) => void;
   onBack: () => void;
   onSaved: (code: string) => Promise<void>;
 }) {
@@ -319,6 +353,31 @@ function FlowEditor({
   const simulation = useMemo(() => simulateFlow(draft, decisions), [draft, decisions]);
   const routes = Object.entries(node.routes);
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(initial), [draft, initial]);
+  const [confirm, setConfirm] = useState<'leave' | 'publish' | null>(null);
+  const services = catalog.filter((s) => s.workflowTemplateCode === draft.code);
+  const others = catalog.filter((s) => s.workflowTemplateCode !== draft.code);
+  // Avisa o resto da página e o navegador (fechar/recarregar) enquanto houver alterações.
+  useEffect(() => {
+    onDirtyChange(dirty);
+    if (!dirty) return;
+    const warn = (event: BeforeUnloadEvent) => event.preventDefault();
+    window.addEventListener('beforeunload', warn);
+    return () => window.removeEventListener('beforeunload', warn);
+  }, [dirty, onDirtyChange]);
+  async function linkService(id: string) {
+    setError('');
+    try {
+      await action.execute({
+        path: `/service-catalog/${id}`,
+        method: 'PUT',
+        body: { workflowTemplateCode: draft.code },
+      });
+      await onCatalogChanged();
+      toast.success('Serviço vinculado a este fluxo');
+    } catch (e) {
+      setError(errorText(e));
+    }
+  }
   const canAddNext = node.kind === 'task' && routes.length === 1;
   const canAddParallel =
     node.kind === 'task' &&
@@ -488,7 +547,12 @@ function FlowEditor({
     <div className="flex flex-col gap-4">
       {/* Barra do fluxo inteiro: nome, situação e ações que valem para todas as etapas. */}
       <header className="panel sticky top-2 z-20 flex flex-wrap items-center gap-3 p-3">
-        <Button variant="ghost" size="sm" onClick={onBack} aria-label="Voltar para a lista">
+        <Button
+          variant="ghost"
+          size="sm"
+          onClick={() => (dirty ? setConfirm('leave') : onBack())}
+          aria-label="Voltar para a lista"
+        >
           <ArrowLeft />
           Fluxos
         </Button>
@@ -529,19 +593,40 @@ function FlowEditor({
               >
                 Salvar rascunho
               </Button>
-              <Button size="sm" disabled={action.pending} onClick={() => void save(true)}>
+              <Button size="sm" disabled={action.pending} onClick={() => setConfirm('publish')}>
                 Publicar
               </Button>
             </>
           )}
         </div>
       </header>
-      <p className="px-1 text-xs text-muted-foreground">
-        {services.length
-          ? `Usado por: ${services.map((s) => s.name).join(', ')}. `
-          : 'Ainda não vinculado a um serviço do catálogo. '}
-        Publicar vale para novas O.S.; atendimentos em andamento mantêm a versão em que começaram.
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-2 px-1 text-xs text-muted-foreground">
+        <span>
+          {services.length
+            ? `Usado por: ${services.map((s) => s.name).join(', ')}.`
+            : 'Ainda não vinculado a um serviço do catálogo.'}
+        </span>
+        {manager && template?.publishedAt && others.length > 0 && (
+          <select
+            aria-label="Vincular um serviço do catálogo a este fluxo"
+            className="native-select h-8 w-auto py-0 text-xs"
+            value=""
+            disabled={action.pending}
+            onChange={(e) => e.target.value && void linkService(e.target.value)}
+          >
+            <option value="">Vincular um serviço…</option>
+            {others.map((s) => (
+              <option key={s.id} value={s.id}>
+                {s.name}
+                {s.workflowTemplateCode ? ' (troca o fluxo atual dele)' : ''}
+              </option>
+            ))}
+          </select>
+        )}
+        {manager && !template?.publishedAt && (
+          <span>Publique o fluxo para poder vincular um serviço.</span>
+        )}
+      </div>
       {error && (
         <p
           role="alert"
@@ -577,6 +662,7 @@ function FlowEditor({
           )}
           <Graph
             className="h-[520px]"
+            minFitZoom={0.7}
             definition={draft}
             selected={selected}
             onSelect={setSelected}
@@ -946,6 +1032,33 @@ function FlowEditor({
           )}
         </aside>
       </div>
+      <ConfirmDialog
+        open={confirm === 'leave'}
+        title="Sair sem salvar?"
+        description="As alterações deste fluxo ainda não foram salvas e serão perdidas."
+        confirm="Sair sem salvar"
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          setConfirm(null);
+          onBack();
+        }}
+      />
+      <ConfirmDialog
+        open={confirm === 'publish'}
+        title="Publicar esta versão?"
+        description={
+          (services.length
+            ? `Novas O.S. de ${services.map((s) => s.name).join(', ')} passam a seguir esta versão. `
+            : 'O fluxo ainda não está vinculado a nenhum serviço; depois de publicar, vincule um. ') +
+          'Atendimentos em andamento continuam na versão em que começaram.'
+        }
+        confirm="Publicar"
+        onCancel={() => setConfirm(null)}
+        onConfirm={() => {
+          setConfirm(null);
+          void save(true);
+        }}
+      />
     </div>
   );
 }
@@ -1012,5 +1125,38 @@ function SimulationPanel({
         </Button>
       </div>
     </>
+  );
+}
+
+function ConfirmDialog({
+  open,
+  title,
+  description,
+  confirm,
+  onConfirm,
+  onCancel,
+}: {
+  open: boolean;
+  title: string;
+  description: string;
+  confirm: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  return (
+    <Dialog open={open} onOpenChange={(value) => !value && onCancel()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
+        </DialogHeader>
+        <DialogFooter>
+          <Button variant="outline" onClick={onCancel}>
+            Cancelar
+          </Button>
+          <Button onClick={onConfirm}>{confirm}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }
