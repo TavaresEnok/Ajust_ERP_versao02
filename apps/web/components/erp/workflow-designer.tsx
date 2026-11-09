@@ -39,7 +39,12 @@ const Graph = dynamic(
 const endpoint = '/service-processes/operational';
 const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Falha na operação');
 type Person = { id: string; name: string; role: string; accessBlocked: boolean };
-type CatalogItem = { id: string; name: string; workflowTemplateCode?: string | null };
+type CatalogItem = {
+  id: string;
+  name: string;
+  workflowTemplateCode?: string | null;
+  active?: boolean;
+};
 
 // Draft identifiers are not credentials. getRandomValues also works on the HTTP pilot address,
 // whereas randomUUID is available only in secure browser contexts.
@@ -354,8 +359,10 @@ function FlowEditor({
   const routes = Object.entries(node.routes);
   const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(initial), [draft, initial]);
   const [confirm, setConfirm] = useState<'leave' | 'publish' | null>(null);
+  // Serviço que já segue outro fluxo: trocar exige confirmação.
+  const [pendingLink, setPendingLink] = useState<CatalogItem | null>(null);
   const services = catalog.filter((s) => s.workflowTemplateCode === draft.code);
-  const others = catalog.filter((s) => s.workflowTemplateCode !== draft.code);
+  const others = catalog.filter((s) => s.workflowTemplateCode !== draft.code && s.active !== false);
   // Avisa o resto da página e o navegador (fechar/recarregar) enquanto houver alterações.
   useEffect(() => {
     onDirtyChange(dirty);
@@ -612,13 +619,18 @@ function FlowEditor({
             className="native-select h-8 w-auto py-0 text-xs"
             value=""
             disabled={action.pending}
-            onChange={(e) => e.target.value && void linkService(e.target.value)}
+            onChange={(e) => {
+              const chosen = others.find((s) => s.id === e.target.value);
+              if (!chosen) return;
+              if (chosen.workflowTemplateCode) setPendingLink(chosen);
+              else void linkService(chosen.id);
+            }}
           >
             <option value="">Vincular um serviço…</option>
             {others.map((s) => (
               <option key={s.id} value={s.id}>
                 {s.name}
-                {s.workflowTemplateCode ? ' (troca o fluxo atual dele)' : ''}
+                {s.workflowTemplateCode ? ' · já usa outro fluxo' : ''}
               </option>
             ))}
           </select>
@@ -1041,6 +1053,18 @@ function FlowEditor({
         onConfirm={() => {
           setConfirm(null);
           onBack();
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingLink}
+        title="Trocar o fluxo deste serviço?"
+        description={`“${pendingLink?.name}” hoje segue o fluxo ${pendingLink?.workflowTemplateCode}. Se confirmar, as próximas O.S. desse serviço passam a seguir “${draft.name}”. Atendimentos em andamento não mudam.`}
+        confirm="Trocar fluxo"
+        onCancel={() => setPendingLink(null)}
+        onConfirm={() => {
+          const id = pendingLink!.id;
+          setPendingLink(null);
+          void linkService(id);
         }}
       />
       <ConfirmDialog
