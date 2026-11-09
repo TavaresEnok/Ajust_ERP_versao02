@@ -182,7 +182,7 @@ export function WorkflowNodeForm({
                 },
               ]
             : configFields),
-          ...positions,
+          ...(raw ? positions : []),
         ]}
         values={{
           ...initial?.config,
@@ -213,7 +213,10 @@ export function WorkflowNodeForm({
             type,
             subtype,
             config,
-            position: { x: Number(x), y: Number(y) },
+            position: {
+              x: x === undefined ? initial?.position.x || 0 : Number(x),
+              y: y === undefined ? initial?.position.y || 0 : Number(y),
+            },
           });
         }}
       />

@@ -1,5 +1,6 @@
 'use client';
 import { useState } from 'react';
+import Link from 'next/link';
 import { Plus } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
@@ -34,7 +35,7 @@ const days = [
   'Sábado',
 ];
 type CalendarDay = { isWorkDay: boolean; startTime: string; endTime: string };
-export function SlaWorkspace() {
+export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: string }) {
   const { scope } = useErp();
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   const policies = useErpQuery<ErpRecord[]>(manager ? '/sla-policies' : null);
@@ -75,10 +76,14 @@ export function SlaWorkspace() {
     <>
       <PageHeading
         title="Calendário e regras de SLA"
-        description="Políticas, dias úteis, exceções e simulação pelo motor original do ERP."
-      />
+        description="Defina os prazos por tipo de serviço, ajuste os dias de atendimento e confira o cálculo antes de usar."
+      >
+        <Link className="text-link" href="/gerencia/sla">
+          Acompanhar prazos da equipe →
+        </Link>
+      </PageHeading>
       {!calendar.connected && <ConnectionNotice />}
-      <Tabs defaultValue="Monitoramento" className="gap-5">
+      <Tabs defaultValue={initialTab} className="gap-5">
         <div className="overflow-x-auto">
           <TabsList variant="line">
             {['Monitoramento', 'Políticas', 'Calendário comercial', 'Exceções', 'Simulação'].map(
@@ -111,7 +116,7 @@ export function SlaWorkspace() {
           <section className="panel">
             <PanelHeading
               title="Prazos por tipo de serviço"
-              description="O prazo do tipo vale para todos os provedores e prioridades. Serviços sem política usam o padrão provisório de 48 horas úteis; revise com a gestão."
+              description="O prazo do tipo vale para todos os provedores e prioridades. A mudança aplica-se ao cálculo de novas O.S.; prazos já registrados não mudam automaticamente. Sem política, o padrão é 48 horas úteis."
             >
               {manager && (
                 <Button
@@ -379,6 +384,13 @@ export function SlaWorkspace() {
             connected={action.connected && manager}
             pending={action.pending}
             draft={!action.connected}
+            label={
+              dialog === 'policy'
+                ? 'Salvar política de SLA'
+                : dialog === 'day'
+                  ? 'Salvar dia de atendimento'
+                  : 'Salvar exceção'
+            }
             onSubmit={async (values) => {
               if (dialog === 'policy') {
                 if (!Number.isInteger(values.hours)) throw new Error('O prazo deve ser inteiro.');

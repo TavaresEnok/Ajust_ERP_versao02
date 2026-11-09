@@ -3,7 +3,7 @@ import { useRef, useState } from 'react';
 import { toast } from 'sonner';
 import Link from 'next/link';
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
-import { errorMessage, type ErpRecord } from '@/lib/erp/contracts';
+import { ErpError, errorMessage, type ErpRecord } from '@/lib/erp/contracts';
 import type { FlowInstance } from '@/lib/erp/operational-flow';
 import { useRouteBase } from '@/lib/erp/visual-data';
 import { useOrderDraft } from '@/lib/erp/order-draft';
@@ -35,6 +35,7 @@ export function AnalystOrderWork({
   const text = draft.text;
   const setText = (text: string) => setDraft({ text });
   const [error, setError] = useState('');
+  const [refreshRequired, setRefreshRequired] = useState(false);
   const [confirmation, setConfirmation] = useState('');
   const [working, setWorking] = useState(false);
   const inFlight = useRef(false);
@@ -100,6 +101,16 @@ export function AnalystOrderWork({
       workflowBlocked ||
       roleBlocked);
   const closed = ['FECHADA', 'CANCELADA'].includes(String(order.status));
+  const awaitingApproval =
+    order.status === 'RESOLVIDA' &&
+    !!order.requiresApproval &&
+    ['ALTA', 'CRITICA'].includes(String(order.priority)) &&
+    new Date(String(order.deadlineAt)).getTime() < new Date(String(order.resolvedAt)).getTime();
+  const pendingOrders = (
+    process.data?.orders ||
+    process.data?.links?.map((link) => link.order) ||
+    []
+  ).filter((item) => item.id !== order.id && !['FECHADA', 'CANCELADA'].includes(item.status));
   const paused = !!order.pausedAt;
   const primaryAction = paused ? 'resume' : order.status === 'ABERTA' ? 'start' : 'finish';
   const finishAssignedElsewhere =
@@ -133,6 +144,7 @@ export function AnalystOrderWork({
     setWorking(true);
     try {
       setError('');
+      setRefreshRequired(false);
       setConfirmation('');
       const updated = await action.execute<ErpRecord>({
         path: `/service-orders/${order.id}/operations`,
@@ -177,10 +189,10 @@ export function AnalystOrderWork({
           ? 'Execução iniciada. A O.S. está em andamento.'
           : operation === 'finish'
             ? updated.status === 'FECHADA'
-              ? order.processInstanceId
-                ? 'O.S. encerrada. O fluxo seguirá as próximas etapas configuradas.'
-                : 'O.S. encerrada. Resultado registrado no atendimento.'
-              : 'Etapa registrada. A O.S. continua no fluxo de atendimento.'
+              ? 'O.S. encerrada. Resultado registrado no atendimento.'
+              : updated.status === 'RESOLVIDA'
+                ? 'Resultado registrado. A O.S. aguarda aprovação da gestão para o fechamento.'
+                : 'Etapa registrada. A O.S. continua no fluxo de atendimento.'
             : 'Alteração registrada com sucesso.';
       setConfirmation(message);
       toast.success(message);
@@ -192,7 +204,30 @@ export function AnalystOrderWork({
         );
       }
     } catch (e) {
-      setError(errorMessage(e));
+      const conflict = e instanceof ErpError && [409, 412].includes(e.status || 0);
+      setRefreshRequired(conflict);
+      setError(
+        conflict
+          ? 'A situação desta O.S. mudou. Atualize os dados e confira as regras antes de tentar novamente. Seu rascunho foi preservado nesta aba.'
+          : errorMessage(e),
+      );
+    } finally {
+      inFlight.current = false;
+      setWorking(false);
+    }
+  }
+  async function refreshAfterConflict() {
+    if (inFlight.current) return;
+    inFlight.current = true;
+    setWorking(true);
+    try {
+      await Promise.all([refresh(), process.mutate()]);
+      setError('');
+      setRefreshRequired(false);
+    } catch {
+      setError(
+        'Não foi possível atualizar os dados. Tente novamente; o rascunho continua salvo nesta aba.',
+      );
     } finally {
       inFlight.current = false;
       setWorking(false);
@@ -214,7 +249,54 @@ export function AnalystOrderWork({
           </Link>
         )}
       </div>
-      {!!order.processInstanceId && !closed && (
+      {awaitingApproval && (
+        <p role="status" className="rounded-lg border border-amber-300 p-3 text-sm">
+          Aguardando aprovação da gestão. O resultado já foi registrado; o fechamento depende da
+          aprovação do prazo excedido. Você pode acompanhar o atendimento e adicionar anotações.
+        </p>
+      )}
+      {order.status === 'FECHADA' && !!order.processInstanceId && (
+        <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-4 text-sm">
+          <QueryState
+            loading={process.isLoading}
+            error={process.error}
+            onRetry={() => void process.mutate()}
+          />
+          {process.data &&
+            !process.error &&
+            (pendingOrders.length ? (
+              <>
+                <h3 className="font-semibold">Próximas entregas do atendimento</h3>
+                <p>
+                  Esta O.S. foi encerrada. Ainda há {pendingOrders.length} O.S. pendente(s) no
+                  fluxo. O atendimento continua aberto até concluir todas as entregas.
+                </p>
+                <ul className="space-y-2">
+                  {pendingOrders.map((item) => (
+                    <li key={item.id}>
+                      <Link className="text-link" href={`${base}/ordens/${item.id}`}>
+                        {item.title} →
+                      </Link>
+                      <span className="block text-xs text-muted-foreground">
+                        Responsável: {item.analystName || 'A definir'}
+                      </span>
+                    </li>
+                  ))}
+                </ul>
+              </>
+            ) : process.data.status === 'COMPLETED' ? (
+              <p role="status">
+                Fluxo de atendimento concluído. Todas as entregas deste fluxo foram encerradas.
+              </p>
+            ) : (
+              <p>
+                Esta O.S. está encerrada. Consulte o atendimento completo para acompanhar a situação
+                das demais etapas.
+              </p>
+            ))}
+        </div>
+      )}
+      {!!order.processInstanceId && !closed && !awaitingApproval && (
         <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-4 text-sm">
           <h3 className="font-semibold">Etapa do fluxo de atendimento</h3>
           <QueryState
@@ -268,7 +350,9 @@ export function AnalystOrderWork({
                   ? 'Pausada com justificativa'
                   : order.status === 'ABERTA'
                     ? 'Aberta · aguardando início'
-                    : 'Em andamento'}
+                    : awaitingApproval
+                      ? 'Aguardando aprovação da gestão'
+                      : 'Em andamento'}
             </p>
             {!closed && !paused && node?.name && (
               <p className="mt-1 text-xs text-muted-foreground">{node.name}</p>
@@ -323,9 +407,18 @@ export function AnalystOrderWork({
         </div>
       )}
       {error && (
-        <p role="alert" className="text-sm text-danger">
-          {error}
-        </p>
+        <div role="alert" className="space-y-3 text-sm">
+          <p className="text-danger">{error}</p>
+          {refreshRequired && (
+            <Button
+              variant="outline"
+              disabled={working || action.pending}
+              onClick={() => void refreshAfterConflict()}
+            >
+              Atualizar dados mantendo rascunho
+            </Button>
+          )}
+        </div>
       )}
       {confirmation && (
         <p
@@ -409,9 +502,10 @@ export function AnalystOrderWork({
               </div>
             </details>
           </div>
-          {mode !== 'start' && !(mode === 'finish' && finishAssignedElsewhere) && (
-            <h3 className="text-sm font-semibold">{labels[mode]}</h3>
-          )}
+          {mode !== 'start' &&
+            !(mode === 'finish' && (finishAssignedElsewhere || awaitingApproval)) && (
+              <h3 className="text-sm font-semibold">{labels[mode]}</h3>
+            )}
           {mode === 'schedule' && (
             <label className="block text-sm">
               Data e horário de execução · Fortaleza
@@ -493,20 +587,23 @@ export function AnalystOrderWork({
               </label>
             </div>
           )}
-          {mode === 'finish' && !finishAssignedElsewhere && outcomes.length > 1 && (
-            <select
-              aria-label="Resultado do atendimento"
-              className="native-select w-full"
-              value={outcome}
-              onChange={(e) => setOutcome(e.target.value)}
-            >
-              <option value="">Selecione o resultado</option>
-              {outcomes.map((o) => (
-                <option key={o}>{o}</option>
-              ))}
-            </select>
-          )}
-          {mode === 'finish' && !finishAssignedElsewhere && node && (
+          {mode === 'finish' &&
+            !finishAssignedElsewhere &&
+            !awaitingApproval &&
+            outcomes.length > 1 && (
+              <select
+                aria-label="Resultado do atendimento"
+                className="native-select w-full"
+                value={outcome}
+                onChange={(e) => setOutcome(e.target.value)}
+              >
+                <option value="">Selecione o resultado</option>
+                {outcomes.map((o) => (
+                  <option key={o}>{o}</option>
+                ))}
+              </select>
+            )}
+          {mode === 'finish' && !finishAssignedElsewhere && !awaitingApproval && node && (
             <p className="rounded-lg bg-secondary/40 p-3 text-sm" role="note">
               {selectedOutcome ? (
                 <>
@@ -521,72 +618,73 @@ export function AnalystOrderWork({
               )}
             </p>
           )}
-          {mode !== 'start' && !(mode === 'finish' && finishAssignedElsewhere) && (
-            <>
-              {hasRequirements &&
-                node!.requiredFields.map((field) => (
-                  <label key={`${step?.id}-${field}`} className="block text-sm">
-                    {field} *
-                    <textarea
-                      aria-label={`Evidência: ${field}`}
-                      className="mt-2 min-h-24 w-full rounded-lg border border-border bg-card p-3 text-sm"
-                      maxLength={20000}
-                      value={evidence[field] || ''}
-                      onChange={(event) =>
-                        setEvidenceByStep((current) => ({
-                          ...current,
-                          [step!.id]: { ...current[step!.id], [field]: event.target.value },
-                        }))
-                      }
-                    />
-                  </label>
-                ))}
-              <label className="block text-sm">
-                {hasRequirements
-                  ? 'Observações adicionais (opcional)'
-                  : mode === 'finish'
-                    ? node && !closesOrder
-                      ? 'Registro e evidências da etapa'
-                      : 'Solução e resultado do atendimento'
-                    : mode === 'assign'
-                      ? 'O que foi feito e o que falta para o próximo analista'
-                      : 'Justificativa e orientações'}
-                <textarea
-                  aria-label="Registro do atendimento"
-                  maxLength={20000}
-                  className="mt-2 min-h-28 w-full rounded-lg border border-border bg-card p-3 text-sm"
-                  value={text}
-                  onChange={(e) => setText(e.target.value)}
-                />
-              </label>
-              <p className="text-xs text-muted-foreground">
-                {text.length.toLocaleString('pt-BR')} / 20.000 caracteres · Para backups extensos,
-                use Anexos.{' '}
-                {hasRequirements
-                  ? 'Preencha cada evidência obrigatória.'
-                  : 'Mínimo de 3 caracteres para confirmar.'}
-              </p>
-              <Button
-                disabled={
-                  working ||
-                  action.pending ||
-                  recordText.trim().length < 3 ||
-                  missingEvidence ||
-                  (paused && !['resume', 'assign', 'schedule', 'unschedule'].includes(mode)) ||
-                  (mode === 'schedule' && !schedule) ||
-                  (mode === 'schedule' &&
-                    maintenance &&
-                    (impact.trim().length < 3 || rollback.trim().length < 3)) ||
-                  (mode === 'assign' && (!assignee || people.isLoading || !!people.error)) ||
-                  (mode === 'finish' && outcomes.length > 1 && !outcome) ||
-                  (mode === 'finish' && (finishUnavailable || finishAssignedElsewhere))
-                }
-                onClick={() => void submit()}
-              >
-                {working ? 'Salvando…' : labels[mode]}
-              </Button>
-            </>
-          )}
+          {mode !== 'start' &&
+            !(mode === 'finish' && (finishAssignedElsewhere || awaitingApproval)) && (
+              <>
+                {hasRequirements &&
+                  node!.requiredFields.map((field) => (
+                    <label key={`${step?.id}-${field}`} className="block text-sm">
+                      {field} *
+                      <textarea
+                        aria-label={`Evidência: ${field}`}
+                        className="mt-2 min-h-24 w-full rounded-lg border border-border bg-card p-3 text-sm"
+                        maxLength={20000}
+                        value={evidence[field] || ''}
+                        onChange={(event) =>
+                          setEvidenceByStep((current) => ({
+                            ...current,
+                            [step!.id]: { ...current[step!.id], [field]: event.target.value },
+                          }))
+                        }
+                      />
+                    </label>
+                  ))}
+                <label className="block text-sm">
+                  {hasRequirements
+                    ? 'Observações adicionais (opcional)'
+                    : mode === 'finish'
+                      ? node && !closesOrder
+                        ? 'Registro e evidências da etapa'
+                        : 'Solução e resultado do atendimento'
+                      : mode === 'assign'
+                        ? 'O que foi feito e o que falta para o próximo analista'
+                        : 'Justificativa e orientações'}
+                  <textarea
+                    aria-label="Registro do atendimento"
+                    maxLength={20000}
+                    className="mt-2 min-h-28 w-full rounded-lg border border-border bg-card p-3 text-sm"
+                    value={text}
+                    onChange={(e) => setText(e.target.value)}
+                  />
+                </label>
+                <p className="text-xs text-muted-foreground">
+                  {text.length.toLocaleString('pt-BR')} / 20.000 caracteres · Para backups extensos,
+                  use Anexos.{' '}
+                  {hasRequirements
+                    ? 'Preencha cada evidência obrigatória.'
+                    : 'Mínimo de 3 caracteres para confirmar.'}
+                </p>
+                <Button
+                  disabled={
+                    working ||
+                    action.pending ||
+                    recordText.trim().length < 3 ||
+                    missingEvidence ||
+                    (paused && !['resume', 'assign', 'schedule', 'unschedule'].includes(mode)) ||
+                    (mode === 'schedule' && !schedule) ||
+                    (mode === 'schedule' &&
+                      maintenance &&
+                      (impact.trim().length < 3 || rollback.trim().length < 3)) ||
+                    (mode === 'assign' && (!assignee || people.isLoading || !!people.error)) ||
+                    (mode === 'finish' && outcomes.length > 1 && !outcome) ||
+                    (mode === 'finish' && (finishUnavailable || finishAssignedElsewhere))
+                  }
+                  onClick={() => void submit()}
+                >
+                  {working ? 'Salvando…' : labels[mode]}
+                </Button>
+              </>
+            )}
         </>
       )}
       {closed && (

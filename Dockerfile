@@ -1,5 +1,5 @@
 # syntax=docker/dockerfile:1.4
-FROM node:20-alpine AS base
+FROM node:22-alpine AS base
 ENV PNPM_HOME="/pnpm"
 ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
@@ -16,13 +16,13 @@ RUN pnpm exec prisma generate --schema prisma/schema.prisma
 RUN pnpm build
 # Após o build da web, copia os arquivos estáticos para standalone
 # (O Next.js output: standalone cria um server.js próprio que precisa do public e static)
-RUN cp -r apps/web/public apps/web/.next/standalone/apps/web/public || true
-RUN cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static || true
+RUN cp -r apps/web/public apps/web/.next/standalone/apps/web/public
+RUN cp -r apps/web/.next/static apps/web/.next/standalone/apps/web/.next/static
 
 # -----------------
 # 1. API RUNNER
 # -----------------
-FROM node:20-alpine AS api
+FROM node:22-alpine AS api
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/apps/api/node_modules ./apps/api/node_modules
@@ -44,7 +44,7 @@ CMD ["./start-api.sh"]
 # -----------------
 # 2. WORKER RUNNER
 # -----------------
-FROM node:20-alpine AS worker
+FROM node:22-alpine AS worker
 WORKDIR /app
 COPY --from=builder --chown=node:node /app/node_modules ./node_modules
 COPY --from=builder --chown=node:node /app/apps/worker/node_modules ./apps/worker/node_modules
@@ -60,7 +60,7 @@ CMD ["node", "apps/worker/dist/main.js"]
 # -----------------
 # 3. WEB RUNNER
 # -----------------
-FROM node:20-alpine AS web
+FROM node:22-alpine AS web
 WORKDIR /app
 ENV NODE_ENV=production
 # Next standalone escuta em $HOSTNAME: 0.0.0.0 atende a rede e o healthcheck local.

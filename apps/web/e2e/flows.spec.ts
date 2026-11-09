@@ -16,7 +16,9 @@ test.describe('Portal da gerência', () => {
   test('dashboard identifica a sessão', async ({ page }) => {
     await page.goto('/');
     await expect(page).toHaveURL(/\/gerencia$/);
-    await expect(page.getByText(/seu dia começa por aqui/i)).toBeVisible();
+    await expect(
+      page.getByRole('heading', { name: 'Painel da gerência', exact: true }),
+    ).toBeVisible();
     await expect(page.getByText('gerente', { exact: true }).first()).toBeVisible();
   });
 
@@ -48,14 +50,25 @@ test.describe('Portal da gerência', () => {
     await page.getByLabel(/^Título/).fill(title);
     await page.getByLabel(/^Tipo de serviço/).selectOption('LENTIDAO');
     await page.getByLabel(/^Descrição/).fill('Criada pelo teste e2e do redesign');
-    await page.getByRole('button', { name: /criar ordem/i }).click();
-    await page.waitForURL(/\/gerencia\/ordens\/[0-9a-f-]{36}$/, { timeout: 20000 });
-    await expect(page.getByRole('heading', { name: title })).toBeVisible();
+    for (const label of ['Provedor', 'Origem', 'Setor', 'Analista responsável']) {
+      await page.getByLabel(new RegExp(`^${label}(?: [*])?$`)).click();
+      await page
+        .getByRole('listbox', { name: label, exact: true })
+        .getByRole('option')
+        .first()
+        .click();
+    }
+    await page.getByRole('button', { name: /abrir atendimento/i }).click();
+    await page.waitForURL(/\/gerencia\/ocorrencias\/[0-9a-f-]{36}\/ordens$/, { timeout: 20000 });
+    await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
     expect(errors).toEqual([]);
   });
 
-  test('ID inexistente mostra o ID solicitado, sem trocar de registro', async ({ page }) => {
+  test('ID inexistente mantém a URL e mostra erro sem trocar de registro', async ({ page }) => {
     await page.goto('/gerencia/ativos/registro-inexistente/snapshots');
-    await expect(page.getByText(/registro-inexistente/).first()).toBeVisible();
+    await expect(page).toHaveURL(/registro-inexistente/);
+    await expect(
+      page.getByRole('alert').filter({ hasText: /não foi possível carregar/i }),
+    ).toBeVisible();
   });
 });

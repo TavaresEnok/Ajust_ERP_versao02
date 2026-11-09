@@ -148,3 +148,39 @@ describe('NotificationsService.notifyOrderClosed (C-033)', () => {
     expect(payload.message).not.toContain('segredo');
   });
 });
+
+describe('Durable notification delivery', () => {
+  it('surfaces HTTP failures to the outbox and sends a stable idempotency key', async () => {
+    const prisma = makePrisma();
+    prisma.notificationConfig.findMany.mockResolvedValue([
+      { id: 'n1', channel: 'WHATSAPP', target: 'https://gateway.test' },
+    ]);
+    const spy = jest
+      .spyOn(global, 'fetch')
+      .mockResolvedValue({ ok: false, status: 503 } as Response);
+    try {
+      const service = new NotificationsService(prisma, makeEmail());
+      await expect(
+        service.dispatch(
+          't',
+          'ORDER_CLOSED',
+          {},
+          {
+            eventId: 'event-1',
+            effect: async (_, run) => {
+              await run();
+            },
+          },
+        ),
+      ).rejects.toThrow('503');
+      expect(spy).toHaveBeenCalledWith(
+        'https://gateway.test',
+        expect.objectContaining({
+          headers: expect.objectContaining({ 'idempotency-key': 'event-1:n1' }),
+        }),
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});

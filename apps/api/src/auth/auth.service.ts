@@ -15,7 +15,7 @@ import { sign, verify } from 'jsonwebtoken';
 import { PrismaService } from '../prisma/prisma.service';
 import { AuditService } from '../common/audit.service';
 import { EmailService } from '../common/email.service';
-import { decryptSecret } from '../common/secrets.crypto';
+import { decryptSecret, encryptSecret } from '../common/secrets.crypto';
 import { resolveCustomerLogin } from './customer-login';
 import { TotpService } from './totp.service';
 import { BootstrapTokenService } from './bootstrap-token.service';
@@ -226,6 +226,11 @@ export class AuthService {
       );
     }
 
+    if (user.twoFactorEnabled && !user.twoFactorSecretEnc)
+      throw new UnauthorizedException(
+        'Configuração de verificação em duas etapas inválida. Solicite suporte.',
+      );
+
     // ✅ If 2FA is enabled, return temporary 2FA session token instead of full access
     if (user.twoFactorEnabled && user.twoFactorSecretEnc) {
       const tempSessionId = randomUUID();
@@ -364,7 +369,22 @@ export class AuthService {
   async refresh(input: RefreshInput) {
     const payload = this.verifyRefreshToken(input.refreshToken);
 
-    const session = await this.prisma.session.findUnique({
+    // Database lock and cached rotation result are shared by every API/BFF replica.
+    // Return denials from the transaction so revocation is committed before throwing.
+    const result = await this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`refresh:${payload.sid}`}))`;
+      return this.rotateRefresh(tx, input, payload);
+    });
+    if ('denied' in result) throw new UnauthorizedException(result.denied);
+    return result;
+  }
+
+  private async rotateRefresh(
+    tx: Prisma.TransactionClient,
+    input: RefreshInput,
+    payload: RefreshPayload,
+  ) {
+    const session = await tx.session.findUnique({
       where: { id: payload.sid },
       include: {
         user: {
@@ -387,16 +407,8 @@ export class AuthService {
       throw new UnauthorizedException('Refresh session is invalid.');
     }
 
-    if (session.refreshTokenHash !== this.hashToken(input.refreshToken)) {
-      await this.prisma.session.updateMany({
-        where: { id: session.id, revokedAt: null },
-        data: { revokedAt: new Date() },
-      });
-      throw new UnauthorizedException('Refresh token mismatch.');
-    }
-
     const membership = session.tenantId
-      ? await this.prisma.userTenant.findUnique({
+      ? await tx.userTenant.findUnique({
           where: {
             userId_tenantId: {
               userId: session.userId,
@@ -408,23 +420,56 @@ export class AuthService {
       : null;
 
     if (session.tenantId && !membership) {
-      await this.prisma.session.updateMany({
+      await tx.session.updateMany({
         where: { id: session.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      throw new UnauthorizedException('Tenant membership is no longer valid.');
+      return { denied: 'Tenant membership is no longer valid.' };
     }
     if (membership && (membership.tenant.status !== 'ACTIVE' || membership.tenant.deletedAt)) {
-      await this.prisma.session.updateMany({
+      await tx.session.updateMany({
         where: { id: session.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      throw new UnauthorizedException('Tenant is inactive or suspended.');
+      return { denied: 'Tenant is inactive or suspended.' };
     }
 
     const roleCode = membership?.role.code ?? null;
     if (membership && !isActiveRole(roleCode))
       throw new UnauthorizedException('Perfil de acesso descontinuado ou inválido.');
+
+    const inputHash = this.hashToken(input.refreshToken);
+    if (session.refreshTokenHash !== inputHash) {
+      if (
+        session.previousRefreshTokenHash === inputHash &&
+        session.refreshResponseEnc &&
+        session.refreshResponseExpiresAt &&
+        session.refreshResponseExpiresAt > new Date()
+      ) {
+        const cached = JSON.parse(decryptSecret(session.refreshResponseEnc)) as {
+          accessToken: string;
+          refreshToken: string;
+          sessionId: string;
+          tenantId: string | null;
+          role: string | null;
+        };
+        // Do not replay permissions cached before a membership role change.
+        cached.role = roleCode;
+        cached.accessToken = this.signAccessToken({
+          sub: session.userId,
+          sid: session.id,
+          tenantId: session.tenantId,
+          role: roleCode,
+          typ: 'access',
+        });
+        return cached;
+      }
+      await tx.session.updateMany({
+        where: { id: session.id, revokedAt: null },
+        data: { revokedAt: new Date() },
+      });
+      return { denied: 'Refresh token mismatch.' };
+    }
 
     const nextRefreshToken = this.signRefreshToken({
       sub: session.userId,
@@ -434,20 +479,23 @@ export class AuthService {
     });
     const nextExpiresAt = this.refreshExpiresAt();
 
-    const rotated = await this.prisma.session.updateMany({
+    const rotated = await tx.session.updateMany({
       where: { id: session.id, revokedAt: null, refreshTokenHash: session.refreshTokenHash },
       data: {
         refreshTokenHash: this.hashToken(nextRefreshToken),
         expiresAt: nextExpiresAt,
+        previousRefreshTokenHash: inputHash,
+        refreshResponseEnc: null,
+        refreshResponseExpiresAt: null,
       },
     });
 
     if (rotated.count !== 1) {
-      await this.prisma.session.updateMany({
+      await tx.session.updateMany({
         where: { id: session.id, revokedAt: null },
         data: { revokedAt: new Date() },
       });
-      throw new UnauthorizedException('Refresh token already used.');
+      return { denied: 'Refresh token already used.' };
     }
 
     const accessToken = this.signAccessToken({
@@ -457,14 +505,21 @@ export class AuthService {
       role: roleCode,
       typ: 'access',
     });
-
-    return {
+    const response = {
       accessToken,
       refreshToken: nextRefreshToken,
       sessionId: session.id,
       tenantId: session.tenantId,
       role: roleCode,
     };
+    await tx.session.update({
+      where: { id: session.id },
+      data: {
+        refreshResponseEnc: encryptSecret(JSON.stringify(response)),
+        refreshResponseExpiresAt: new Date(Date.now() + 15_000),
+      },
+    });
+    return response;
   }
 
   async logout(userId: string, sessionId?: string) {

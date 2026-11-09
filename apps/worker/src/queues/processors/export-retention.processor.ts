@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { ExportRetentionService } from '../../reports/export-retention.service';
 import { QUEUE_EXPORT_RETENTION } from '../queue.constants';
+import { JOB_RETENTION } from '../job-retention';
 import { redisConnection } from '../../common/redis-connection';
 
 @Injectable()
@@ -15,6 +16,7 @@ export class ExportRetentionProcessor {
   ) {
     this.worker = new Worker(QUEUE_EXPORT_RETENTION, async (job: Job) => this.process(job), {
       connection: redisConnection,
+      ...JOB_RETENTION,
       concurrency: 1,
     });
 

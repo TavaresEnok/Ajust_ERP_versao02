@@ -317,37 +317,35 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
       },
       { label: 'Minha conta', sections: ['seguranca', 'configuracoes'], collapsible: true },
     ];
-    return groups.map(
-      ({ label, sections, collapsible }): NavGroup => ({
-        label,
-        collapsible,
-        items: sections.flatMap((section) => {
-          const item = navigation
-            .flatMap((g) => g.items)
-            .find((n) => (n.path.split('/').filter(Boolean)[1] || '') === section);
-          if (!item || (role && !canAccessSection(role, section))) return [];
-          return [
-            {
-              ...item,
-              title:
-                section === ''
-                  ? 'Meu painel'
-                  : section === 'ordens'
-                    ? 'Minhas ordens'
-                    : section === 'ativos'
-                      ? 'Topologia de rede'
-                      : section === 'plantao'
-                        ? 'Escala de plantão'
-                        : section === 'processos'
-                          ? 'Acompanhar atendimentos'
-                          : item.title,
-              path: item.path.replace(/^\/(gerencia|analista|cliente)/, portal),
-              count: undefined,
-            },
-          ];
-        }),
+    return groups.map(({ label, sections, collapsible }): NavGroup => ({
+      label,
+      collapsible,
+      items: sections.flatMap((section) => {
+        const item = navigation
+          .flatMap((g) => g.items)
+          .find((n) => (n.path.split('/').filter(Boolean)[1] || '') === section);
+        if (!item || (role && !canAccessSection(role, section))) return [];
+        return [
+          {
+            ...item,
+            title:
+              section === ''
+                ? 'Meu painel'
+                : section === 'ordens'
+                  ? 'Minhas ordens'
+                  : section === 'ativos'
+                    ? 'Topologia de rede'
+                    : section === 'plantao'
+                      ? 'Escala de plantão'
+                      : section === 'processos'
+                        ? 'Acompanhar atendimentos'
+                        : item.title,
+            path: item.path.replace(/^\/(gerencia|analista|cliente)/, portal),
+            count: undefined,
+          },
+        ];
       }),
-    );
+    }));
   }
   if (!customer) {
     const groups = [
@@ -376,26 +374,22 @@ export function getPortalNavigation(path: string, role?: import('./erp/contracts
       },
     ];
     return groups
-      .map(
-        ({ label, sections, collapsible }): NavGroup => ({
-          label,
-          collapsible,
-          items: sections.flatMap((section) => {
-            const item = allNavigation.find(
-              (entry) => (entry.path.split('/')[2] || '') === section,
-            );
-            if (!item || (role && !canAccessSection(role, section))) return [];
-            return [
-              {
-                ...item,
-                title: section === '' ? 'Painel da gerência' : item.title,
-                path: item.path.replace(/^\/(gerencia|analista|cliente)/, portal),
-                count: undefined,
-              },
-            ];
-          }),
+      .map(({ label, sections, collapsible }): NavGroup => ({
+        label,
+        collapsible,
+        items: sections.flatMap((section) => {
+          const item = allNavigation.find((entry) => (entry.path.split('/')[2] || '') === section);
+          if (!item || (role && !canAccessSection(role, section))) return [];
+          return [
+            {
+              ...item,
+              title: section === '' ? 'Painel da gerência' : item.title,
+              path: item.path.replace(/^\/(gerencia|analista|cliente)/, portal),
+              count: undefined,
+            },
+          ];
         }),
-      )
+      }))
       .filter((group) => group.items.length);
   }
   const customerSections = new Set([

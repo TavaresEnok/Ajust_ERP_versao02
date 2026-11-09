@@ -74,6 +74,7 @@ export function ReferenceField({
     events: '/calendar/events',
     sectors: `/iam/tenants/${scope?.tenantId}/sectors`,
     origins: `/iam/tenants/${scope?.tenantId}/order-origins`,
+    flowTemplates: '/service-processes/operational/templates',
   };
   const paginated = reference.resource === 'orders' || reference.resource === 'occurrences';
   const path = queryPath(
@@ -110,6 +111,7 @@ export function ReferenceField({
     )
       return [];
     if (typeof record.id !== 'string') return [];
+    if (reference.resource === 'flowTemplates' && !record.publishedAt) return [];
     if (reference.hideClosed && record.status === 'ENCERRADA') return [];
     const label =
       [
@@ -117,6 +119,9 @@ export function ReferenceField({
         reference.resource === 'occurrences' ? record.provider : undefined,
         reference.resource === 'occurrences' ? record.type : undefined,
         record.title || record.tradeName || record.legalName || record.name,
+        reference.resource === 'flowTemplates'
+          ? (record.definition as { name?: string })?.name
+          : undefined,
         reference.resource === 'users' &&
         [
           'ownerUserId',
@@ -132,11 +137,13 @@ export function ReferenceField({
         .filter((value) => typeof value === 'string' || typeof value === 'number')
         .join(' · ') || record.id;
     const optionValue =
-      reference.value === 'name'
-        ? reference.resource === 'customers'
-          ? record.tradeName || record.legalName
-          : record.name
-        : record.id;
+      reference.value === 'code'
+        ? record.code
+        : reference.value === 'name'
+          ? reference.resource === 'customers'
+            ? record.tradeName || record.legalName
+            : record.name
+          : record.id;
     return typeof optionValue === 'string' ? [{ value: optionValue, label }] : [];
   });
   const filtered = options.filter((option) =>
@@ -347,7 +354,9 @@ export function ReferenceField({
           ? 'Não foi possível buscar as opções. Tente novamente.'
           : query.isLoading
             ? 'Consultando registros autorizados.'
-            : `${filtered.length} opções${paginated ? ' · até 50 por busca; refine por nome ou protocolo' : ''}. O formulário envia o identificador original.`}
+            : reference.resource === 'flowTemplates'
+              ? `${filtered.length} fluxo(s) publicado(s). Salve e publique um fluxo para disponibilizá-lo aqui.`
+              : `${filtered.length} opções${paginated ? ' · até 50 por busca; refine por nome ou protocolo' : ''}. O formulário envia o identificador original.`}
       </p>
       {query.error && (
         <Button type="button" variant="ghost" size="sm" onClick={() => void query.mutate()}>

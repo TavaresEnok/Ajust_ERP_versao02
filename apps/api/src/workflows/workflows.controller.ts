@@ -22,7 +22,7 @@ const NodeSchema = z.object({
   id: z.string().min(1),
   type: z.enum(['trigger', 'condition', 'action']),
   subtype: z.string().min(1),
-  config: z.record(z.any()),
+  config: z.record(z.string(), z.any()),
   position: z.object({
     x: z.number().finite(),
     y: z.number().finite(),
@@ -107,10 +107,18 @@ export class WorkflowsController {
   }
 
   @Post()
+  @ApiOperation({ summary: 'Cadastrar automação' })
   create(@Body() body: unknown, @Req() req: RequestWithAuth) {
     assertManagerRole(req.auth);
     const input = CreateWorkflowSchema.parse(body);
     return this.svc.create(this.tid(req), req.auth!.userId, input);
+  }
+
+  @Get(':id/executions')
+  @ApiOperation({ summary: 'Consultar os 50 registros mais recentes da automação' })
+  executions(@Param('id') id: string, @Req() req: RequestWithAuth) {
+    assertManagerRole(req.auth);
+    return this.svc.executions(this.tid(req), id);
   }
 
   @Patch(':id')

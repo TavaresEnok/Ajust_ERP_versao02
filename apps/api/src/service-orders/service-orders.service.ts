@@ -1881,7 +1881,7 @@ export class ServiceOrdersService {
         const saved = await tx.serviceOrder.update({
           where: {
             id: order.id,
-            ...(input.expectedVersion !== undefined ? { version: input.expectedVersion } : {}),
+            version: input.expectedVersion ?? order.version,
           },
           data: {
             ...(statusDates(order, to) as Prisma.ServiceOrderUpdateInput),
@@ -1979,28 +1979,32 @@ export class ServiceOrdersService {
         });
         if (active) continue;
       }
-      const changed = await this.prisma.serviceOrder.updateMany({
-        where: { id: order.id, version: order.version },
-        data: {
-          ...statusDates(order, 'RESOLVIDA'),
-          status: 'RESOLVIDA',
-          version: { increment: 1 },
-        },
+      const applied = await this.prisma.$transaction(async (tx) => {
+        const changed = await tx.serviceOrder.updateMany({
+          where: { id: order.id, version: order.version },
+          data: {
+            ...statusDates(order, 'RESOLVIDA'),
+            status: 'RESOLVIDA',
+            version: { increment: 1 },
+          },
+        });
+        if (changed.count !== 1) return false;
+        await tx.serviceOrderOccurrence.create({
+          data: { serviceOrderId: order.id, sourceSystem: 'WEBHOOK', message: reason },
+        });
+        await tx.serviceOrderStatusEvent.create({
+          data: {
+            tenantId,
+            serviceOrderId: order.id,
+            fromStatus: order.status,
+            toStatus: 'RESOLVIDA',
+            reason,
+            metadata: { source: 'integration' },
+          },
+        });
+        return true;
       });
-      if (changed.count !== 1) continue;
-      await this.prisma.serviceOrderOccurrence.create({
-        data: { serviceOrderId: order.id, sourceSystem: 'WEBHOOK', message: reason },
-      });
-      await this.prisma.serviceOrderStatusEvent.create({
-        data: {
-          tenantId,
-          serviceOrderId: order.id,
-          fromStatus: order.status,
-          toStatus: 'RESOLVIDA',
-          reason,
-          metadata: { source: 'integration' },
-        },
-      });
+      if (!applied) continue;
       await this.lifecycle.afterStatusChange({
         tenantId,
         orderId: order.id,

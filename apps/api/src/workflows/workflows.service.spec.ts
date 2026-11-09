@@ -334,3 +334,58 @@ it('does not reactivate or restore a legacy mutating rule', async () => {
   );
   expect(prisma.workflowRule.update).not.toHaveBeenCalled();
 });
+
+describe('Durable workflow retries', () => {
+  it('retries failed actions while preserving successful actions from the same event', async () => {
+    const logs: any[] = [];
+    const def = makeDef(
+      [makeTriggerNode(), makeActionNode({ id: 'a' }), makeActionNode({ id: 'b' })],
+      [makeEdge('trigger', 'a'), makeEdge('a', 'b')],
+    );
+    const prisma = {
+      workflowRule: {
+        findMany: jest.fn().mockResolvedValue([{ id: 'rule', name: 'Rule', definition: def }]),
+        update: jest.fn(),
+      },
+      workflowExecutionLog: {
+        create: jest.fn(async ({ data }: any) => {
+          logs.push(data);
+          return data;
+        }),
+        count: jest.fn(
+          async ({ where }: any) =>
+            logs.filter(
+              (row) =>
+                row.nodeId === where.nodeId && row.context.eventKey === where.context?.equals,
+            ).length,
+        ),
+        findFirst: jest.fn(
+          async ({ where }: any) =>
+            logs.find(
+              (row) =>
+                row.nodeId === where.nodeId &&
+                row.status === 'SUCCESS' &&
+                row.context.eventKey === where.context.equals,
+            ) ?? null,
+        ),
+      },
+    };
+    let fail = true;
+    const executor = {
+      executeNode: jest.fn(async (node: WorkflowNode) => ({
+        nodeId: node.id,
+        subtype: node.subtype,
+        status: node.id === 'b' && fail ? 'FAILED' : 'SUCCESS',
+      })),
+    };
+    const service = new WorkflowsService(prisma as never, {} as never, executor as never);
+    const options = { eventKey: 'event-1', throwOnFailure: true };
+    await expect(
+      service.executeForEvent('tenant', { type: 'order_created' }, options),
+    ).rejects.toThrow('failed');
+    fail = false;
+    await service.executeForEvent('tenant', { type: 'order_created' }, options);
+    expect(executor.executeNode.mock.calls.filter(([node]) => node.id === 'a')).toHaveLength(1);
+    expect(executor.executeNode.mock.calls.filter(([node]) => node.id === 'b')).toHaveLength(2);
+  });
+});

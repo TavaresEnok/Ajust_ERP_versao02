@@ -2,6 +2,7 @@ import { Inject, Injectable, Logger } from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE_AUDIT_ARCHIVING } from '../queue.constants';
+import { JOB_RETENTION } from '../job-retention';
 import { redisConnection } from '../../common/redis-connection';
 
 const ARCHIVE_AFTER_DAYS = Number(process.env.AUDIT_ARCHIVE_AFTER_DAYS || 90);
@@ -15,6 +16,7 @@ export class AuditArchivingProcessor {
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {
     this.worker = new Worker(QUEUE_AUDIT_ARCHIVING, async (job: Job) => this.process(job), {
       connection: redisConnection,
+      ...JOB_RETENTION,
       concurrency: 1,
     });
 

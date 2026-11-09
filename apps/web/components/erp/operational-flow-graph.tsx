@@ -139,7 +139,7 @@ export function OperationalFlowGraph({
   }
   return (
     <div
-      className="workflow-canvas h-[540px] min-w-0 rounded-xl border border-border"
+      className="workflow-canvas h-[360px] min-w-0 rounded-xl border border-border"
       aria-label="Diagrama do fluxo de atendimento"
     >
       <ReactFlow

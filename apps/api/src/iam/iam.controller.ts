@@ -314,7 +314,7 @@ export class IamController {
     this.assertTenantScope(req, tenantId);
     const logo = await this.iamService.readTenantLogo(tenantId);
     if (!logo) {
-      throw new BadRequestException('Tenant logo not found.');
+      return res.status(204).send();
     }
     res.setHeader('content-type', logo.mimeType);
     res.setHeader('cache-control', 'no-store');

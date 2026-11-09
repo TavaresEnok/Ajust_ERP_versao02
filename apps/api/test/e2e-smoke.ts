@@ -5,7 +5,11 @@ import { hash } from 'bcryptjs';
 import assert from 'node:assert/strict';
 import { createHmac, randomUUID } from 'node:crypto';
 import request from 'supertest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { AppModule } from '../src/app.module';
+import { ajustFlow } from '../src/service-processes/ajust-default-flows';
 
 async function ensureSeedData(prisma: PrismaClient) {
   const roles = [
@@ -56,14 +60,14 @@ async function ensureSeedData(prisma: PrismaClient) {
       name: 'Ajust Super Admin',
       passwordHash,
       status: 'ACTIVE',
-      twoFactorEnabled: true,
+      twoFactorEnabled: false,
     },
     create: {
       name: 'Ajust Super Admin',
       email,
       passwordHash,
       status: 'ACTIVE',
-      twoFactorEnabled: true,
+      twoFactorEnabled: false,
     },
   });
 
@@ -82,7 +86,31 @@ async function ensureSeedData(prisma: PrismaClient) {
     },
   });
 
-  return { email, password, tenantId: tenant.id };
+  const flow = ajustFlow('AJUST_SIMPLES');
+  await prisma.serviceProcessTemplate.upsert({
+    where: { tenantId_code: { tenantId: tenant.id, code: flow.code } },
+    create: {
+      tenantId: tenant.id,
+      code: flow.code,
+      version: 1,
+      definition: JSON.parse(JSON.stringify(flow)),
+      publishedAt: new Date(),
+    },
+    update: { definition: JSON.parse(JSON.stringify(flow)), publishedAt: new Date() },
+  });
+  const customer =
+    (await prisma.customer.findFirst({
+      where: { tenantId: tenant.id, tradeName: 'ProviderTest' },
+    })) ??
+    (await prisma.customer.create({
+      data: {
+        tenantId: tenant.id,
+        legalName: 'ProviderTest',
+        tradeName: 'ProviderTest',
+        personType: 'J',
+      },
+    }));
+  return { email, password, tenantId: tenant.id, customerId: customer.id };
 }
 
 function expectStatus(actual: number, expected: number[]) {
@@ -93,11 +121,22 @@ function expectStatus(actual: number, expected: number[]) {
 }
 
 async function main() {
+  const database = new URL(process.env.DATABASE_URL || 'invalid');
+  if (
+    process.env.NODE_ENV === 'production' ||
+    !['localhost', '127.0.0.1'].includes(database.hostname) ||
+    database.pathname !== '/ajust_ci'
+  )
+    throw new Error('E2E smoke requires the isolated localhost ajust_ci database.');
   process.env.JWT_ACCESS_SECRET = process.env.JWT_ACCESS_SECRET || 'dev-access-secret';
   process.env.JWT_REFRESH_SECRET = process.env.JWT_REFRESH_SECRET || 'dev-refresh-secret';
   process.env.JWT_ACCESS_TTL = process.env.JWT_ACCESS_TTL || '15m';
   process.env.JWT_REFRESH_TTL_DAYS = process.env.JWT_REFRESH_TTL_DAYS || '7';
 
+  // Normal-login smoke; 2FA enforcement/replay are covered by security and integration suites.
+  process.env.REQUIRE_2FA_ROLES = '';
+  const uploads = await mkdtemp(join(tmpdir(), 'ajust-e2e-uploads-'));
+  process.env.UPLOAD_ROOT = uploads;
   const moduleRef = await Test.createTestingModule({
     imports: [AppModule],
   }).compile();
@@ -222,6 +261,7 @@ async function main() {
       .post('/service-orders/occurrences')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
+        customerId: seed.customerId,
         provider: 'ProviderTest',
         type: 'Rompimento',
         sector: 'NOC',
@@ -306,16 +346,32 @@ async function main() {
       .post('/service-orders')
       .set('Authorization', `Bearer ${accessToken}`)
       .send({
+        occurrenceId: occId,
         type: 'ROMPIMENTO',
         priority: 'CRITICA',
         title: 'OS e2e atraso',
         description: 'Teste de aprovacao obrigatoria',
-        deadlineAt: delayedDeadline,
+        deadlineAt: new Date(Date.now() + 3_600_000).toISOString(),
       });
 
     expectStatus(createdOrder.status, [200, 201]);
-    const orderId: string = createdOrder.body.id;
-    assert.ok(orderId, 'created order id missing');
+    assert.ok(createdOrder.body.id, 'created order id missing');
+    // Imported orders without an attached process still use manual transitions.
+    // Create this historical overdue fixture directly; the API correctly refuses past deadlines.
+    const manualOrder = await prisma.serviceOrder.create({
+      data: {
+        tenantId: seed.tenantId,
+        occurrenceId: occId,
+        protocol: `E2E-${randomUUID()}`,
+        type: 'ROMPIMENTO',
+        priority: 'CRITICA',
+        title: 'OS e2e atraso',
+        description: 'Histórico importado',
+        deadlineAt: new Date(delayedDeadline),
+        requiresApproval: true,
+      },
+    });
+    const orderId = manualOrder.id;
 
     const summary = await request(app.getHttpServer())
       .get(`/service-orders/summary?status=ABERTA`)
@@ -409,21 +465,21 @@ async function main() {
     const toAnalysis = await request(app.getHttpServer())
       .patch(`/service-orders/${orderId}/transition`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ toStatus: 'EM_ANALISE', reason: 'triagem inicial' });
+      .send({ toStatus: 'EM_ANALISE', reason: 'triagem inicial', expectedVersion: 1 });
 
     assert.equal(toAnalysis.status, 200, 'ABERTA -> EM_ANALISE should be allowed');
 
     const toResolved = await request(app.getHttpServer())
       .patch(`/service-orders/${orderId}/transition`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ toStatus: 'RESOLVIDA', reason: 'acao aplicada' });
+      .send({ toStatus: 'RESOLVIDA', reason: 'acao aplicada', expectedVersion: 2 });
 
     assert.equal(toResolved.status, 200, 'EM_ANALISE -> RESOLVIDA should be allowed');
 
     const closeWithoutApproval = await request(app.getHttpServer())
       .patch(`/service-orders/${orderId}/transition`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ toStatus: 'FECHADA', reason: 'fechamento sem aprovacao' });
+      .send({ toStatus: 'FECHADA', reason: 'fechamento sem aprovacao', expectedVersion: 3 });
 
     assert.equal(
       closeWithoutApproval.status,
@@ -441,7 +497,7 @@ async function main() {
     const closeWithApproval = await request(app.getHttpServer())
       .patch(`/service-orders/${orderId}/transition`)
       .set('Authorization', `Bearer ${accessToken}`)
-      .send({ toStatus: 'FECHADA', reason: 'encerramento apos aprovacao' });
+      .send({ toStatus: 'FECHADA', reason: 'encerramento apos aprovacao', expectedVersion: 3 });
 
     assert.equal(closeWithApproval.status, 200, 'closing with approval should pass');
 
@@ -562,7 +618,11 @@ async function main() {
 
     const credReveal = await request(app.getHttpServer())
       .post(`/knowledge/credentials/${credId}/reveal`)
-      .set('Authorization', `Bearer ${accessToken}`);
+      .set('Authorization', `Bearer ${accessToken}`)
+      .send({
+        reason: 'Validação técnica do cofre no smoke isolado',
+        currentPassword: seed.password,
+      });
 
     assert.equal(credReveal.status, 201, 'reveal credential should return 201');
     assert.equal(credReveal.body.secret, 'super-secret-token-e2e', 'revealed secret must match');
@@ -689,6 +749,7 @@ async function main() {
   } finally {
     await prisma.$disconnect();
     await app.close();
+    await rm(uploads, { recursive: true, force: true });
   }
 }
 

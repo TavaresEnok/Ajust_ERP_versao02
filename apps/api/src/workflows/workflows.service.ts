@@ -73,6 +73,44 @@ export class WorkflowsService {
     return rule;
   }
 
+  async executions(tenantId: string, id: string) {
+    await this.findOne(tenantId, id);
+    const items = await this.prisma.workflowExecutionLog.findMany({
+      where: { tenantId, ruleId: id },
+      orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
+      take: 50,
+      // Contexto e resultado podem conter dados da O.S. e parâmetros de integrações.
+      select: {
+        id: true,
+        nodeId: true,
+        nodeSubtype: true,
+        status: true,
+        createdAt: true,
+        context: true,
+      },
+    });
+    return {
+      items: items.map(({ context, ...entry }) => {
+        const source =
+          context && typeof context === 'object' && !Array.isArray(context) ? context.order : null;
+        const order =
+          source && typeof source === 'object' && !Array.isArray(source) ? source : null;
+        const orderId =
+          typeof order?.id === 'string' && /^[0-9a-f]{8}-[0-9a-f-]{27}$/i.test(order.id)
+            ? order.id
+            : null;
+        return {
+          ...entry,
+          orderId,
+          orderProtocol:
+            orderId && (typeof order?.protocol === 'string' || typeof order?.protocol === 'number')
+              ? String(order.protocol).slice(0, 80)
+              : null,
+        };
+      }),
+    };
+  }
+
   async create(
     tenantId: string,
     _userId: string,
@@ -219,7 +257,7 @@ export class WorkflowsService {
       type: 'order_created' | 'order_updated' | 'order_closed' | 'sla_breach';
       order?: Record<string, any>;
     },
-    options: { eventKey?: string } = {},
+    options: { eventKey?: string; throwOnFailure?: boolean } = {},
   ): Promise<string[]> {
     if (!this.isExecutionEnabled()) {
       this.logger.warn(
@@ -234,10 +272,12 @@ export class WorkflowsService {
       rules = await this.prisma.workflowRule.findMany({
         where: { tenantId, enabled: true },
       });
-    } catch {
+    } catch (error) {
+      if (options.throwOnFailure) throw error;
       return [];
     }
 
+    let anyFailure = false;
     const triggered: string[] = [];
 
     for (const rule of rules) {
@@ -247,17 +287,6 @@ export class WorkflowsService {
 
       if (!this.evaluateTrigger(triggerNode, event)) continue;
       if (!this.triggerMatchesOrder(triggerNode, event.order || {})) continue;
-      const governanceReason = await this.getGovernanceBlockReason(
-        tenantId,
-        rule.id,
-        def.governance,
-        event.order || {},
-      );
-      if (governanceReason) {
-        this.logger.warn(`Workflow ${rule.name} skipped by governance: ${governanceReason}`);
-        continue;
-      }
-
       // Nova tentativa do mesmo evento: regra que já terminou sem falha não roda de novo (C-038).
       if (
         options.eventKey &&
@@ -271,6 +300,20 @@ export class WorkflowsService {
         }))
       )
         continue;
+
+      const governanceReason = await this.getGovernanceBlockReason(
+        tenantId,
+        rule.id,
+        def.governance,
+        event.order || {},
+        options.eventKey,
+      );
+      if (governanceReason) {
+        if (options.throwOnFailure && governanceReason.startsWith('hourly execution limit'))
+          throw new Error(governanceReason);
+        this.logger.warn(`Workflow ${rule.name} skipped by governance: ${governanceReason}`);
+        continue;
+      }
 
       const ctx: WorkflowContext = {
         tenantId,
@@ -306,6 +349,7 @@ export class WorkflowsService {
       for (const r of results) {
         if (r.status === 'SUCCESS') successCount++;
         else if (r.status === 'FAILED') failureCount++;
+        if (r.status === 'FAILED') anyFailure = true;
       }
 
       await this.prisma.workflowRule.update({
@@ -353,13 +397,18 @@ export class WorkflowsService {
               status: 'SUCCESS',
             },
           })
-          .catch(() => this.logger.warn(`Failed to log workflow completion for rule ${rule.id}`));
+          .catch((error) => {
+            if (options.throwOnFailure) throw error;
+            this.logger.warn(`Failed to log workflow completion for rule ${rule.id}`);
+          });
 
       if (def.governance?.stopOnFailure && failureCount > 0) {
         this.logger.warn(`Workflow ${rule.name} stopped due to failure (stopOnFailure=true)`);
       }
     }
 
+    if (options.throwOnFailure && anyFailure)
+      throw new Error('Workflow actions failed; event will be retried.');
     return triggered;
   }
 
@@ -368,6 +417,7 @@ export class WorkflowsService {
     ruleId: string,
     governance: WorkflowDefinition['governance'],
     order: Record<string, any>,
+    eventKey?: string,
   ): Promise<string | null> {
     if (!governance) return null;
     if (governance.requiresApproval && order.approvalCompleted !== true) {
@@ -388,7 +438,19 @@ export class WorkflowsService {
           createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
         },
       });
-      if (executions >= maxPerHour) {
+      const sameEventRuns = eventKey
+        ? await this.prisma.workflowExecutionLog.count({
+            where: {
+              tenantId,
+              ruleId,
+              nodeType: 'workflow',
+              nodeId: '__run__',
+              createdAt: { gte: new Date(Date.now() - 60 * 60 * 1000) },
+              context: { path: ['eventKey'], equals: eventKey },
+            },
+          })
+        : 0;
+      if (executions - sameEventRuns >= maxPerHour) {
         return `hourly execution limit reached (${maxPerHour})`;
       }
     }
@@ -457,7 +519,35 @@ export class WorkflowsService {
       executed.add(currentId);
 
       if (node.type === 'action') {
-        const result = await this.executor.executeNode(node, ctx);
+        const previous =
+          ctx.eventKey && ctx.workflow
+            ? await this.prisma.workflowExecutionLog.findFirst({
+                where: {
+                  tenantId: ctx.tenantId,
+                  ruleId: ctx.workflow.ruleId,
+                  nodeId: node.id,
+                  status: 'SUCCESS',
+                  context: { path: ['eventKey'], equals: ctx.eventKey },
+                },
+              })
+            : null;
+        const result = previous
+          ? { nodeId: node.id, subtype: node.subtype, status: 'SUCCESS' as const }
+          : await this.executor.executeNode(node, ctx);
+        if (!previous && ctx.eventKey && ctx.workflow && result.status === 'SUCCESS')
+          await this.prisma.workflowExecutionLog.create({
+            data: {
+              tenantId: ctx.tenantId,
+              ruleId: ctx.workflow.ruleId,
+              ruleName: ctx.workflow.ruleName,
+              nodeId: node.id,
+              nodeType: 'action',
+              nodeSubtype: node.subtype,
+              context: ctx as any,
+              result: { ...result },
+              status: 'SUCCESS',
+            },
+          });
         results.push({
           nodeId: node.id,
           subtype: node.subtype,

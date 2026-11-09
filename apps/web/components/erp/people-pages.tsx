@@ -6,7 +6,7 @@ import { SecurityWorkspace } from './security-workspace';
 import { OperationControl } from './operation-controls';
 import { useSWRConfig } from 'swr';
 import { refreshVisualData } from '@/lib/erp/visual-data';
-import { ErpEmpty } from './contract-form';
+import { ErpEmpty, QueryState } from './contract-form';
 import { useState } from 'react';
 import Link from 'next/link';
 import {
@@ -395,8 +395,15 @@ export function TechniciansPage() {
     <>
       <PageHeading
         title="Equipe técnica"
-        description="Pessoas conectadas. Atendimentos que fazem a diferença."
+        description="Consulte os analistas, a situação de acesso e as O.S. atribuídas a cada pessoa."
       >
+        <Button
+          variant="outline"
+          disabled={teamSource.isValidating}
+          onClick={() => void teamSource.mutate()}
+        >
+          Atualizar equipe
+        </Button>
         <Link className="text-link" href={`${portalBase}/relatorios?tab=team`}>
           Performance da equipe
         </Link>
@@ -416,9 +423,22 @@ export function TechniciansPage() {
           ]}
         />
       </PageHeading>
-      <p className="mb-5 rounded-lg border border-border p-4 text-xs leading-6 text-muted-foreground">
-        Contas bloqueadas não conseguem entrar no ERP. O gestor deve conferir os dados de acesso e
-        ativar apenas quem fará parte da equipe operacional.
+      {analysts.some((person) => person.status === 'Acesso bloqueado') && (
+        <p className="mb-5 rounded-lg border border-border p-4 text-xs leading-6 text-muted-foreground">
+          Há analistas com acesso bloqueado. Revise essas contas em Usuários e acessos antes de
+          encaminhar novos atendimentos.
+        </p>
+      )}
+      <QueryState
+        loading={teamSource.isLoading}
+        error={teamSource.error}
+        onRetry={() => void teamSource.mutate()}
+      />
+      <p className="mb-4 text-xs leading-6 text-muted-foreground">
+        SLA histórico: proporção das O.S. elegíveis concluídas até o prazo, considerando a resolução
+        técnica e o responsável atual. Exclui demonstrações, cancelamentos e ordens ainda abertas.
+        Transferências podem alterar o histórico de cada integrante. Sem base significa ausência de
+        conclusões válidas para avaliar.
       </p>
       <div className="panel">
         <PanelHeading
@@ -448,7 +468,7 @@ export function TechniciansPage() {
                 <th>Situação do acesso</th>
                 <th>O.S. ativas</th>
                 <th>O.S. concluídas</th>
-                <th>SLA</th>
+                <th>SLA histórico</th>
                 <th>Ação</th>
               </tr>
             </thead>
@@ -477,7 +497,10 @@ export function TechniciansPage() {
                     </td>
                     <td>{t.active}</td>
                     <td>{t.done}</td>
-                    <td className="text-primary">{t.sla}</td>
+                    <td>
+                      <span className="block text-primary">{t.sla}</span>
+                      <span className="text-[10px] text-muted-foreground">{t.slaSummary}</span>
+                    </td>
                     <td>
                       <RecordDialog
                         title="Editar integrante"
@@ -546,9 +569,7 @@ export function TechnicianDetail({
   const events = useErpQuery<unknown>(tab === 'Agenda' ? '/calendar/events/all' : null);
   const orderSource = useVisualSource('orders');
   const assignedOrders = orders.filter((order) =>
-    orderSource.raw.some(
-      (raw) => raw.id === order.id && (raw.assigneeUserId === id || raw.ownerUserId === id),
-    ),
+    orderSource.raw.some((raw) => raw.id === order.id && raw.assigneeUserId === id),
   );
   if (!member)
     return (
@@ -603,25 +624,30 @@ export function TechnicianDetail({
             <Metric
               label="Atendimentos ativos"
               value={String(member.active)}
-              change="Hoje"
-              foot="carga de trabalho"
+              change="Total atual"
+              foot="O.S. atribuídas"
               icon={ClipboardList}
             />
             <Metric
               label="Ordens concluídas"
               value={String(member.done)}
-              change="ERP"
-              foot="neste período"
+              change="Histórico"
+              foot="responsável atual pela O.S."
               icon={CheckCircle2}
             />
             <Metric
               label="Cumprimento de SLA"
               value={String(member.sla)}
-              change="ERP"
-              foot="indicador retornado pelo servidor"
+              change="Histórico · atribuição atual"
+              foot={member.slaSummary || 'Nenhuma O.S. elegível concluída'}
               icon={Timer}
             />
           </div>
+          <p className="mb-5 text-xs leading-6 text-muted-foreground">
+            O SLA considera todo o histórico de O.S. elegíveis atribuídas atualmente a esta pessoa.
+            Compara a resolução técnica com o prazo; exclui demonstrações, cancelamentos, ordens
+            abertas e conclusões sem data válida. Transferências podem alterar este indicador.
+          </p>
           <section className="panel">
             <PanelHeading title="Ordens do integrante" />
             <OrdersTable orders={assignedOrders} />

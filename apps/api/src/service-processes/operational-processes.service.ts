@@ -738,14 +738,12 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
       );
     } catch (error) {
       // Validation and permission failures remain user-correctable; unexpected execution failures are durable.
-      if (
-        !(
-          error instanceof BadRequestException ||
-          error instanceof ForbiddenException ||
-          error instanceof ConflictException ||
-          error instanceof NotFoundException
-        )
-      ) {
+      if (!(
+        error instanceof BadRequestException ||
+        error instanceof ForbiddenException ||
+        error instanceof ConflictException ||
+        error instanceof NotFoundException
+      )) {
         await this.prisma.serviceProcessInstance.updateMany({
           where: {
             tenantId,
@@ -1116,7 +1114,6 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
       const stale = new Date(Date.now() - 120000);
       const pending = await this.prisma.serviceProcessEvent.findMany({
         where: {
-          attempts: { lt: 5 },
           OR: [
             { status: 'PENDING' },
             { status: 'PROCESSING', claimedAt: { lt: stale } },
@@ -1136,9 +1133,9 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
           const startedAt = new Date();
           // Efeitos únicos do fechamento (auditoria, CSAT, aviso, tempo real, ocorrência) para
           // todo fechamento pelo motor, inclusive pela tela de processos (C-013/C-032/C-035).
-          // Só na primeira entrega: uma nova tentativa reenvia apenas os workflows.
+          // O outbox registra os efeitos concluídos e retenta os restantes após reinícios.
           const payload = event.payload as Record<string, unknown>;
-          if (event.attempts === 0 && this.lifecycle && typeof payload.id === 'string')
+          if (this.lifecycle && typeof payload.id === 'string')
             await this.lifecycle.afterStatusChange({
               tenantId: event.tenantId,
               orderId: payload.id,
@@ -1154,7 +1151,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
           await this.automations.executeForEvent(
             event.tenantId,
             { type: 'order_closed', order: event.payload as Record<string, unknown> },
-            { eventKey: event.eventKey },
+            { eventKey: event.eventKey, throwOnFailure: true },
           );
           // Falha só desta execução (mesma chave de evento), não de outras da mesma O.S. (C-038).
           if (

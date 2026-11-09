@@ -510,8 +510,8 @@ export function AuthPage({ mode }: { mode: string }) {
               )}
               <p className="mt-5 text-[10px] leading-5 text-muted-foreground">
                 {action.connected
-                  ? 'Autenticação realizada pelo ERP original via BFF da mesma origem.'
-                  : 'Backend não conectado. Não insira credenciais reais.'}
+                  ? 'Acesse com as credenciais fornecidas pela sua empresa.'
+                  : 'O acesso está temporariamente indisponível.'}
               </p>
               <div className="mt-8 border-t border-border pt-5">
                 {isBootstrapRequest || isBootstrapVerify ? (

@@ -39,5 +39,6 @@ export type TechnicianRow = {
   active: string | number;
   done: string | number;
   sla: string | number;
+  slaSummary?: string;
   status: string;
 };

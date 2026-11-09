@@ -10,7 +10,9 @@ describe('validação de ambiente do worker', () => {
     exit = jest.spyOn(process, 'exit').mockImplementation((() => undefined) as never);
     jest.spyOn(console, 'error').mockImplementation(() => undefined);
     jest.doMock('@nestjs/core', () => ({
-      NestFactory: { create: jest.fn().mockResolvedValue({ listen: jest.fn() }) },
+      NestFactory: {
+        create: jest.fn().mockResolvedValue({ enableShutdownHooks: jest.fn(), listen: jest.fn() }),
+      },
     }));
     jest.doMock('./app.module', () => ({ AppModule: class {} }));
     Object.assign(process.env, {

@@ -182,11 +182,12 @@ describe('ServiceOrderLifecycleService', () => {
       source: 'operations',
     });
     expect(prisma.auditLog.create.mock.calls[0][0].data.action).toBe('OS_CLOSE');
-    expect(csat.createForOrder).toHaveBeenCalledWith('t', 'o1');
+    expect(csat.createForOrder).toHaveBeenCalledWith('t', 'o1', false);
     expect(legacyTemplates.executeForOrder).not.toHaveBeenCalled();
     expect(workflows.executeForEvent).toHaveBeenCalledWith(
       't',
       expect.objectContaining({ type: 'order_closed' }),
+      { eventKey: undefined, throwOnFailure: false },
     );
     expect(prisma.occurrence.updateMany).toHaveBeenCalledWith({
       where: { id: 'occ', tenantId: 't' },

@@ -177,12 +177,13 @@ describe('WorkflowActionExecutor - action_notify_slack', () => {
 describe('WorkflowActionExecutor - action_csat', () => {
   it('cria e envia a pesquisa pelo serviço de CSAT', async () => {
     const prisma = makePrisma();
+    prisma.serviceOrder.findFirst.mockResolvedValue({ id: 'order-1', status: 'FECHADA' });
     const csat = makeCsat();
     const executor = makeExecutor(prisma, makeNotifications(), csat);
     const node = makeNode({ subtype: 'action_csat', config: {} });
     const result = await executor.executeNode(node, makeContext());
     expect(result.status).toBe('SUCCESS');
-    expect(csat.createForOrder).toHaveBeenCalledWith('tenant-1', 'order-1');
+    expect(csat.createForOrder).toHaveBeenCalledWith('tenant-1', 'order-1', false);
   });
 });
 

@@ -4,16 +4,21 @@ import { EmailService } from '../common/email.service';
 function makePrisma(overrides: any = {}): any {
   const base: any = {
     serviceOrder: {
-      findFirst: jest.fn().mockResolvedValue({ id: 'order-1' }),
+      findFirst: jest
+        .fn()
+        .mockResolvedValue({ id: 'order-1', protocol: 'OS-001', status: 'FECHADA' }),
     },
     satisfactionResponse: {
       findMany: jest.fn().mockResolvedValue([]),
       findFirst: jest
         .fn()
         .mockResolvedValue({ id: 'r1', orderId: 'o1', token: 'tok', answered: false }),
-      create: jest
-        .fn()
-        .mockResolvedValue({ id: 'r1', token: 'tok', tenant: null, order: { protocol: 'OS-001' } }),
+      create: jest.fn().mockResolvedValue({
+        id: 'r1',
+        token: 'tok',
+        tenant: null,
+        order: { protocol: 'OS-001' },
+      }),
       update: jest.fn().mockResolvedValue({ id: 'r1' }),
       updateMany: jest.fn().mockResolvedValue({ count: 1 }),
     },
@@ -35,6 +40,17 @@ describe('CsatService.createForOrder', () => {
     expect(prisma.satisfactionResponse.create).not.toHaveBeenCalled();
   });
 
+  it('does not send a survey while the order is still open', async () => {
+    const prisma = makePrisma();
+    prisma.serviceOrder.findFirst.mockResolvedValue({ id: 'o1', status: 'RESOLVIDA' });
+    const email = makeEmail();
+    await expect(new CsatService(prisma, email).createForOrder('t1', 'o1')).rejects.toThrow(
+      'fechamento',
+    );
+    expect(email.sendEmail).not.toHaveBeenCalled();
+    expect(prisma.satisfactionResponse.create).not.toHaveBeenCalled();
+  });
+
   it('retorna pesquisa existente sem duplicar', async () => {
     const prisma = makePrisma();
     prisma.satisfactionResponse.findFirst.mockResolvedValueOnce({ id: 'r1' });
@@ -48,6 +64,8 @@ describe('CsatService.createForOrder', () => {
     const prisma = makePrisma();
     prisma.serviceOrder.findFirst.mockResolvedValueOnce({
       id: 'o1',
+      protocol: 'OS-001',
+      status: 'FECHADA',
       occurrence: { customer: { contacts: { emails: ['noc@provedor.com'] } } },
     });
     prisma.satisfactionResponse.findFirst.mockResolvedValueOnce(null);
@@ -181,5 +199,49 @@ describe('CsatService.listByTenant', () => {
     await svc.listByTenant('t1');
     const where = prisma.satisfactionResponse.findMany.mock.calls[0][0].where;
     expect(where).toEqual({ tenantId: 't1', answered: true });
+  });
+});
+
+describe('CsatService durable email delivery', () => {
+  it('retries an existing unsent survey after an SMTP failure and marks it only after confirmation', async () => {
+    const prisma = makePrisma();
+    prisma.serviceOrder.findFirst.mockResolvedValue({
+      id: 'o1',
+      protocol: 'OS-001',
+      status: 'FECHADA',
+      occurrence: { customer: { contacts: { emails: ['noc@provedor.com'] } } },
+    });
+    prisma.satisfactionResponse.findFirst.mockResolvedValue({
+      id: 'r1',
+      token: 'abc',
+      answered: false,
+      emailSentAt: null,
+    });
+    const sendEmailConfirmed = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('smtp down'))
+      .mockResolvedValue(undefined);
+    const service = new CsatService(prisma, { sendEmailConfirmed } as never);
+    await expect(service.createForOrder('t1', 'o1', true)).rejects.toThrow('smtp down');
+    expect(prisma.satisfactionResponse.update).not.toHaveBeenCalled();
+    await service.createForOrder('t1', 'o1', true);
+    expect(prisma.satisfactionResponse.create).not.toHaveBeenCalled();
+    expect(sendEmailConfirmed).toHaveBeenCalledTimes(2);
+    expect(prisma.satisfactionResponse.update).toHaveBeenCalledWith({
+      where: { id: 'r1' },
+      data: { emailSentAt: expect.any(Date) },
+    });
+  });
+
+  it('does not resend a survey already confirmed by SMTP', async () => {
+    const prisma = makePrisma();
+    prisma.satisfactionResponse.findFirst.mockResolvedValue({
+      id: 'r1',
+      emailSentAt: new Date(),
+      answered: false,
+    });
+    const sendEmailConfirmed = jest.fn();
+    await new CsatService(prisma, { sendEmailConfirmed } as never).createForOrder('t1', 'o1', true);
+    expect(sendEmailConfirmed).not.toHaveBeenCalled();
   });
 });

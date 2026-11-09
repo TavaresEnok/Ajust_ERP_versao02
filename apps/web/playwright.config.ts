@@ -17,7 +17,10 @@ export default defineConfig({
     viewport: { width: 1440, height: 1000 },
   },
   projects: [
+    { name: 'gestao', testMatch: /manager-journey\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'analista', testMatch: /analyst-journey\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'publico', testMatch: /smoke\.spec\.ts/, use: { browserName: 'chromium' } },
+    { name: 'perfis', testMatch: /roles\.spec\.ts/, use: { browserName: 'chromium' } },
     { name: 'setup', testMatch: /auth\.setup\.ts/, use: { browserName: 'chromium' } },
     {
       name: 'gerencia',

@@ -97,6 +97,11 @@ export function WorkflowsHub({ id }: { id?: string }) {
           Acompanhar execuções →
         </Link>
       </div>
+      <p className="mb-5 text-sm text-muted-foreground">
+        {tab === 'operational'
+          ? 'Organize o trabalho: quais etapas a equipe executa, quem pode concluir e quais evidências registrar. Depois de publicar, vincule o fluxo a um serviço do catálogo.'
+          : 'Automatize respostas a eventos, como solicitar uma pesquisa após fechar uma O.S. As etapas de trabalho da equipe ficam em Fluxos de atendimento.'}
+      </p>
       {tab === 'operational' ? (
         <OperationalTemplates code={id && /^(ATEND_|AJUST_)/.test(id) ? id : undefined} />
       ) : (
@@ -118,7 +123,7 @@ function OperationalTemplates({ code }: { code?: string }) {
   return (
     <>
       <PageHeading
-        title="Workflows de atendimento"
+        title="Fluxos de atendimento"
         description="Defina etapas na mesma O.S., decisões e trabalhos independentes. Publicar preserva as versões já em execução."
       >
         {manager && (
@@ -165,9 +170,14 @@ function OperationalTemplates({ code }: { code?: string }) {
             ))}
         </select>
         <p className="self-center text-xs text-muted-foreground">
-          Metas propostas para o piloto; revisão operacional pendente.
+          {row?.draft
+            ? 'Há um rascunho salvo. Publique para aplicá-lo às novas O.S.'
+            : 'Alterações publicadas valem para novas O.S.; atendimentos em andamento mantêm sua versão.'}
         </p>
       </div>
+      <Link className="text-link mb-5 inline-flex" href="/gerencia/servicos?tab=catalog">
+        Vincular um fluxo publicado ao catálogo de serviços →
+      </Link>
       {(row || fresh) && (
         <FlowEditor
           key={`${row?.code || fresh!.code}:${row?.version || 0}`}
@@ -205,10 +215,67 @@ function FlowEditor({
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(false);
   const [decisions, setDecisions] = useState<{ nodeId: string; outcome: string }[]>([]);
+  const [fieldDrafts, setFieldDrafts] = useState<Record<string, string>>({});
   const people = useErpQuery<Person[]>(`${endpoint}/assignees`);
   const action = useErpAction();
   const node = draft.nodes.find((n) => n.id === selected) || draft.nodes[0];
   const simulation = simulateFlow(draft, decisions);
+  const routes = Object.entries(node.routes);
+  const canAddParallel =
+    node.kind === 'task' &&
+    node.orderKey === 'root' &&
+    routes.length === 1 &&
+    node.closeOn.includes(routes[0][0]) &&
+    draft.nodes.find((n) => n.id === routes[0][1])?.kind === 'end';
+  function addParallelDeliveries() {
+    const suffix = draftId();
+    const [outcome, target] = routes[0];
+    const fork = `paralelo_${suffix}`,
+      join = `reunir_${suffix}`;
+    const children = [1, 2].map((number): FlowNode => ({
+      ...node,
+      id: `entrega_${number}_${suffix}`,
+      name: `Entrega complementar ${number}`,
+      orderKey: `entrega_${number}_${suffix}`,
+      requiredFields: ['Resultado técnico'],
+      routes: { Concluído: join },
+      closeOn: ['Concluído'],
+      waitFor: [],
+      position: { x: node.position.x + 560, y: node.position.y + (number - 1) * 200 },
+    }));
+    const control = { ...node, closeOn: [], requiredFields: [], waitFor: [] };
+    setDraft({
+      ...draft,
+      nodes: [
+        ...draft.nodes.map((n) =>
+          n.id === node.id
+            ? { ...n, routes: { [outcome]: fork } }
+            : n.id === target
+              ? { ...n, position: { x: node.position.x + 1120, y: node.position.y } }
+              : n,
+        ),
+        {
+          ...control,
+          id: fork,
+          name: 'Distribuir entregas',
+          kind: 'fork',
+          routes: { 'Entrega 1': children[0].id, 'Entrega 2': children[1].id },
+          position: { x: node.position.x + 280, y: node.position.y },
+        },
+        ...children,
+        {
+          ...control,
+          id: join,
+          name: 'Aguardar as duas entregas',
+          kind: 'join',
+          waitFor: children.map((n) => n.id),
+          routes: { Pronto: target },
+          position: { x: node.position.x + 840, y: node.position.y },
+        },
+      ],
+    });
+    setSelected(children[0].id);
+  }
   function change(patch: Partial<FlowNode>) {
     setDraft((d) => ({
       ...d,
@@ -253,23 +320,11 @@ function FlowEditor({
             onChange={(e) => setDraft({ ...draft, name: e.target.value })}
           />
         </label>
-        <label className="text-xs">
-          Limite de visitas por bloco
-          <input
-            type="number"
-            min={1}
-            max={10}
-            className="native-select mt-2"
-            value={draft.maxVisits}
-            disabled={!manager}
-            onChange={(e) => setDraft({ ...draft, maxVisits: Number(e.target.value) })}
-          />
-        </label>
       </div>
       <p className="text-xs text-muted-foreground">
-        Arraste os blocos para organizar, conecte pelos pontos e clique em um bloco para configurar.
-        As saídas e os resultados podem ser alterados abaixo. Novas O.S. usam uma chave de trabalho
-        própria; etapas com chave “root” permanecem na principal.
+        Dê um nome ao fluxo, configure a primeira etapa e use “Adicionar próxima etapa” para
+        continuar na mesma O.S. Simule os resultados antes de publicar. O diagrama acompanha as
+        alterações.
       </p>
       {error && (
         <p
@@ -371,6 +426,46 @@ function FlowEditor({
                 </option>
               ))}
             </select>
+            {node.kind === 'task' && Object.keys(node.routes).length === 1 && (
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const id = `etapa_${draftId()}`;
+                  const [outcome, target] = Object.entries(node.routes)[0];
+                  const next: FlowNode = {
+                    ...node,
+                    id,
+                    name: 'Nova etapa',
+                    requiredFields: ['Resultado técnico'],
+                    routes: { Concluído: target },
+                    closeOn: node.closeOn.includes(outcome) ? ['Concluído'] : [],
+                    waitFor: [],
+                    position: { x: node.position.x + 280, y: node.position.y },
+                  };
+                  setDraft({
+                    ...draft,
+                    nodes: [
+                      ...draft.nodes.map((n) =>
+                        n.id === node.id
+                          ? { ...n, routes: { [outcome]: id }, closeOn: [] }
+                          : n.position.x > node.position.x
+                            ? { ...n, position: { ...n.position, x: n.position.x + 280 } }
+                            : n,
+                      ),
+                      next,
+                    ],
+                  });
+                  setSelected(id);
+                }}
+              >
+                Adicionar próxima etapa
+              </Button>
+            )}
+            {canAddParallel && (
+              <Button variant="outline" onClick={addParallelDeliveries}>
+                Adicionar duas entregas paralelas
+              </Button>
+            )}
             <Button
               variant="outline"
               onClick={() => {
@@ -388,7 +483,8 @@ function FlowEditor({
                       routes: {
                         Concluído: draft.nodes.find((n) => n.kind === 'end')?.id || draft.start,
                       },
-                      closeOn: [],
+                      closeOn: ['Concluído'],
+                      requiredFields: ['Resultado técnico'],
                       waitFor: [],
                       position: { x: node.position.x + 280, y: node.position.y + 180 },
                     },
@@ -397,7 +493,7 @@ function FlowEditor({
                 setSelected(id);
               }}
             >
-              Adicionar bloco
+              Adicionar bloco independente
             </Button>
             <Button
               variant="outline"
@@ -423,7 +519,7 @@ function FlowEditor({
           </div>
           <div className="grid gap-4 md:grid-cols-3">
             <label className="text-xs">
-              Nome do bloco
+              Nome da etapa
               <input
                 className="native-select mt-2"
                 value={node.name}
@@ -435,7 +531,25 @@ function FlowEditor({
               <select
                 className="native-select mt-2"
                 value={node.kind}
-                onChange={(e) => change({ kind: e.target.value as FlowNode['kind'] })}
+                onChange={(e) => {
+                  const kind = e.target.value as FlowNode['kind'];
+                  change({
+                    kind,
+                    closeOn: kind === 'task' ? node.closeOn : [],
+                    requiredFields: kind === 'task' ? node.requiredFields : [],
+                    routes:
+                      kind === 'end'
+                        ? {}
+                        : Object.keys(node.routes).length
+                          ? node.routes
+                          : {
+                              Concluído:
+                                draft.nodes.find((n) => n.kind === 'end' && n.id !== node.id)?.id ||
+                                draft.start,
+                            },
+                    waitFor: kind === 'join' ? node.waitFor : [],
+                  });
+                }}
               >
                 {[
                   ['task', 'Etapa humana / decisão'],
@@ -449,111 +563,169 @@ function FlowEditor({
                 ))}
               </select>
             </label>
-            <label className="text-xs">
-              Chave da O.S. (“root” = principal)
-              <input
-                className="native-select mt-2"
-                value={node.orderKey}
-                onChange={(e) => change({ orderKey: e.target.value })}
-              />
-            </label>
-            <label className="text-xs">
-              Setor de destino
-              <input
-                className="native-select mt-2"
-                value={node.sector}
-                onChange={(e) => change({ sector: e.target.value })}
-              />
-            </label>
-            <label className="text-xs">
-              Tipo de serviço
-              <select
-                className="native-select mt-2"
-                value={node.serviceType}
-                onChange={(e) => change({ serviceType: e.target.value })}
-              >
-                {Object.entries(orderTypes).map(([v, l]) => (
-                  <option key={v} value={v}>
-                    {l}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label className="text-xs">
-              Meta piloto (minutos)
-              <input
-                className="native-select mt-2"
-                type="number"
-                min={1}
-                value={node.slaMinutes}
-                onChange={(e) => change({ slaMinutes: Number(e.target.value) })}
-              />
-            </label>
-            <label className="text-xs">
-              Responsável padrão
-              <select
-                className="native-select mt-2"
-                value={node.assigneeUserId || ''}
-                onChange={(e) => {
-                  const { assigneeUserId: _, ...rest } = node;
-                  change(
-                    e.target.value
-                      ? { assigneeUserId: e.target.value }
-                      : { ...rest, assigneeUserId: undefined },
-                  );
-                }}
-              >
-                <option value="">Fila do setor</option>
-                {people.data
-                  ?.filter((p) => node.roles.includes(p.role))
-                  .map((p) => (
-                    <option key={p.id} value={p.id}>
-                      {p.name}
-                      {p.accessBlocked ? ' · acesso bloqueado' : ''}
-                    </option>
-                  ))}
-              </select>
-            </label>
-            <label className="text-xs">
-              Evidências obrigatórias (uma por linha)
-              <textarea
-                className="native-select mt-2 min-h-24"
-                value={node.requiredFields.join('\n')}
-                onChange={(e) =>
-                  change({ requiredFields: e.target.value.split('\n').filter(Boolean) })
-                }
-              />
-            </label>
-            {node.kind === 'join' && (
+            {node.kind === 'task' && (
               <label className="text-xs">
-                IDs dos ramos obrigatórios (um por linha)
-                <textarea
-                  className="native-select mt-2 min-h-24"
-                  value={node.waitFor.join('\n')}
-                  onChange={(e) => change({ waitFor: e.target.value.split('\n').filter(Boolean) })}
-                />
-              </label>
-            )}
-          </div>
-          <fieldset className="flex flex-wrap gap-4 text-xs">
-            <legend className="mb-2">Perfis autorizados</legend>
-            {['super_admin', 'gerente', 'analista'].map((role) => (
-              <label key={role}>
-                <input
-                  type="checkbox"
-                  checked={node.roles.includes(role)}
+                Trabalho desta etapa
+                <select
+                  className="native-select mt-2"
+                  value={node.orderKey}
                   onChange={(e) =>
                     change({
-                      roles: e.target.checked
-                        ? [...node.roles, role]
-                        : node.roles.filter((x) => x !== role),
+                      orderKey: e.target.value === '__new__' ? `os_${draftId()}` : e.target.value,
                     })
                   }
-                />{' '}
-                {role}
+                >
+                  <option value="root">Mesma O.S. principal</option>
+                  {[...new Set(draft.nodes.map((n) => n.orderKey))]
+                    .filter((key) => key !== 'root')
+                    .map((key) => (
+                      <option key={key} value={key}>
+                        O.S. complementar ·{' '}
+                        {draft.nodes.find((n) => n.orderKey === key && n.kind === 'task')?.name ||
+                          key}
+                      </option>
+                    ))}
+                  <option value="__new__">Criar outra O.S. para esta entrega</option>
+                </select>
               </label>
-            ))}
-          </fieldset>
+            )}
+            {node.kind === 'task' && (
+              <>
+                <label className="text-xs">
+                  Setor de destino
+                  <input
+                    className="native-select mt-2"
+                    value={node.sector}
+                    onChange={(e) => change({ sector: e.target.value })}
+                  />
+                </label>
+                <label className="text-xs">
+                  Tipo de serviço
+                  <select
+                    className="native-select mt-2"
+                    value={node.serviceType}
+                    onChange={(e) => change({ serviceType: e.target.value })}
+                  >
+                    {Object.entries(orderTypes).map(([v, l]) => (
+                      <option key={v} value={v}>
+                        {l}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label className="text-xs">
+                  Prazo da etapa (minutos)
+                  <input
+                    className="native-select mt-2"
+                    type="number"
+                    min={1}
+                    value={node.slaMinutes}
+                    onChange={(e) => change({ slaMinutes: Number(e.target.value) })}
+                  />
+                </label>
+                <label className="text-xs">
+                  Responsável padrão
+                  <select
+                    className="native-select mt-2"
+                    value={node.assigneeUserId || ''}
+                    onChange={(e) => {
+                      const { assigneeUserId: _, ...rest } = node;
+                      change(
+                        e.target.value
+                          ? { assigneeUserId: e.target.value }
+                          : { ...rest, assigneeUserId: undefined },
+                      );
+                    }}
+                  >
+                    <option value="">Fila do setor</option>
+                    {people.data
+                      ?.filter((p) => node.roles.includes(p.role) && !p.accessBlocked)
+                      .map((p) => (
+                        <option key={p.id} value={p.id}>
+                          {p.name}
+                          {p.accessBlocked ? ' · acesso bloqueado' : ''}
+                        </option>
+                      ))}
+                  </select>
+                </label>
+                <label className="text-xs">
+                  Evidências obrigatórias (uma por linha)
+                  <textarea
+                    aria-label="Evidências obrigatórias (uma por linha)"
+                    className="native-select mt-2 min-h-24"
+                    value={fieldDrafts[node.id] ?? node.requiredFields.join('\n')}
+                    onChange={(e) => {
+                      setFieldDrafts((current) => ({ ...current, [node.id]: e.target.value }));
+                      change({
+                        requiredFields: [
+                          ...new Set(
+                            e.target.value
+                              .split('\n')
+                              .map((field) => field.trim())
+                              .filter(Boolean),
+                          ),
+                        ],
+                      });
+                    }}
+                  />
+                </label>
+              </>
+            )}
+            {node.kind === 'join' && (
+              <fieldset className="space-y-2 text-xs">
+                <legend className="mb-2">Entregas que precisam terminar antes de continuar</legend>
+                {draft.nodes
+                  .filter((n) => n.kind === 'task' && n.orderKey !== 'root')
+                  .map((n) => (
+                    <label key={n.id} className="block">
+                      <input
+                        type="checkbox"
+                        checked={node.waitFor.includes(n.id)}
+                        onChange={(e) =>
+                          change({
+                            waitFor: e.target.checked
+                              ? [...node.waitFor, n.id]
+                              : node.waitFor.filter((id) => id !== n.id),
+                          })
+                        }
+                      />{' '}
+                      {n.name}
+                    </label>
+                  ))}
+              </fieldset>
+            )}
+          </div>
+          {node.kind === 'task' && (
+            <>
+              <p className="text-xs text-muted-foreground">
+                O prazo desta etapa ajuda a acompanhar o fluxo. O prazo de SLA da O.S. é definido
+                nas políticas por tipo de serviço.
+              </p>
+              <fieldset className="flex flex-wrap gap-4 text-xs">
+                <legend className="mb-2">Perfis autorizados</legend>
+                {['super_admin', 'gerente', 'analista'].map((role) => (
+                  <label key={role}>
+                    <input
+                      type="checkbox"
+                      checked={node.roles.includes(role)}
+                      onChange={(e) =>
+                        change({
+                          roles: e.target.checked
+                            ? [...node.roles, role]
+                            : node.roles.filter((x) => x !== role),
+                        })
+                      }
+                    />{' '}
+                    {
+                      { super_admin: 'Administrador', gerente: 'Gerente', analista: 'Analista' }[
+                        role
+                      ]
+                    }
+                  </label>
+                ))}
+              </fieldset>
+            </>
+          )}
           <div className="space-y-3">
             <h3 className="text-sm font-semibold">Resultados, conexões e conclusão da O.S.</h3>
             {Object.entries(node.routes).map(([outcome, target]) => (
@@ -561,6 +733,7 @@ function FlowEditor({
                 <span className="min-w-40 text-xs">{outcome}</span>
                 <select
                   className="native-select"
+                  aria-label={`Próxima etapa para ${outcome}`}
                   value={target}
                   onChange={(e) =>
                     change({ routes: { ...node.routes, [outcome]: e.target.value } })
@@ -576,6 +749,7 @@ function FlowEditor({
                   <label className="text-xs">
                     <input
                       type="checkbox"
+                      aria-label={`Encerrar esta O.S. ao selecionar ${outcome}`}
                       checked={node.closeOn.includes(outcome)}
                       onChange={(e) =>
                         change({
@@ -629,11 +803,24 @@ function FlowEditor({
               <Button variant="outline">Adicionar saída</Button>
             </form>
           )}
-          <p className="text-xs text-muted-foreground">
-            ID deste bloco: {node.id}. Neste piloto, a junção reúne tarefas diretamente abertas pelo
-            mesmo bloco paralelo. A profundidade de O.S. derivadas é limitada a um nível; retornos
-            reutilizam a mesma ordem.
-          </p>
+          <details className="rounded-lg border border-border p-3 text-xs">
+            <summary className="cursor-pointer font-medium">Configurações avançadas</summary>
+            <label className="mt-3 block">
+              Limite de repetições de uma etapa
+              <input
+                type="number"
+                min={1}
+                max={10}
+                className="native-select ml-2"
+                value={draft.maxVisits}
+                onChange={(e) => setDraft({ ...draft, maxVisits: Number(e.target.value) })}
+              />
+            </label>
+            <p className="mt-3">
+              Identificador da etapa: {node.id}. As entregas paralelas devem partir da mesma divisão
+              e podem gerar O.S. complementares em um nível.
+            </p>
+          </details>
         </>
       )}
     </section>

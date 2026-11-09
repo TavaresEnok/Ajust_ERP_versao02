@@ -102,6 +102,7 @@ export function AttendanceIntake({
         fields={fields}
         values={{
           ownerUserId: scope?.userId,
+          assigneeUserId: scope?.role === 'analista' ? scope.userId : undefined,
           sector: occurrence?.sector,
           origin: occurrence?.origin,
         }}

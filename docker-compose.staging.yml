@@ -1,3 +1,4 @@
+# Staging uses the same production protections with its own credentials, keys and volumes.
 services:
   drawio:
     image: jgraph/drawio:32.6.1@sha256:3d0a5a5ffb4f76abcecd9d17ae1373e3eefd0db07b657c545637dc9c6a7412e1
@@ -12,14 +13,19 @@ services:
       timeout: 5s
       retries: 3
       start_period: 20s
+  # ── Frontend (Next.js BFF) ───────────────────────────────
   web:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/web:${IMAGE_TAG:-latest}
     ports:
-      - "8080:3000"
+      # Só na máquina: o acesso público é pelo Caddy (HTTPS do staging).
+      - "127.0.0.1:${WEB_PORT:-8080}:3000"
     env_file:
-      - .env.staging.example
+      - ${STAGING_ENV_FILE:-.env.staging}
     environment:
-      - NODE_ENV=staging
+      - NODE_ENV=production
+      # O Next standalone escuta em $HOSTNAME; com o id do contêiner, o healthcheck em 127.0.0.1 falha.
+      - HOSTNAME=0.0.0.0
+      - DRAWIO_INTERNAL_URL=http://drawio:8080
       - API_INTERNAL_URL=http://api:3001
       - API_BASE_URL=${API_BASE_URL}
       - WS_PUBLIC_URL=${API_BASE_URL}
@@ -28,104 +34,178 @@ services:
         condition: service_healthy
       api:
         condition: service_healthy
+    restart: always
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3000"]
-      interval: 15s
-      timeout: 5s
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
+      interval: 30s
+      timeout: 10s
       retries: 3
-      start_period: 30s
-    restart: unless-stopped
+      start_period: 20s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.75"
 
+  # ── API (NestJS) ─────────────────────────────────────────
   api:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/api:${IMAGE_TAG:-latest}
     ports:
-      - "8081:3001"
+      # Mesma porta usada pelo Caddy para o /socket.io.
+      - "127.0.0.1:${API_PORT:-8081}:3001"
     env_file:
-      - .env.staging.example
+      - ${STAGING_ENV_FILE:-.env.staging}
     environment:
-      - NODE_ENV=staging
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379
-      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET}
-      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET}
-      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
-      - UPLOAD_ROOT=/app/uploads
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-    healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3001/monitoring/health"]
-      interval: 15s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
-
-  worker:
-    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/worker:${IMAGE_TAG:-latest}
-    ports:
-      - "8086:3002"
-    env_file:
-      - .env.staging.example
-    environment:
-      - NODE_ENV=staging
-      - DATABASE_URL=${DATABASE_URL}
-      - REDIS_URL=redis://redis:6379
-      - IXC_RECONCILE_INTERVAL_MS=300000
-      - EXPORT_RETENTION_DAYS=30
-      - EXPORT_RETENTION_INTERVAL_MS=3600000
-      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY}
-      - WORKER_API_TOKEN=${WORKER_API_TOKEN}
-      - SMTP_HOST=${SMTP_HOST}
+      - NODE_ENV=production
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN:?Defina WORKER_API_TOKEN}
+      # Inclua gerente depois que os gerentes configurarem o 2FA (C-051).
+      - REQUIRE_2FA_ROLES=${REQUIRE_2FA_ROLES:-super_admin}
+      - DATABASE_URL=postgresql://ajust_staging:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}@postgres:5432/ajust_staging?schema=public
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Defina REDIS_PASSWORD}@redis:6379
+      - JWT_ACCESS_SECRET=${JWT_ACCESS_SECRET:?Defina JWT_ACCESS_SECRET}
+      - JWT_REFRESH_SECRET=${JWT_REFRESH_SECRET:?Defina JWT_REFRESH_SECRET}
+      - JWT_RESET_SECRET=${JWT_RESET_SECRET:?Defina JWT_RESET_SECRET}
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:?Defina SECRETS_ENCRYPTION_KEY}
+      - MONITORING_WEBHOOK_TOKEN=${MONITORING_WEBHOOK_TOKEN:?Defina MONITORING_WEBHOOK_TOKEN}
+      - CHAT_WEBHOOK_TOKEN=${CHAT_WEBHOOK_TOKEN:?Defina CHAT_WEBHOOK_TOKEN}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      - SMTP_HOST=${SMTP_HOST:-}
       - SMTP_PORT=${SMTP_PORT:-587}
       - SMTP_SECURE=${SMTP_SECURE:-false}
-      - SMTP_USER=${SMTP_USER}
-      - SMTP_PASS=${SMTP_PASS}
-      - SMTP_FROM=${SMTP_FROM}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-"Ajust ERP <noreply@ajusterp.com.br>"}
+      - WEB_BASE_URL=${WEB_BASE_URL:?Defina WEB_BASE_URL}
+      - FRONTEND_URL=${WEB_BASE_URL}
+      - PUBLIC_APP_URL=${WEB_BASE_URL}
+      - UPLOAD_ROOT=/app/uploads
+      - VAULT_KEY_FILE=/run/secrets/vault.key
+    volumes:
+      # Pasta de uploads do servidor (anexos, relatórios, logos).
+      - ${UPLOADS_HOST_DIR:-./uploads-staging}:/app/uploads
+      - type: bind
+        source: ${VAULT_KEY_HOST_FILE:?Informe o caminho da chave existente do cofre fora de uploads}
+        target: /run/secrets/vault.key
+        read_only: true
+        bind:
+          create_host_path: false
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    restart: always
     healthcheck:
-      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:3002/health"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
-      start_period: 20s
-    restart: unless-stopped
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/monitoring/ready | grep -q '\"ready\":true' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
+  # ── Worker (Sync/Jobs) ───────────────────────────────────
+  worker:
+    image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/worker:${IMAGE_TAG:-latest}
+    env_file:
+      - ${STAGING_ENV_FILE:-.env.staging}
+    environment:
+      - NODE_ENV=production
+      - API_INTERNAL_URL=http://api:3001
+      - DATABASE_URL=postgresql://ajust_staging:${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}@postgres:5432/ajust_staging?schema=public
+      - REDIS_URL=redis://:${REDIS_PASSWORD:?Defina REDIS_PASSWORD}@redis:6379
+      - IXC_RECONCILE_INTERVAL_MS=${IXC_RECONCILE_INTERVAL_MS:-300000}
+      - UPLOAD_ROOT=/app/uploads
+      - SECRETS_ENCRYPTION_KEY=${SECRETS_ENCRYPTION_KEY:?Defina SECRETS_ENCRYPTION_KEY}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
+      - WORKER_API_TOKEN=${WORKER_API_TOKEN:?Defina WORKER_API_TOKEN}
+      - SMTP_HOST=${SMTP_HOST:-}
+      - SMTP_PORT=${SMTP_PORT:-587}
+      - SMTP_SECURE=${SMTP_SECURE:-false}
+      - SMTP_USER=${SMTP_USER:-}
+      - SMTP_PASS=${SMTP_PASS:-}
+      - SMTP_FROM=${SMTP_FROM:-"Ajust ERP <noreply@ajusterp.com.br>"}
+    volumes:
+      # Pasta de uploads do servidor (anexos, relatórios, logos).
+      - ${UPLOADS_HOST_DIR:-./uploads-staging}:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    restart: always
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/health | grep -q '\"status\"' || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+          cpus: "0.5"
+
+  # ── PostgreSQL ───────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
-    ports:
-      - "8082:5432"
-    env_file:
-      - .env.staging.example
     environment:
       POSTGRES_DB: ajust_staging
       POSTGRES_USER: ajust_staging
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Defina POSTGRES_PASSWORD}
     volumes:
       - postgres_staging_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ajust_staging -d ajust_staging"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
-    restart: unless-stopped
+      retries: 5
+      start_period: 10s
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+          cpus: "1.0"
 
+  # ── Redis (Pub/Sub + Sessions) ───────────────────────────
   redis:
     image: redis:7-alpine
-    ports:
-      - "8083:6379"
+    environment:
+      REDISCLI_AUTH: ${REDIS_PASSWORD:?Defina REDIS_PASSWORD}
+    command:
+      - redis-server
+      - --save
+      - "60 1"
+      - --loglevel
+      - warning
+      - --maxmemory
+      - 256mb
+      - --maxmemory-policy
+      - noeviction
+      - --appendonly
+      - "yes"
+      - --requirepass
+      - ${REDIS_PASSWORD:?Defina REDIS_PASSWORD}
+    volumes:
+      - redis_staging_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 10s
       timeout: 5s
-      retries: 10
-    restart: unless-stopped
+      retries: 5
+    restart: always
+    deploy:
+      resources:
+        limits:
+          memory: 300M
+          cpus: "0.25"
 
 volumes:
   postgres_staging_data:
+    driver: local
+  redis_staging_data:
+    driver: local

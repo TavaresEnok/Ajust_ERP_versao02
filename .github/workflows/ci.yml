@@ -4,6 +4,7 @@ on:
   push:
     branches: [main, master]
   pull_request:
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.workflow }}-${{ github.ref }}
@@ -20,6 +21,7 @@ env:
   WORKER_API_TOKEN: ci_worker_token_minimum_thirty_two_characters_x
   WEB_BASE_URL: http://localhost:3000
   API_BASE_URL: http://localhost:3001
+  REDIS_URL: redis://localhost:6379
   SMTP_HOST: smtp.mailgun.org
   SMTP_USER: ci@company.test
   SMTP_PASS: ci_smtp_password_minimum_thirty_two_chars
@@ -44,6 +46,15 @@ jobs:
     runs-on: ubuntu-latest
 
     services:
+      redis:
+        image: redis:7-alpine
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
       postgres:
         image: postgres:16-alpine
         env:
@@ -67,7 +78,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: 'pnpm'
 
       - name: Install dependencies
@@ -97,11 +108,10 @@ jobs:
       - name: Build Web
         run: pnpm --filter @ajust/web build
 
-      - name: Maintenance script safety tests
-        run: node --test scripts/data-script-guard.test.cjs
-
       - name: Seed isolated integration database
         run: node scripts/seed-test-db.cjs
+        env:
+          SEED_E2E_PASSWORD: CiOnlyPassword@123
 
       - name: Database integration tests
         run: pnpm --filter @ajust/api exec jest --runInBand --testPathPatterns=integration
@@ -113,7 +123,7 @@ jobs:
         run: pnpm test:unit:coverage
 
       - name: Operational script safeguards
-        run: node --test scripts/data-script-guard.test.cjs scripts/db-backup.test.cjs
+        run: pnpm test:scripts
 
       - name: Release configuration check
         run: pnpm release:check
@@ -127,6 +137,8 @@ jobs:
         run: pnpm --filter @ajust/api test:e2e
 
       - name: Start API server
+        env:
+          REQUIRE_2FA_ROLES: super_admin
         working-directory: apps/api
         run: |
           node dist/main.js &
@@ -151,9 +163,40 @@ jobs:
         env:
           LOAD_BASE_URL: http://127.0.0.1:3001
 
+      - name: Install browser
+        run: pnpm --filter @ajust/web exec playwright install --with-deps chromium
+
+      - name: Start Web server
+        working-directory: apps/web
+        env:
+          API_INTERNAL_URL: http://127.0.0.1:3001
+        run: |
+          pnpm start > /tmp/ajust-web.log 2>&1 &
+          echo $! > /tmp/ajust-web.pid
+          for i in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:3000/login >/dev/null; then exit 0; fi
+            sleep 1
+          done
+          cat /tmp/ajust-web.log
+          exit 1
+
+      - name: Browser regression tests
+        run: pnpm test:web:e2e
+        env:
+          PLAYWRIGHT_BASE_URL: http://127.0.0.1:3000
+          E2E_WEB_EMAIL: gerente@example.invalid
+          E2E_WEB_PASSWORD: CiOnlyPassword@123
+          E2E_ROLE_PASSWORD: CiOnlyPassword@123
+          E2E_ANALYST_JOURNEY: '1'
+          E2E_MANAGER_JOURNEY: '1'
+
+      - name: Stop Web
+        if: always()
+        run: kill $(cat /tmp/ajust-web.pid) 2>/dev/null || true
+
       - name: Stop API
         if: always()
         run: kill $(cat /tmp/ajust-api.pid) 2>/dev/null || true
 
       - name: Dependency audit
-        run: pnpm audit --audit-level=high
+        run: pnpm run audit

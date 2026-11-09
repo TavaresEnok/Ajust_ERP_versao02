@@ -305,32 +305,43 @@ export function RecordWorkspace({
         <TabsContent value="Editar" keepMounted={embedded && canOperate} className={contentClass}>
           <section className={embedded ? 'space-y-5' : 'panel p-6'}>
             <h2 className="section-title mb-5">Editar dados do atendimento</h2>
+            {kind === 'orders' && !manager && (
+              <p className="mb-4 text-sm text-muted-foreground">
+                O prazo é definido pelo serviço. Para alterá-lo, solicite a mudança à gestão.
+              </p>
+            )}
             <ContractForm
               key={`${id}-${String(record?.version || '')}`}
               label="Salvar alterações"
               fields={
                 kind === 'orders'
                   ? [
-                      ...orderFields.map((field) =>
-                        [
-                          'requester',
-                          'sector',
-                          'origin',
-                          'ownerName',
-                          'analystName',
-                          'internalNotes',
-                        ].includes(field.name)
-                          ? { ...field, nullable: true }
-                          : field.name === 'deadlineAt'
-                            ? { ...field, label: 'Prazo' }
-                            : field,
-                      ),
-                      {
-                        name: 'deadlineReason',
-                        label: 'Motivo da mudança de prazo',
-                        hint: 'Obrigatório só se você mudar o prazo. Mudança de prazo é feita pela gestão.',
-                        max: 2000,
-                      },
+                      ...orderFields
+                        .filter((field) => manager || field.name !== 'deadlineAt')
+                        .map((field) =>
+                          [
+                            'requester',
+                            'sector',
+                            'origin',
+                            'ownerName',
+                            'analystName',
+                            'internalNotes',
+                          ].includes(field.name)
+                            ? { ...field, nullable: true }
+                            : field.name === 'deadlineAt'
+                              ? { ...field, label: 'Prazo' }
+                              : field,
+                        ),
+                      ...(manager
+                        ? [
+                            {
+                              name: 'deadlineReason',
+                              label: 'Motivo da mudança de prazo',
+                              hint: 'Obrigatório só se você mudar o prazo. Mudança de prazo é feita pela gestão.',
+                              max: 2000,
+                            },
+                          ]
+                        : []),
                     ]
                   : editOccurrence
               }

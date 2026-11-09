@@ -10,12 +10,19 @@ export class CsatService {
     @Inject(EmailService) private readonly emailService: EmailService,
   ) {}
 
-  async createForOrder(tenantId: string, orderId: string) {
+  async createForOrder(tenantId: string, orderId: string, confirmDelivery = false) {
     const order = await this.prisma.serviceOrder.findFirst({
       where: { id: orderId, tenantId, deletedAt: null },
-      select: { id: true, occurrence: { select: { customer: { select: { contacts: true } } } } },
+      select: {
+        id: true,
+        protocol: true,
+        status: true,
+        occurrence: { select: { customer: { select: { contacts: true } } } },
+      },
     });
     if (!order) throw new NotFoundException('Order not found.');
+    if (order.status !== 'FECHADA')
+      throw new BadRequestException('A pesquisa só pode ser enviada após o fechamento da O.S.');
     // A pesquisa vai para o provedor atendido, não para o contato da Ajust (C-032).
     const contacts = (order.occurrence?.customer?.contacts ?? {}) as { emails?: unknown };
     const recipient = Array.isArray(contacts.emails)
@@ -27,25 +34,40 @@ export class CsatService {
     const existing = await this.prisma.satisfactionResponse.findFirst({
       where: { orderId, tenantId },
     });
-    if (existing) return existing;
+    if (existing && (!confirmDelivery || existing.emailSentAt || existing.answered))
+      return existing;
 
-    const survey = await this.prisma.satisfactionResponse.create({
-      data: { tenantId, orderId, score: 1, answered: false },
-      include: { order: { select: { protocol: true } } },
-    });
+    const data = { tenantId, orderId, score: 1, answered: false };
+    const survey =
+      existing ??
+      (confirmDelivery
+        ? await this.prisma.satisfactionResponse.upsert({
+            where: { orderId },
+            create: data,
+            update: {},
+            include: { order: { select: { protocol: true } } },
+          })
+        : await this.prisma.satisfactionResponse.create({
+            data,
+            include: { order: { select: { protocol: true } } },
+          }));
+    const protocol = order.protocol;
 
     if (recipient) {
       const webBaseUrl =
         process.env.WEB_BASE_URL || process.env.FRONTEND_URL || 'http://localhost:8070';
       const link = `${webBaseUrl.replace(/\/+$/, '')}/csat/${survey.token}`;
-      this.emailService.sendEmail(
+      const send = confirmDelivery
+        ? this.emailService.sendEmailConfirmed.bind(this.emailService)
+        : this.emailService.sendEmail.bind(this.emailService);
+      await send(
         recipient,
-        `Pesquisa de Satisfação - O.S ${survey.order?.protocol || ''}`,
-        `Olá!\n\nA Ordem de Serviço ${survey.order?.protocol || ''} foi resolvida. Gostaríamos de saber como foi sua experiência.\n\nPor favor, acesse o link abaixo para nos avaliar:\n${link}\n\nObrigado,\nEquipe Ajust ERP`,
+        `Pesquisa de Satisfação - O.S ${protocol || ''}`,
+        `Olá!\n\nA Ordem de Serviço ${protocol || ''} foi resolvida. Gostaríamos de saber como foi sua experiência.\n\nPor favor, acesse o link abaixo para nos avaliar:\n${link}\n\nObrigado,\nEquipe Ajust ERP`,
         `
         <div style="font-family: sans-serif; max-w: 600px; margin: 0 auto; color: #333;">
           <h2 style="color: #4f46e5;">Sua Ordem de Serviço foi concluída!</h2>
-          <p>A O.S <strong>${survey.order?.protocol || ''}</strong> foi marcada como resolvida.</p>
+          <p>A O.S <strong>${protocol || ''}</strong> foi marcada como resolvida.</p>
           <p>Para continuarmos entregando o melhor serviço, sua opinião é fundamental. Demora menos de 10 segundos!</p>
           <div style="text-align: center; margin: 30px 0;">
             <a href="${link}" style="background-color: #6366f1; color: white; padding: 14px 24px; text-decoration: none; border-radius: 8px; font-weight: bold; font-size: 16px;">
@@ -58,6 +80,11 @@ export class CsatService {
       );
     }
 
+    if (confirmDelivery && recipient)
+      await this.prisma.satisfactionResponse.update({
+        where: { id: survey.id },
+        data: { emailSentAt: new Date() },
+      });
     return survey;
   }
 

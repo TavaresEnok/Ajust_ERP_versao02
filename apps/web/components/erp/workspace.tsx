@@ -123,6 +123,7 @@ export function Workspace({ path = '/' }: { path?: string }) {
     if (section === 'processos') return <ProcessTemplatesPage id={id} base={base} />;
     if (section === 'automacoes') return <WorkflowEditorPage key={path} id={id} />;
     if (section === 'calendario-sla') return <SlaWorkspace />;
+    if (section === 'politicas-sla' && !id) return <SlaWorkspace initialTab="Políticas" />;
     if (section === 'configuracoes-ativos') return <CmdbWorkspace />;
     if (path === '/' || path === '/gerencia')
       return scope?.role === 'analista' ? <AnalystDashboard /> : <Dashboard />;

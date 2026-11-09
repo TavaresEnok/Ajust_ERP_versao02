@@ -21,6 +21,7 @@ import { ContractForm, ConnectionNotice, ErpEmpty, QueryState } from './contract
 import { PageHeading, PanelHeading, StatusBadge } from './primitives';
 import { WorkflowNodeForm } from './workflow-node-form';
 import { WorkflowVersions } from './workflow-versions';
+import { WorkflowExecutions } from './workflow-executions';
 import { DataReport } from './data-report';
 import { OperationControl } from './operation-controls';
 import { useRouter } from 'next/navigation';
@@ -33,6 +34,11 @@ type WorkflowRecord = ErpRecord & {
   name: string;
   description?: string;
   enabled: boolean;
+};
+const nodeLabels: Record<string, string> = {
+  ...workflowSubtypes.trigger,
+  ...workflowSubtypes.condition,
+  ...workflowSubtypes.action,
 };
 export function WorkflowEditorPage({ id }: { id?: string }) {
   const { scope } = useErp();
@@ -53,12 +59,12 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
   return (
     <>
       <PageHeading
-        title="Automação de workflows"
-        description="Gatilhos, condições, ações e governança no contrato original do ERP."
+        title="Automações por evento"
+        description="Escolha o evento e a ação que o ERP deve executar automaticamente. Para definir o trabalho da equipe, use Fluxos de atendimento."
       >
         <Link href="/gerencia/automacoes/novo" className="text-link">
           <Plus className="size-3" />
-          Novo workflow
+          Nova automação
         </Link>
         {selected && (
           <>
@@ -86,7 +92,7 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
       {!query.connected && <ConnectionNotice />}
       {!id ? (
         <section className="panel">
-          <PanelHeading title="Workflows do ERP" />
+          <PanelHeading title="Automações configuradas" />
           <QueryState
             loading={query.isLoading}
             error={query.error}
@@ -121,9 +127,10 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
               key={(selected?.updatedAt as string) || id}
               initial={selected}
               connected={query.connected}
-              onSaved={async () => {
+              onSaved={async (savedId) => {
                 await query.mutate();
-                if (id && id !== 'novo') await detail.mutate();
+                if (id === 'novo' && savedId) router.replace(`/gerencia/automacoes/${savedId}`);
+                else if (id && id !== 'novo') await detail.mutate();
               }}
             />
           )}
@@ -139,7 +146,7 @@ function WorkflowDraft({
 }: {
   initial?: WorkflowRecord;
   connected: boolean;
-  onSaved: () => Promise<void>;
+  onSaved: (id?: string) => Promise<void>;
 }) {
   const action = useErpAction();
   const [definition, setDefinition] = useState<WorkflowDefinition>(
@@ -160,9 +167,9 @@ function WorkflowDraft({
   const [result, setResult] = useState('');
   const warnings = workflowWarnings(definition);
   const nodeOptions = Object.fromEntries(
-    definition.nodes.map((node) => [
+    definition.nodes.map((node, index) => [
       node.id,
-      `${node.type} · ${node.subtype} · ${node.id.slice(0, 8)}`,
+      `${nodeLabels[node.subtype] || node.subtype} · ${index + 1}`,
     ]),
   );
   const updateDefinition = useCallback((next: WorkflowDefinition) => {
@@ -188,10 +195,50 @@ function WorkflowDraft({
         </TabsList>
       </div>
       <TabsContent value="Definição">
+        {!definition.nodes.length && (
+          <section className="panel mb-5 space-y-3 p-5">
+            <h2 className="section-title">Comece com uma automação pronta</h2>
+            <p className="text-sm text-muted-foreground">
+              O exemplo já conecta evento e ação. Revise a configuração e marque a ativação quando
+              estiver pronto.
+            </p>
+            <Button
+              variant="outline"
+              onClick={() => {
+                updateDefinition({
+                  nodes: [
+                    {
+                      id: 'fechamento',
+                      type: 'trigger',
+                      subtype: 'os_fechada',
+                      config: {},
+                      position: { x: 0, y: 0 },
+                    },
+                    {
+                      id: 'pesquisa',
+                      type: 'action',
+                      subtype: 'action_csat',
+                      config: {},
+                      position: { x: 280, y: 0 },
+                    },
+                  ],
+                  edges: [{ id: 'fechamento_pesquisa', source: 'fechamento', target: 'pesquisa' }],
+                  governance: definition.governance,
+                });
+                setMetadata((current) => ({
+                  ...current,
+                  name: current.name || 'Pesquisa de satisfação após fechamento',
+                }));
+              }}
+            >
+              Pesquisa de satisfação ao fechar O.S.
+            </Button>
+          </section>
+        )}
         <div className="grid min-w-0 gap-5 xl:grid-cols-[1fr_320px]">
           <section className="panel min-w-0">
             <PanelHeading
-              title="Nós e conexões"
+              title="Eventos, condições e ações"
               description="Editor estruturado · alterações são rascunhos até o envio"
             >
               <Button
@@ -205,7 +252,7 @@ function WorkflowDraft({
                 }}
               >
                 <Plus data-icon="inline-start" />
-                Nó
+                Adicionar evento, condição ou ação
               </Button>
             </PanelHeading>
             <WorkflowGraph definition={definition} onChange={updateDefinition} onEdit={editNode} />
@@ -227,7 +274,9 @@ function WorkflowDraft({
                               ? 'CONDIÇÃO'
                               : 'AÇÃO'}
                         </p>
-                        <h3 className="mt-1 truncate text-xs">{node.subtype}</h3>
+                        <h3 className="mt-1 truncate text-xs">
+                          {nodeLabels[node.subtype] || node.subtype}
+                        </h3>
                       </div>
                       <Button
                         size="icon-sm"
@@ -259,12 +308,13 @@ function WorkflowDraft({
                         <Trash2 />
                       </Button>
                     </div>
-                    <p className="mt-3 break-all font-mono text-[9px] text-muted-foreground">
-                      {node.id}
-                    </p>
-                    <p className="mt-2 text-[10px] text-muted-foreground">
-                      Posição: {node.position.x}, {node.position.y}
-                    </p>
+                    <details className="mt-3 text-[10px] text-muted-foreground">
+                      <summary className="cursor-pointer">Detalhes do desenho</summary>
+                      <p className="mt-2 break-all font-mono">{node.id}</p>
+                      <p className="mt-2 text-[10px] text-muted-foreground">
+                        Posição: {node.position.x}, {node.position.y}
+                      </p>
+                    </details>
                   </article>
                 ))
               ) : (
@@ -288,7 +338,13 @@ function WorkflowDraft({
                   className="flex items-center justify-between gap-3 rounded-lg bg-muted p-3 text-[10px]"
                 >
                   <span className="break-all">
-                    {edge.source.slice(0, 8)} → {edge.target.slice(0, 8)}{' '}
+                    {nodeLabels[
+                      definition.nodes.find((n) => n.id === edge.source)?.subtype || ''
+                    ] || edge.source}{' '}
+                    →{' '}
+                    {nodeLabels[
+                      definition.nodes.find((n) => n.id === edge.target)?.subtype || ''
+                    ] || edge.target}{' '}
                     {edge.label ? `· ${edge.label}` : ''}
                   </span>
                   <Button
@@ -369,9 +425,9 @@ function WorkflowDraft({
                 });
                 setLastSaved(saved.id);
                 toast.success('Workflow confirmado pelo ERP');
-                await onSaved();
+                await onSaved(saved.id);
               }}
-              label="Salvar workflow no ERP"
+              label="Salvar automação"
             />
             {checked && (
               <p role="status" className="mt-4 text-xs text-primary">
@@ -431,6 +487,7 @@ function WorkflowDraft({
       </TabsContent>
       <TabsContent value="Execução e logs">
         <div className="flex flex-col gap-5">
+          {initial && <WorkflowExecutions id={initial.id} />}
           <DataReport
             title="Estado do motor de workflows"
             path="/workflows/status"
@@ -458,12 +515,10 @@ function WorkflowDraft({
             />
           )}
           <Alert>
-            <AlertTitle>Execução pertence ao motor original</AlertTitle>
+            <AlertTitle>Acompanhamento das automações</AlertTitle>
             <AlertDescription>
-              Não há execução simulada nesta interface. Consulte /workflows/status para o estado do
-              motor. O modelo WorkflowExecutionLog existe no Prisma, mas o controller do ZIP não
-              expõe um endpoint de consulta de logs nem de execução manual. A auditoria acima não
-              substitui logs de execução. Essas interfaces dependem da definição desse contrato.
+              As regras ativas executam quando o evento acontece. Os registros recentes mostram o
+              resultado dessas execuções; a auditoria registra quem alterou a configuração da regra.
             </AlertDescription>
           </Alert>
         </div>

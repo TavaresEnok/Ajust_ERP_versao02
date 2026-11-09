@@ -1,5 +1,6 @@
 'use client';
 import { Fragment, useMemo, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import { BarChart3, Clock3, Layers, RefreshCw, AlertTriangle, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
@@ -60,7 +61,10 @@ const hours = (value: number | null | undefined) =>
 export function ServiceTypesAnalyticsPage() {
   const { scope } = useErp();
   const canAnalyze = !scope || scope.role !== 'cliente';
-  const [tab, setTab] = useState<'analysis' | 'catalog'>('analysis');
+  const searchParams = useSearchParams();
+  const [tab, setTab] = useState<'analysis' | 'catalog'>(
+    searchParams.get('tab') === 'catalog' ? 'catalog' : 'analysis',
+  );
   const [period, setPeriod] = useState('all');
   const [from, setFrom] = useState('');
   const [to, setTo] = useState('');

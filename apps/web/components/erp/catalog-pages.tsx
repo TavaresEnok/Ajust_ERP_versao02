@@ -189,10 +189,10 @@ export function CatalogPage({
         }
       >
         <Link
-          href={`${portalBase}/${isService ? 'processos' : 'calendario-sla'}`}
+          href={`${portalBase}/${isService ? 'workflows' : 'calendario-sla'}`}
           className="text-link"
         >
-          {isService ? 'Modelos de processos' : 'Regras e calendário'}
+          {isService ? 'Criar ou editar fluxos de atendimento' : 'Regras e calendário'}
         </Link>
         <RecordDialog
           title={isService ? 'Novo tipo de serviço' : 'Nova política de SLA'}
@@ -283,7 +283,7 @@ export function WorkflowsPage({ id }: { id?: string }) {
       <>
         <Link href={`${base}/workflows`} className="mb-4 text-link">
           <ArrowLeft />
-          Todos os workflows
+          Todas as automações
         </Link>
         <WorkflowEditorPage id={id} />
       </>
@@ -291,12 +291,12 @@ export function WorkflowsPage({ id }: { id?: string }) {
   return (
     <>
       <PageHeading
-        title="Workflows"
-        description="Menos ruído, mais fluidez em cada etapa da operação."
+        title="Automações por evento"
+        description="Regras que executam ações quando uma O.S. é criada, atualizada ou encerrada."
       >
-        <Link href={`${base}/workflows/novo`} className={buttonVariants()}>
+        <Link href={`${base}/automacoes/novo`} className={buttonVariants()}>
           <Plus className="size-4" />
-          Novo workflow
+          Nova automação
         </Link>
       </PageHeading>
       <QueryState
@@ -322,8 +322,8 @@ export function WorkflowsPage({ id }: { id?: string }) {
                   : '—'}{' '}
                 etapas
               </span>
-              <ViewLink href={`${base}/workflows/${encodeURIComponent(row.id)}`}>
-                Editar fluxo
+              <ViewLink href={`${base}/automacoes/${encodeURIComponent(row.id)}`}>
+                Editar automação
               </ViewLink>
             </div>
           </article>

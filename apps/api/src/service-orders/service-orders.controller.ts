@@ -138,7 +138,7 @@ const CreateAnnotationSchema = z.object({
 const TransitionSchema = z.object({
   toStatus: z.nativeEnum(ServiceOrderStatus),
   reason: z.string().min(3),
-  expectedVersion: z.coerce.number().int().positive().optional(),
+  expectedVersion: z.coerce.number().int().positive(),
 });
 
 const ApprovalSchema = z.object({

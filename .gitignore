@@ -25,3 +25,6 @@ backups/
 *.orig
 *.tmp
 *~
+
+# Local immutable image snapshots used for rollback
+.deploy/
