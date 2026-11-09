@@ -818,6 +818,20 @@ export function TeamRosterPage() {
         error={query.error}
         onRetry={() => void query.mutate()}
       />
+      {demo && (
+        <div
+          role="status"
+          className="sticky top-2 z-10 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-surface p-3 text-sm text-warning"
+        >
+          <span>
+            <strong>Exemplo:</strong> nomes e plantões fictícios, só para mostrar como a escala
+            fica. Nada aqui é a escala real e nada pode ser editado.
+          </span>
+          <Button size="sm" variant="outline" onClick={() => setExample(false)}>
+            Voltar à escala real
+          </Button>
+        </div>
+      )}
       {manager && real && !demo && showHolidayPicker && (
         <div className="panel mb-5 flex flex-wrap items-center gap-3 p-4">
           <CalendarDays className="size-4 text-primary" />

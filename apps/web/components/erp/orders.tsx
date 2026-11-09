@@ -507,7 +507,7 @@ export function OrdersPage({
         )}
         {!customer && (
           <div
-            className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3"
+            className="flex items-center gap-2 overflow-x-auto border-b border-border px-5 py-3 sm:flex-wrap [&>*]:shrink-0"
             aria-label="Filtrar ordens por prazo"
           >
             <span className="mr-1 text-xs text-muted-foreground">Prazo</span>

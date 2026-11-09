@@ -185,7 +185,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
   );
   return (
     <div className="mx-auto max-w-[1400px] space-y-6">
-      <header className="relative overflow-hidden rounded-2xl border border-slate-800 bg-gradient-to-br from-slate-950 via-slate-900 to-info p-6 text-white sm:p-8">
+      <header className="tone-surface tone-info relative overflow-hidden rounded-2xl border p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
             <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.18em] text-info">
@@ -193,14 +193,14 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
               Base de conhecimento · Ajust
             </p>
             <h1 className="text-3xl font-semibold tracking-tight">Ajustpedia</h1>
-            <p className="mt-3 max-w-xl text-sm leading-6 text-slate-300">
+            <p className="mt-3 max-w-xl text-sm leading-6 text-muted-foreground">
               Procedimentos, comandos e conhecimento técnico compartilhado pela equipe.
             </p>
           </div>
           <div className="flex gap-2">
             <Button
               variant="outline"
-              className="border-white/20 bg-white/5 text-white hover:bg-white/10"
+              className="bg-card"
               onClick={() => setOnlyFavorites((v) => !v)}
               aria-pressed={onlyFavorites}
             >
@@ -212,18 +212,20 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
             )}
           </div>
         </div>
-        <div className="mt-6 grid gap-4 border-t border-white/10 pt-5 sm:grid-cols-3">
+        <div className="mt-6 grid gap-4 border-t border-border pt-5 sm:grid-cols-3">
           {[
             { label: 'Artigos disponíveis', value: articles.length, icon: FileText },
             { label: 'Artigos com comandos', value: totalCommands, icon: Terminal },
             { label: 'Categorias e tags', value: tags.length, icon: Layers },
           ].map((stat) => (
             <div key={stat.label} className="flex items-center gap-3">
-              <span className="rounded-xl border border-white/10 bg-white/5 p-2.5">
+              <span className="rounded-xl border border-border bg-card p-2.5">
                 <stat.icon className="size-4 text-info" />
               </span>
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-slate-400">{stat.label}</p>
+                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {stat.label}
+                </p>
                 <p className="mt-1 font-semibold">{stat.value}</p>
               </div>
             </div>

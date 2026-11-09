@@ -11,6 +11,7 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
+  DialogFooter,
 } from '@/components/ui/dialog';
 import { useErp, useErpAction } from '@/lib/erp/gateway';
 import { modules } from '@/lib/erp/modules';
@@ -35,6 +36,13 @@ export function OrderForm({
   const [ownOpen, setOwnOpen] = useState(false);
   const visible = open ?? ownOpen;
   const setOpen = onOpenChange ?? setOwnOpen;
+  const [dirty, setDirty] = useState(false);
+  const [confirmDiscard, setConfirmDiscard] = useState(false);
+  const close = () => {
+    setDirty(false);
+    setConfirmDiscard(false);
+    setOpen(false);
+  };
   const { scope } = useErp();
   const action = useErpAction();
   const { mutate } = useSWRConfig();
@@ -47,6 +55,7 @@ export function OrderForm({
       occurrence={occurrence}
       connected={action.connected && allowed}
       pending={action.pending}
+      onDirtyChange={setDirty}
       onSubmit={async (path, values) => {
         const record = await action.execute<ErpRecord>({
           path,
@@ -55,7 +64,7 @@ export function OrderForm({
         });
         await refreshVisualData(mutate);
         await onCreated?.();
-        setOpen(false);
+        close();
         toast.success(
           path.endsWith('/occurrences')
             ? 'Ocorrência e primeira O.S. criadas'
@@ -75,7 +84,12 @@ export function OrderForm({
           {occurrence ? 'Adicionar O.S.' : 'Novo atendimento'}
         </Button>
       )}
-      <Dialog open={visible} onOpenChange={setOpen}>
+      <Dialog
+        open={visible}
+        onOpenChange={(value) =>
+          value ? setOpen(true) : dirty ? setConfirmDiscard(true) : close()
+        }
+      >
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
@@ -88,6 +102,24 @@ export function OrderForm({
             </DialogDescription>
           </DialogHeader>
           {form}
+        </DialogContent>
+      </Dialog>
+      <Dialog open={confirmDiscard} onOpenChange={(value) => !value && setConfirmDiscard(false)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Descartar o que foi preenchido?</DialogTitle>
+            <DialogDescription>
+              O atendimento ainda não foi aberto. Se fechar agora, o que você digitou será perdido.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setConfirmDiscard(false)}>
+              Continuar preenchendo
+            </Button>
+            <Button variant="destructive" onClick={close}>
+              Descartar
+            </Button>
+          </DialogFooter>
         </DialogContent>
       </Dialog>
     </>

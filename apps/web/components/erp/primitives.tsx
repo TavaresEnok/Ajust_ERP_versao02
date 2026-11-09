@@ -178,7 +178,8 @@ export function Metric({
         {children}
       </div>
       <div className="metric-foot">
-        {change ? (
+        {change && /^[+\-−]?\d/.test(change) ? (
+          // Só variação numérica ganha seta e cor; rótulos ("Histórico", "Atenção") ficam neutros.
           <span
             className={cn(
               'inline-flex items-center gap-0.5',
@@ -188,6 +189,8 @@ export function Metric({
             <ArrowUpRight className="size-3" />
             {change}
           </span>
+        ) : change ? (
+          <span className="font-medium text-foreground/70">{change} ·</span>
         ) : null}
         <span>{foot}</span>
       </div>

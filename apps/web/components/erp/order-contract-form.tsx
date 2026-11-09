@@ -82,6 +82,7 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
       if (isBlank(typed) || same(typed, previous[name]) || same(typed, value)) merged[name] = value;
       else preserved.push(name);
     }
+    props.onDirtyChange?.(true);
     setUndo({ selected, draft: current });
     setKept(preserved);
     setDraft(merged);

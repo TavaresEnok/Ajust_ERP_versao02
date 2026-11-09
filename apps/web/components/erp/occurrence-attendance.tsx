@@ -46,6 +46,7 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
   const [closing, setClosing] = useState(false);
   const [conclusion, setConclusion] = useState('');
   const [closeError, setCloseError] = useState('');
+  const [confirmPending, setConfirmPending] = useState(false);
   const query = useErpQuery<ErpRecord>(`/service-orders/occurrences/${id}`);
   const customers = useErpQuery<ErpRecord[]>('/customers');
   const [tab, setTab] = useState(
@@ -153,11 +154,31 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
                 </Button>
                 {closing && (
                   <div className="space-y-3 rounded-lg border border-border p-4">
-                    <p className="text-sm">
-                      {pendingOrders.length
-                        ? `Deseja concluir também estas ${pendingOrders.length} O.S.: ${pendingOrders.map((o) => o.protocol).join(', ')}? Confirme somente trabalhos efetivamente realizados. Novas entregas geradas pelo fluxo precisarão de conclusão própria.`
-                        : 'Todas as O.S. foram encerradas. Registre a conclusão do atendimento.'}
-                    </p>
+                    {pendingOrders.length ? (
+                      <div className="flex flex-col gap-2 text-sm">
+                        <p>
+                          Encerrar a ocorrência também conclui{' '}
+                          {pendingOrders.length === 1
+                            ? 'esta O.S.'
+                            : `estas ${pendingOrders.length} O.S.`}
+                          :
+                        </p>
+                        <ul className="list-disc pl-5 text-muted-foreground">
+                          {pendingOrders.map((o) => (
+                            <li key={String(o.id)}>
+                              {String(o.protocol)} · {String(o.title)}
+                            </li>
+                          ))}
+                        </ul>
+                        <p className="text-xs text-muted-foreground">
+                          Novas entregas geradas pelo fluxo precisarão de conclusão própria.
+                        </p>
+                      </div>
+                    ) : (
+                      <p className="text-sm">
+                        Todas as O.S. foram encerradas. Registre a conclusão do atendimento.
+                      </p>
+                    )}
                     <textarea
                       aria-label="Conclusão da ocorrência"
                       className="native-select min-h-24 w-full"
@@ -166,8 +187,27 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
                       onChange={(e) => setConclusion(e.target.value)}
                       placeholder="Resultado dos trabalhos e conclusão"
                     />
+                    {pendingOrders.length > 0 && (
+                      <label className="flex items-start gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          className="mt-0.5 size-4 accent-primary"
+                          checked={confirmPending}
+                          onChange={(e) => setConfirmPending(e.target.checked)}
+                        />
+                        Confirmo que o trabalho{' '}
+                        {pendingOrders.length === 1
+                          ? 'desta O.S. foi realizado'
+                          : `destas ${pendingOrders.length} O.S. foi realizado`}
+                        .
+                      </label>
+                    )}
                     <Button
-                      disabled={action.pending || conclusion.trim().length < 3}
+                      disabled={
+                        action.pending ||
+                        conclusion.trim().length < 3 ||
+                        (pendingOrders.length > 0 && !confirmPending)
+                      }
                       onClick={async () => {
                         try {
                           setCloseError('');
@@ -180,6 +220,7 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
                             },
                           });
                           if (result.status === 'ENCERRADA') {
+                            setConfirmPending(false);
                             setClosing(false);
                             setConclusion('');
                           } else

@@ -205,28 +205,24 @@ export function ReportsPage() {
             <Metric
               label="Pendentes agora"
               value={value(overview?.totalOpen)}
-              change="ERP"
               foot="todas as pendências, inclusive antigas"
               icon={ClipboardList}
             />
             <Metric
               label="Entregas no período"
               value={value(overview?.totalClosed)}
-              change="ERP"
               foot="pela data efetiva de resolução ou fechamento"
               icon={CheckCircle2}
             />
             <Metric
               label="Tempo de resolução"
               value={overview?.tmrHours != null ? `${overview.tmrHours} h` : 'Sem base'}
-              change="ERP"
               foot={`${overview?.measuredClosed ?? 0} conclusões com datas válidas`}
               icon={Timer}
             />
             <Metric
               label="Violações de SLA"
               value={value(overview?.slaBreaches)}
-              change="ERP"
               foot="pendências atuais sem pausa"
               icon={ShieldCheck}
             />
