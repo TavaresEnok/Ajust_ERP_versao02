@@ -241,7 +241,10 @@ export function TenantAdministration({
                   {uploadError}
                 </p>
               )}
-              <Button disabled={!action.connected || !logoAllowed || !tenantId || action.pending}>
+              <Button
+                type="submit"
+                disabled={!action.connected || !logoAllowed || !tenantId || action.pending}
+              >
                 Enviar logo ao ERP
               </Button>
             </form>

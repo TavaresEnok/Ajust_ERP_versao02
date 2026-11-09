@@ -50,7 +50,7 @@ const ProcessTemplatesPage = dynamic(() =>
   import('./operational-workflows').then((module) => module.ServiceProcessesHub),
 );
 const WorkflowsHub = dynamic(() =>
-  import('./operational-workflows').then((module) => module.WorkflowsHub),
+  import('./workflow-designer').then((module) => module.WorkflowsHub),
 );
 const SlaWorkspace = dynamic(() => import('./sla-workspace').then((module) => module.SlaWorkspace));
 const CmdbWorkspace = dynamic(() =>

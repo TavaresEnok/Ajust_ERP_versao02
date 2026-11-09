@@ -32,6 +32,7 @@ export type FlowTemplate = {
   definition: FlowDefinition;
   draft?: FlowDefinition | null;
   publishedAt: string | null;
+  updatedAt?: string;
 };
 export type FlowOrder = {
   pausedAt?: string | null;
