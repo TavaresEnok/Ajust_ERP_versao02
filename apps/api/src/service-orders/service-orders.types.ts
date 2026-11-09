@@ -17,6 +17,7 @@ export type AttachmentDownloadResult = {
 
 export type CreateOrderInput = {
   workflowTemplateCode?: string;
+  serviceCatalogItemId?: string;
   tenantId: string;
   occurrenceId?: string;
   type: ServiceOrderType;
@@ -54,6 +55,7 @@ export type CreateOccurrenceInput = {
   firstOrder: {
     recordCompleted?: boolean;
     workflowTemplateCode?: string;
+  serviceCatalogItemId?: string;
     ownerUserId?: string;
     assigneeUserId?: string;
     type: ServiceOrderType;
@@ -92,6 +94,7 @@ export type ListOccurrencesInput = {
 
 export type CreateOccurrenceOrderInput = {
   workflowTemplateCode?: string;
+  serviceCatalogItemId?: string;
   ownerUserId?: string;
   assigneeUserId?: string;
   type: ServiceOrderType;

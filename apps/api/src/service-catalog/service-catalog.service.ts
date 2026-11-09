@@ -8,6 +8,7 @@ export type ServiceCatalogWriteInput = {
   category?: ServiceOrderType;
   description?: string;
   estimatedMinutes?: number;
+  slaHours?: number | null;
   defaultPriority?: Priority;
   checklist?: string[] | any;
   active?: boolean;
@@ -182,6 +183,7 @@ export class ServiceCatalogService {
         category: input.category ?? ServiceOrderType.CONSULTORIA_GERAL,
         description: input.description,
         estimatedMinutes: input.estimatedMinutes ?? 120,
+        slaHours: input.slaHours ?? null,
         defaultPriority: input.defaultPriority ?? Priority.NORMAL,
         checklist: Array.isArray(input.checklist) ? input.checklist : [],
         active: input.active ?? true,
@@ -207,6 +209,7 @@ export class ServiceCatalogService {
       ...(input.category !== undefined ? { category: input.category } : {}),
       ...(input.description !== undefined ? { description: input.description } : {}),
       ...(input.estimatedMinutes !== undefined ? { estimatedMinutes: input.estimatedMinutes } : {}),
+      ...(input.slaHours !== undefined ? { slaHours: input.slaHours } : {}),
       ...(input.defaultPriority !== undefined ? { defaultPriority: input.defaultPriority } : {}),
       ...(input.checklist !== undefined
         ? { checklist: Array.isArray(input.checklist) ? input.checklist : [] }

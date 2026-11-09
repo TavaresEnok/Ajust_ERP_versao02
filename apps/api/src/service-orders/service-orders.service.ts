@@ -179,14 +179,15 @@ export class ServiceOrdersService {
     const now = new Date();
 
     // Utilize SLA Engine to dynamically compute deadlines rather than raw timestamp addition
-    const slaPolicy = await this.slaEngine.findApplicablePolicy(
+    const sla = await this.slaHoursFor(
       input.tenantId,
       input.priority,
       input.type,
+      input.serviceCatalogItemId,
     );
     const calculatedDeadline = await this.slaEngine.calculateTargetDate(
       now,
-      slaPolicy.hours,
+      sla.hours,
       input.tenantId,
     );
 
@@ -205,7 +206,11 @@ export class ServiceOrdersService {
               protocol,
               sourceSystem: 'ERP',
               type: input.type,
-              sourceMetadata: { slaPolicyConfirmed: 'id' in slaPolicy, slaHours: slaPolicy.hours },
+              sourceMetadata: {
+                slaPolicyConfirmed: sla.confirmed,
+                slaHours: sla.hours,
+                slaSource: sla.source,
+              },
               priority: input.priority,
               status: 'ABERTA',
               title: input.title,
@@ -870,10 +875,11 @@ export class ServiceOrdersService {
     }
     const occurrenceCreatedAt = input.createdAt ? new Date(input.createdAt) : now;
     const firstOrderPriority = input.firstOrder.priority || 'NORMAL';
-    const firstOrderPolicy = await this.slaEngine.findApplicablePolicy(
+    const firstOrderSla = await this.slaHoursFor(
       input.tenantId,
       firstOrderPriority,
       input.firstOrder.type,
+      input.firstOrder.serviceCatalogItemId,
     );
     if (
       input.firstOrder.deadlineAt &&
@@ -885,7 +891,7 @@ export class ServiceOrdersService {
       ? new Date(input.firstOrder.deadlineAt)
       : await this.slaEngine.calculateTargetDate(
           occurrenceCreatedAt,
-          firstOrderPolicy.hours,
+          firstOrderSla.hours,
           input.tenantId,
         );
     if (
@@ -933,8 +939,9 @@ export class ServiceOrdersService {
             sourceSystem: input.sourceSystem || 'ERP',
             type: input.firstOrder.type,
             sourceMetadata: {
-              slaPolicyConfirmed: 'id' in firstOrderPolicy,
-              slaHours: firstOrderPolicy.hours,
+              slaPolicyConfirmed: firstOrderSla.confirmed,
+              slaHours: firstOrderSla.hours,
+              slaSource: firstOrderSla.source,
             },
             priority: firstOrderPriority,
             status: firstOrderStatus,
@@ -1315,10 +1322,10 @@ export class ServiceOrdersService {
         sector: input.sector || occurrence.sector,
         origin: input.origin || occurrence.origin,
       });
-    const slaPolicy = await this.slaEngine.findApplicablePolicy(tenantId, priority, input.type);
+    const sla = await this.slaHoursFor(tenantId, priority, input.type, input.serviceCatalogItemId);
     const deadlineAt = input.deadlineAt
       ? new Date(input.deadlineAt)
-      : await this.slaEngine.calculateTargetDate(new Date(), slaPolicy.hours, tenantId);
+      : await this.slaEngine.calculateTargetDate(new Date(), sla.hours, tenantId);
     const status = 'ABERTA';
 
     const created = await this.withCreateRetry(async () => {
@@ -2101,6 +2108,29 @@ export class ServiceOrdersService {
       sizeBytes: attachment.sizeBytes,
       filePath: safePath,
     };
+  }
+
+  /**
+   * Prazo da O.S. em horas úteis: o SLA próprio do serviço do catálogo, quando existir;
+   * senão, a política de SLA por tipo e prioridade (padrão 48 h).
+   */
+  private async slaHoursFor(
+    tenantId: string,
+    priority: Priority,
+    type: ServiceOrderType,
+    serviceCatalogItemId?: string,
+  ) {
+    if (serviceCatalogItemId) {
+      const item = await this.prisma.serviceCatalogItem.findFirst({
+        where: { id: serviceCatalogItemId, tenantId },
+        select: { slaHours: true },
+      });
+      if (!item) throw new BadRequestException('Serviço do catálogo não encontrado.');
+      if (item.slaHours)
+        return { hours: item.slaHours, source: 'catalog' as const, confirmed: true };
+    }
+    const policy = await this.slaEngine.findApplicablePolicy(tenantId, priority, type);
+    return { hours: policy.hours, source: 'policy' as const, confirmed: 'id' in policy };
   }
 
   private assertOccurrenceOpen(occurrence: { number?: string; status?: string | null }) {

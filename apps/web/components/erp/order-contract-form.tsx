@@ -166,13 +166,18 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
         onRetry={() => void catalog.mutate()}
       />
       {service &&
-        (typeof service.estimatedMinutes === 'number' ||
+        (typeof service.slaHours === 'number' ||
+          typeof service.estimatedMinutes === 'number' ||
           (Array.isArray(service.checklist) && service.checklist.length > 0)) && (
           <details className="rounded-lg border border-border px-4 py-3 text-xs">
             <summary className="cursor-pointer text-muted-foreground">
               Referência do serviço
-              {typeof service.estimatedMinutes === 'number' &&
-                ` · tempo estimado ${service.estimatedMinutes} min`}
+              {typeof service.slaHours === 'number' &&
+                ` · prazo ${
+                  service.slaHours % 24 === 0
+                    ? `${service.slaHours / 24} ${service.slaHours === 24 ? 'dia útil' : 'dias úteis'}`
+                    : `${service.slaHours} horas úteis`
+                }`}
             </summary>
             {Array.isArray(service.checklist) && (
               <ul className="mt-2 flex list-disc flex-col gap-1 pl-4">
@@ -195,6 +200,8 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
             ...(service?.workflowTemplateCode
               ? { workflowTemplateCode: service.workflowTemplateCode }
               : {}),
+            // O servidor usa o prazo (SLA) próprio do serviço, quando houver.
+            ...(service ? { serviceCatalogItemId: service.id } : {}),
           })
         }
       />

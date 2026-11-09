@@ -144,6 +144,14 @@ export function CatalogPage({
             {isService ? (
               <dl className="mt-4 flex flex-col gap-3 text-xs">
                 <div>
+                  <dt className="mini-label">Prazo da O.S.</dt>
+                  <dd className="mt-2">
+                    {typeof raw?.slaHours === 'number'
+                      ? `${raw.slaHours} horas úteis${raw.slaHours % 24 === 0 ? ` (${raw.slaHours / 24} ${raw.slaHours === 24 ? 'dia útil' : 'dias úteis'})` : ''}`
+                      : 'Política de SLA'}
+                  </dd>
+                </div>
+                <div>
                   <dt className="mini-label">Tempo estimado</dt>
                   <dd className="mt-2">{String(raw?.estimatedMinutes ?? '—')} minutos</dd>
                 </div>
