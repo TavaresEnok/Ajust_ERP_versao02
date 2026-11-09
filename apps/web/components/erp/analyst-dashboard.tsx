@@ -229,6 +229,7 @@ function AnalystHistory() {
             foot: 'pendências de todo o histórico',
             focus: 'active',
             color: 'text-info',
+            tone: 'tone-info',
             bg: 'bg-info/10',
           },
           {
@@ -238,6 +239,7 @@ function AnalystHistory() {
             foot: 'ativas com prazo de SLA excedido',
             focus: 'overdue',
             color: 'text-danger',
+            tone: 'tone-danger',
             bg: 'bg-danger/10',
           },
           {
@@ -247,6 +249,7 @@ function AnalystHistory() {
             foot: 'prazos de hoje, inclusive já vencidos',
             focus: 'today',
             color: 'text-warning',
+            tone: 'tone-warning',
             bg: 'bg-warning/10',
           },
           {
@@ -256,12 +259,13 @@ function AnalystHistory() {
             foot: 'pela data de resolução ou encerramento',
             focus: 'closed',
             color: 'text-success',
+            tone: 'tone-success',
             bg: 'bg-success/10',
           },
         ].map((m) => (
           <button
             key={m.focus}
-            className="rounded-2xl border border-border bg-card p-5 text-left transition hover:border-primary/40 focus-visible:outline-2 focus-visible:outline-primary"
+            className={`tone-surface ${m.tone} rounded-2xl border p-5 text-left transition hover:border-primary/40 focus-visible:outline-2 focus-visible:outline-primary`}
             onClick={() => setFocus(m.focus as OrderFocus)}
             aria-pressed={focus === m.focus}
           >

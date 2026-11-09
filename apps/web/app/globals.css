@@ -60,17 +60,19 @@
 }
 :root {
   color-scheme: light;
-  --background: #f6f8fc;
-  --foreground: #202b40;
+  --background: #eef1f5;
+  --foreground: #1f2a3c;
   --card: #fff;
   --popover: var(--card);
   --popover-foreground: var(--foreground);
   --primary: #2563eb;
   --primary-foreground: #fff;
   --secondary: #eaf1ff;
-  --muted: #f0f3f9;
-  --muted-foreground: #64748b;
-  --border: #e3e9f2;
+  --muted: #f2f4f8;
+  --muted-foreground: #5f6b7d;
+  --border: #dde3eb;
+  --sidebar-surface: #f7f8fa;
+  --header-surface: #f7f8fa;
   --success: #2f7a5f;
   --warning: #96702a;
   --danger: #b4534f;
@@ -96,15 +98,15 @@
 }
 .dark {
   color-scheme: dark;
-  --background: #08090b;
-  --foreground: #ededee;
-  --card: #18191c;
+  --background: #0f1216;
+  --foreground: #e4e7eb;
+  --card: #181c22;
   --primary: #3b82f6;
   --primary-foreground: #fff;
-  --secondary: #172336;
-  --muted: #222327;
-  --muted-foreground: #a2a3ab;
-  --border: #2b2c31;
+  --secondary: #1b2636;
+  --muted: #212630;
+  --muted-foreground: #9aa3b0;
+  --border: #2a303a;
   /* Tons sóbrios: pouca saturação para não brilhar sobre o fundo escuro. */
   --success: #7fae95;
   --warning: #c4a676;
@@ -122,9 +124,9 @@
   --note-bg: #1d1d1b;
   --note-border: #35342e;
   --auth-bg: #111318;
-  --sidebar-surface: #141518;
-  --header-surface: #08090b;
-  --nav-active-surface: #27282d;
+  --sidebar-surface: #13171c;
+  --header-surface: #0f1216;
+  --nav-active-surface: #232a35;
   --nav-active-text: #f4f4f5;
   --nav-count-active: #35363e;
   --panel-radius: 8px;
@@ -804,4 +806,41 @@
     padding: 0 !important;
     background: #fff !important;
   }
+}
+
+/* Cartões com um véu da cor do significado (5%): diferenciam blocos sem brilho. */
+.tone-surface {
+  --tone: var(--muted-foreground);
+  background: color-mix(in oklab, var(--card) 94%, var(--tone));
+  border-color: color-mix(in oklab, var(--border) 72%, var(--tone));
+}
+.tone-dot::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 6px;
+  border-radius: 50%;
+  background: var(--tone);
+  vertical-align: 1px;
+}
+.tone-info {
+  --tone: var(--info);
+}
+.tone-success {
+  --tone: var(--success);
+}
+.tone-warning {
+  --tone: var(--warning);
+}
+.tone-danger {
+  --tone: var(--danger);
+}
+.tone-neutral {
+  --tone: var(--muted-foreground);
+}
+/* No escuro, 5% some no grafite: o véu precisa ser um pouco mais forte. */
+.dark .tone-surface {
+  background: color-mix(in oklab, var(--card) 88%, var(--tone));
+  border-color: color-mix(in oklab, var(--border) 55%, var(--tone));
 }
