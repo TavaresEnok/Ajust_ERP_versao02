@@ -62,3 +62,35 @@ describe('SecretsValidationService', () => {
     expect(() => service.onModuleInit()).not.toThrow();
   });
 });
+
+describe('senha do e-mail (SMTP)', () => {
+  const originalEnv = process.env;
+  const strong = 'k'.repeat(40);
+  const base = {
+    NODE_ENV: 'production',
+    JWT_ACCESS_SECRET: strong,
+    JWT_REFRESH_SECRET: strong + '1',
+    JWT_RESET_SECRET: strong + '2',
+    SECRETS_ENCRYPTION_KEY: strong + '3',
+    POSTGRES_PASSWORD: strong + '4',
+    MONITORING_WEBHOOK_TOKEN: strong + '5',
+    CHAT_WEBHOOK_TOKEN: strong + '6',
+    SMTP_HOST: 'smtp.exemplo.com.br',
+  };
+  afterEach(() => {
+    process.env = originalEnv;
+  });
+  const start = (pass?: string) => {
+    process.env = { ...originalEnv, ...base, ...(pass === undefined ? {} : { SMTP_PASS: pass }) };
+    return () => new SecretsValidationService().onModuleInit();
+  };
+
+  it('aceita senha de caixa de e-mail comum (menos de 32 caracteres)', () => {
+    expect(start('Caixa#Ajust2026')).not.toThrow();
+  });
+  it('recusa senha ausente, curta ou de exemplo', () => {
+    expect(start()).toThrow('SMTP_PASS is missing');
+    expect(start('1234')).toThrow('SMTP_PASS');
+    expect(start('change-me-123')).toThrow('SMTP_PASS');
+  });
+});

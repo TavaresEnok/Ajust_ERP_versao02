@@ -3,7 +3,7 @@ import { NestFactory } from '@nestjs/core';
 import { AppModule } from './app.module';
 
 const INSECURE_PATTERN = /change[_-]?me|change-this|ajust123|example|dev-/i;
-const STRONG_SECRET_NAMES = new Set(['SECRETS_ENCRYPTION_KEY', 'WORKER_API_TOKEN', 'SMTP_PASS']);
+const STRONG_SECRET_NAMES = new Set(['SECRETS_ENCRYPTION_KEY', 'WORKER_API_TOKEN']);
 
 function validateEnv() {
   const isProduction = (process.env.NODE_ENV || '').toLowerCase() === 'production';
@@ -28,7 +28,9 @@ function validateEnv() {
     ({ name, value }) =>
       !value ||
       INSECURE_PATTERN.test(value) ||
-      (STRONG_SECRET_NAMES.has(name) && value.length < 32),
+      (STRONG_SECRET_NAMES.has(name) && value.length < 32) ||
+      // Senha do e-mail vem do provedor: 8+ caracteres, sem os 32 dos segredos internos.
+      (name === 'SMTP_PASS' && value.length < 8),
   );
 
   if (insecure.length > 0) {

@@ -36,7 +36,15 @@ describe('validação de ambiente do worker', () => {
     expect(exit).not.toHaveBeenCalled();
   });
 
-  it('com SMTP configurado, exige senha forte', async () => {
+  it('aceita senha de caixa de e-mail comum (menos de 32 caracteres)', async () => {
+    process.env.SMTP_HOST = 'smtp.exemplo.com';
+    process.env.SMTP_USER = 'nao-responda@ajustconsulting.com.br';
+    process.env.SMTP_PASS = 'Caixa#Ajust2026';
+    await import('./main');
+    expect(exit).not.toHaveBeenCalled();
+  });
+
+  it('com SMTP configurado, recusa senha curta', async () => {
     process.env.SMTP_HOST = 'smtp.exemplo.com';
     process.env.SMTP_USER = 'noc';
     process.env.SMTP_PASS = 'curta';
