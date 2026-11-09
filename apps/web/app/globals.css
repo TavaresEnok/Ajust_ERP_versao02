@@ -844,3 +844,9 @@
   background: color-mix(in oklab, var(--card) 88%, var(--tone));
   border-color: color-mix(in oklab, var(--border) 55%, var(--tone));
 }
+
+/* Ícone dos indicadores acompanha o tom do cartão. */
+.tone-surface .metric-icon {
+  color: var(--tone);
+  border-color: color-mix(in oklab, var(--border) 60%, var(--tone));
+}
