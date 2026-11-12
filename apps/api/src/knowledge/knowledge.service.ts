@@ -18,6 +18,18 @@ import {
   vaultSourceNoteText,
 } from '../common/vault.crypto';
 import { PrismaService } from '../prisma/prisma.service';
+
+/** Só http/https explícitos: a extensão nunca abre outro esquema nem presume protocolo. */
+export function webAccessUrl(host: string) {
+  const raw = (host || '').trim();
+  if (!/^https?:\/\//i.test(raw)) return null;
+  try {
+    const url = new URL(raw);
+    return url.protocol === 'http:' || url.protocol === 'https:' ? url : null;
+  } catch {
+    return null;
+  }
+}
 import { AuditService } from '../common/audit.service';
 
 type ListArticleInput = {
@@ -689,6 +701,7 @@ export class KnowledgeService {
         OR: [
           { metadata: { path: ['op'], equals: 'reveal' } },
           { metadata: { path: ['op'], equals: 'totp' } },
+          { metadata: { path: ['op'], equals: 'autofill' } },
         ],
       },
     });
@@ -742,6 +755,64 @@ export class KnowledgeService {
       reason: reason!.trim(),
     });
     return totp(decryptSecret(row.totpSecretEnc));
+  }
+
+  /**
+   * Entrada automática pela extensão Ajust Cofre: devolve, numa única consulta auditada, o que a
+   * extensão precisa para preencher o login do site (usuário, senha e, se houver chave 2FA, o
+   * código atual e o seguinte — a tela do 2FA pode demorar alguns segundos para aparecer). A chave
+   * TOTP em si nunca sai do servidor.
+   */
+  async credentialAutofill(
+    role: string,
+    userId: string,
+    tenantId: string,
+    id: string,
+    reason?: string,
+    currentPassword?: string,
+  ) {
+    if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
+    await this.authorizeReveal(userId, reason, currentPassword);
+    const row = await this.prisma.knowledgeCredential.findFirst({
+      where: { id, tenantId },
+      select: {
+        id: true,
+        provider: true,
+        environment: true,
+        host: true,
+        username: true,
+        secretEnc: true,
+        totpSecretEnc: true,
+      },
+    });
+    if (!row) throw new NotFoundException();
+    const url = webAccessUrl(row.host);
+    if (!url)
+      throw new BadRequestException('Esta credencial não tem um endereço web (http ou https).');
+    await this.recordReveal(tenantId, userId, role, id, {
+      op: 'autofill',
+      provider: row.provider,
+      environment: row.environment,
+      reason: reason!.trim().slice(0, 300),
+    });
+    let codes: { code: string; validFrom: number; validUntil: number }[] = [];
+    if (row.totpSecretEnc) {
+      const seed = decryptSecret(row.totpSecretEnc);
+      const current = totp(seed);
+      const next = totp(seed, current.validUntil);
+      codes = [current, next].map((item) => ({
+        code: item.code,
+        validFrom: item.validUntil - item.period * 1000,
+        validUntil: item.validUntil,
+      }));
+    }
+    return {
+      url: url.toString(),
+      origin: url.origin,
+      username: row.username,
+      password: decryptSecret(row.secretEnc),
+      totp: codes.length ? { codes, serverTime: Date.now() } : null,
+    };
   }
 
   async credentialSummary(role: string, tenantId: string) {

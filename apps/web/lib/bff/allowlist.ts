@@ -85,6 +85,7 @@ const ROUTES: Record<string, Method[]> = {
   '/knowledge/credentials/:id/reveal': ['POST'],
   '/knowledge/credentials/:id/history': ['GET'],
   '/knowledge/credentials/:id/totp': ['POST'],
+  '/knowledge/credentials/:id/autofill': ['POST'],
   '/knowledge/credentials/summary': ['GET'],
   '/knowledge/credentials/providers': ['GET'],
   '/knowledge/notes': ['GET', 'POST'],

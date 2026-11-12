@@ -142,7 +142,7 @@ export class AuditInterceptor implements NestInterceptor {
       return { resourceType: resource, resourceId, action };
     }
 
-    if (resource === 'knowledge' && /\/(reveal|totp)$/.test(pathOnly)) {
+    if (resource === 'knowledge' && /\/(reveal|totp|autofill)$/.test(pathOnly)) {
       return { resourceType: resource, resourceId, action: 'CREDENTIAL_ACCESS' };
     }
 

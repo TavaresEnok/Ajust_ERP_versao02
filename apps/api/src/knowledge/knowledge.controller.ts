@@ -286,6 +286,23 @@ export class KnowledgeController {
     );
   }
 
+  @Post('credentials/:id/autofill')
+  async credentialAutofill(
+    @Req() req: RequestWithAuth,
+    @Param('id') id: string,
+    @Body() body?: { reason?: unknown; currentPassword?: unknown },
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException();
+    return this.knowledgeService.credentialAutofill(
+      req.auth.role || '',
+      req.auth.userId,
+      req.auth.tenantId,
+      id,
+      typeof body?.reason === 'string' ? body.reason : undefined,
+      typeof body?.currentPassword === 'string' ? body.currentPassword : undefined,
+    );
+  }
+
   @Post('credentials/:id/reveal')
   async revealCredential(
     @Req() req: RequestWithAuth,

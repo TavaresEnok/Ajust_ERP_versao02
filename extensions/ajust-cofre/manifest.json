@@ -1,0 +1,21 @@
+{
+  "manifest_version": 3,
+  "name": "Ajust Cofre",
+  "description": "Entra automaticamente nos sistemas dos provedores (usuário, senha e 2FA) a partir do cofre do Ajust ERP.",
+  "version": "1.0.0",
+  "minimum_chrome_version": "116",
+  "icons": { "16": "icons/16.png", "48": "icons/48.png", "128": "icons/128.png" },
+  "action": {
+    "default_title": "Ajust Cofre — use o botão “Entrar automaticamente” no cofre do ERP"
+  },
+  "background": { "service_worker": "background.js" },
+  "permissions": ["scripting", "storage", "tabs"],
+  "host_permissions": ["<all_urls>"],
+  "content_scripts": [
+    {
+      "matches": ["https://erp.ajustconsulting.com.br/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_start"
+    }
+  ]
+}

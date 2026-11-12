@@ -23,6 +23,7 @@ import {
   List,
   Building2,
   FolderKey,
+  LogIn,
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -37,7 +38,8 @@ import {
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import { errorMessage, queryPath, type ErpRecord } from '@/lib/erp/contracts';
 import { copyToClipboard } from '@/lib/erp/clipboard';
-import { listRecords } from '@/lib/erp/visual-data';
+import { listRecords, useRouteBase } from '@/lib/erp/visual-data';
+import { sendAutofill, useAjustCofre, type AutofillPayload } from '@/lib/erp/ajust-cofre';
 import { cn } from '@/lib/utils';
 import { RecordDialog } from './record-dialog';
 import { useVaultConfirmation } from './vault-confirmation';
@@ -195,7 +197,15 @@ function IconButton({
   );
 }
 
-function QuickAccess({ onClick, wide }: { onClick: () => void; wide?: boolean }) {
+function QuickAccess({
+  onClick,
+  wide,
+  secondary,
+}: {
+  onClick: () => void;
+  wide?: boolean;
+  secondary?: boolean;
+}) {
   return (
     <button
       type="button"
@@ -205,7 +215,10 @@ function QuickAccess({ onClick, wide }: { onClick: () => void; wide?: boolean })
         onClick();
       }}
       className={cn(
-        'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5',
+        'inline-flex h-8 items-center justify-center gap-1.5 rounded-lg px-3 text-xs font-medium transition-colors focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5',
+        secondary
+          ? 'border border-border bg-card text-foreground hover:bg-muted'
+          : 'bg-primary text-primary-foreground hover:bg-primary/90',
         wide && 'w-full',
       )}
     >
@@ -234,6 +247,8 @@ export function CredentialsPage() {
   const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
   const [providerMode, setProviderMode] = useState<'cards' | 'table'>('cards');
   const confirmation = useVaultConfirmation();
+  const cofre = useAjustCofre();
+  const routeBase = useRouteBase();
   const [detailTab, setDetailTab] = useState<'access' | 'notes' | 'history'>('access');
   const [providerSearch, setProviderSearch] = useState('');
   const [deleteChallenge, setDeleteChallenge] = useState<string | null>(null);
@@ -424,6 +439,32 @@ export function CredentialsPage() {
         onClick: () => void copySecret(item),
       },
     });
+  }
+
+  // Entrada automática pela extensão Ajust Cofre: o ERP confirma e audita a consulta, e a
+  // extensão abre o site e preenche usuário, senha e 2FA. Nada vai na URL.
+  async function autoLogin(item: ErpRecord) {
+    const body = await confirmation.request();
+    if (!body) return;
+    try {
+      const payload = await action.execute<AutofillPayload>({
+        path: `/knowledge/credentials/${encodeURIComponent(item.id)}/autofill`,
+        body,
+        method: 'POST',
+      });
+      const result = await sendAutofill(payload);
+      if (!result.ok) {
+        toast.error(result.error || 'A extensão não conseguiu abrir o site.');
+        return;
+      }
+      toast.success(
+        result.twoFactor
+          ? 'Site aberto: a extensão preenche usuário, senha e o código 2FA.'
+          : 'Site aberto: a extensão preenche usuário e senha. Sem chave 2FA cadastrada.',
+      );
+    } catch (error) {
+      toast.error(errorMessage(error));
+    }
   }
 
   function clearFilters() {
@@ -1249,7 +1290,31 @@ export function CredentialsPage() {
                       </div>
                     </div>
                     {accessUrl(selected.host) && (
-                      <QuickAccess onClick={() => void quickAccess(selected)} />
+                      <div className="flex flex-wrap items-center gap-2">
+                        {cofre && (
+                          <button
+                            type="button"
+                            title="Abre o site e preenche usuário, senha e 2FA (extensão Ajust Cofre)"
+                            onClick={() => void autoLogin(selected)}
+                            className="inline-flex h-8 items-center justify-center gap-1.5 rounded-lg bg-primary px-3 text-xs font-medium text-primary-foreground transition-colors hover:bg-primary/90 focus-visible:ring-2 focus-visible:ring-ring focus-visible:outline-none [&_svg]:size-3.5"
+                          >
+                            <LogIn />
+                            Entrar automaticamente
+                          </button>
+                        )}
+                        <QuickAccess
+                          secondary={!!cofre}
+                          onClick={() => void quickAccess(selected)}
+                        />
+                        {!cofre && (
+                          <a
+                            href={`${routeBase}/guia#extensao-cofre`}
+                            className="text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline"
+                          >
+                            Entrar automaticamente? Instale a extensão Ajust Cofre
+                          </a>
+                        )}
+                      </div>
                     )}
                   </section>
                   <div className="order-3">
@@ -1341,6 +1406,7 @@ export function CredentialsPage() {
                               delete: 'Cadastro excluído',
                               reveal: 'Conteúdo protegido consultado',
                               totp: 'Código 2FA consultado',
+                              autofill: 'Entrada automática (extensão)',
                             } as Record<string, string>
                           )[String(event.operation)] || 'Atividade registrada'}
                         </p>

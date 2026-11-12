@@ -328,6 +328,65 @@ const dayToDay: Chapter[] = [
         ],
       },
       {
+        id: 'extensao-cofre',
+        title: 'Entrar automaticamente nos sistemas (extensão Ajust Cofre)',
+        what: 'Com a extensão Ajust Cofre no navegador, um clique no cofre abre o sistema do provedor (SGP, IXC, painéis web) e preenche usuário, senha e o código 2FA sozinho.',
+        steps: [
+          <>
+            Baixe a extensão:{' '}
+            <a className="font-medium text-primary underline" href="/extensao/ajust-cofre.zip">
+              ajust-cofre.zip
+            </a>
+            . Clique com o botão direito no arquivo e escolha <B>Extrair tudo</B>. Guarde a pasta
+            num lugar fixo (ex.: <B>Documentos\Ajust Cofre</B>) e não apague: a extensão roda a
+            partir dela.
+          </>,
+          <>
+            No <B>Chrome</B>, digite na barra de endereço <B>chrome://extensions</B>. No <B>Edge</B>
+            , digite <B>edge://extensions</B>.
+          </>,
+          <>
+            Ligue o <B>Modo do desenvolvedor</B> (no Chrome fica no canto superior direito; no Edge,
+            no menu da esquerda).
+          </>,
+          <>
+            Clique em <B>Carregar sem compactação</B> (no Edge: <B>Carregar descompactada</B>) e
+            escolha a pasta <B>ajust-cofre</B> que você extraiu.
+          </>,
+          <>
+            Volte ao ERP e aperte <B>F5</B>. No cofre, os acessos web passam a ter o botão{' '}
+            <B>Entrar automaticamente</B>.
+          </>,
+          <>
+            Para usar: clique em <B>Entrar automaticamente</B>, informe o motivo e a sua senha do
+            ERP. O sistema abre numa aba nova já preenchido. Se aparecer <B>Não sou um robô</B>{' '}
+            (como no SGP), marque a caixa: a extensão clica em entrar e depois preenche o código
+            2FA.
+          </>,
+        ],
+        tips: [
+          <>
+            Para o 2FA ser automático, a credencial precisa ter a <B>chave do autenticador</B>{' '}
+            cadastrada em <B>Editar</B> (o texto que aparece junto do QR Code ao ativar o 2FA no
+            sistema, ex.: JBSWY3DPEHPK3PXP).
+          </>,
+          <>
+            Sem a extensão, o botão Abrir site continua funcionando: abre o site e você copia os
+            dados.
+          </>,
+        ],
+        warn: [
+          <>
+            A extensão só preenche o endereço exato cadastrado no cofre e esquece os dados em até 3
+            minutos. Cada entrada automática fica registrada no histórico da credencial.
+          </>,
+          <>
+            Ao abrir o navegador, o Chrome pode avisar sobre extensões em modo de desenvolvedor: é
+            esperado, clique para manter.
+          </>,
+        ],
+      },
+      {
         id: 'ajustpedia',
         title: 'Ajustpedia, notas e gerador de senhas',
         what: 'A base de conhecimento da equipe e suas ferramentas pessoais.',
@@ -870,6 +929,7 @@ export function UserGuide({ audience }: { audience: Audience }) {
           ['Executar uma O.S.', 'executar'],
           ['Pausar quando depende do cliente', 'pausar'],
           ['Ver uma senha no cofre', 'cofre'],
+          ['Entrar automaticamente (extensão)', 'extensao-cofre'],
         ];
   return (
     <div className="mx-auto flex max-w-[1400px] flex-col gap-6">

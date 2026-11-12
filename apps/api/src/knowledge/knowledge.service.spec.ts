@@ -230,6 +230,54 @@ describe('KnowledgeService', () => {
     ).rejects.toBeInstanceOf(NotFoundException);
   });
 
+  it('autofill returns login data and two TOTP codes without the seed, audited', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(
+      credential({
+        host: 'https://sgp.exemplo.net.br/admin/',
+        totpSecretEnc: 'encrypted:GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ',
+      }),
+    );
+    const result = await service.credentialAutofill(
+      'analista',
+      'user-1',
+      'tenant-1',
+      'credential-1',
+      'Entrar no SGP',
+      'confirm-test',
+    );
+    expect(result).toMatchObject({
+      url: 'https://sgp.exemplo.net.br/admin/',
+      origin: 'https://sgp.exemplo.net.br',
+      username: 'admin',
+      password: 'strong-secret',
+    });
+    expect(result.totp?.codes).toHaveLength(2);
+    expect(result.totp!.codes[1].validFrom).toBe(result.totp!.codes[0].validUntil);
+    expect(JSON.stringify(result)).not.toContain('GEZDGNBV');
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ metadata: expect.objectContaining({ op: 'autofill' }) }),
+      }),
+    );
+  });
+
+  it('autofill refuses credentials without an http(s) address and without confirmation', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(credential({ host: '10.0.0.1' }));
+    await expect(
+      service.credentialAutofill(
+        'analista',
+        'user-1',
+        'tenant-1',
+        'credential-1',
+        'x',
+        'confirm-test',
+      ),
+    ).rejects.toThrow(/endereço web/);
+    await expect(
+      service.credentialAutofill('analista', 'user-1', 'tenant-1', 'credential-1', 'x', undefined),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
   it('never returns the encrypted TOTP seed in credential lists', async () => {
     prisma.knowledgeCredential.findMany.mockResolvedValue([
       credential({ totpSecretEnc: 'encrypted:private-seed' }),
