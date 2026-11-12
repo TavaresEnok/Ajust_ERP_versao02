@@ -324,32 +324,60 @@ export function CredentialsPage() {
     ],
     [items],
   );
+  // Na busca, quem tem o termo no nome vem primeiro (ex.: "sgp" acha o sistema SGP antes das
+  // OLTs cujo usuário é "acessosgp"); depois endereço; depois usuário, notas e acessos filhos.
+  const relevance = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    const score = new Map<string, number>();
+    if (!q) return score;
+    for (const item of items) {
+      const name = text(item.equipmentName, '').toLowerCase();
+      score.set(
+        item.id,
+        name.startsWith(q)
+          ? 0
+          : name.includes(q)
+            ? 1
+            : text(item.host, '').toLowerCase().includes(q)
+              ? 2
+              : 3,
+      );
+    }
+    return score;
+  }, [items, search]);
   const filtered = useMemo(() => {
     const q = search.trim().toLowerCase();
-    return items.filter((item) => {
-      if (item.parentCredentialId) return false;
-      if (type === 'Todos' && item.equipmentType === 'DOCUMENTO' && !q) return false;
-      if (provider !== 'Todos' && text(item.provider) !== provider) return false;
-      if (type !== 'Todos' && text(item.equipmentType, 'OUTROS') !== type) return false;
-      if (!q) return true;
-      return [item, ...items.filter((child) => child.parentCredentialId === item.id)].some(
-        (entry) =>
-          `${entry.equipmentName ?? ''} ${entry.host ?? ''} ${entry.username ?? ''} ${entry.notes ?? ''} ${entry.provider ?? ''}`
-            .toLowerCase()
-            .includes(q),
-      );
-    });
-  }, [items, search, provider, type]);
+    const rank = (item: ErpRecord) => relevance.get(item.id) ?? 3;
+    return items
+      .filter((item) => {
+        if (item.parentCredentialId) return false;
+        if (type === 'Todos' && item.equipmentType === 'DOCUMENTO' && !q) return false;
+        if (provider !== 'Todos' && text(item.provider) !== provider) return false;
+        if (type !== 'Todos' && text(item.equipmentType, 'OUTROS') !== type) return false;
+        if (!q) return true;
+        return [item, ...items.filter((child) => child.parentCredentialId === item.id)].some(
+          (entry) =>
+            `${entry.equipmentName ?? ''} ${entry.host ?? ''} ${entry.username ?? ''} ${entry.notes ?? ''} ${entry.provider ?? ''}`
+              .toLowerCase()
+              .includes(q),
+        );
+      })
+      .sort((a, b) => rank(a) - rank(b));
+  }, [items, search, provider, type, relevance]);
   const grouped = useMemo(() => {
     const map = new Map<string, ErpRecord[]>();
     for (const item of filtered.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)) {
       const key = text(item.equipmentType, 'OUTROS');
       map.set(key, [...(map.get(key) || []), item]);
     }
+    const best = (rows: ErpRecord[]) => Math.min(...rows.map((r) => relevance.get(r.id) ?? 3));
     return [...map.entries()].sort(
-      (a, b) => categoryOrder(a[0]) - categoryOrder(b[0]) || a[0].localeCompare(b[0], 'pt-BR'),
+      (a, b) =>
+        best(a[1]) - best(b[1]) ||
+        categoryOrder(a[0]) - categoryOrder(b[0]) ||
+        a[0].localeCompare(b[0], 'pt-BR'),
     );
-  }, [filtered, page]);
+  }, [filtered, page, relevance]);
 
   const selected = items.find((item) => item.id === selectedId) || null;
   const rootId = selected?.parentCredentialId || selected?.id;
