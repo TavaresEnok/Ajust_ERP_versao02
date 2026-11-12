@@ -386,6 +386,8 @@ export class KnowledgeService {
           sourceSystem: true,
           sourceMetadata: true,
           totpSecretEnc: true,
+          secretEnc: true,
+          protectedContentEnc: true,
           createdAt: true,
           updatedAt: true,
         },
@@ -406,14 +408,32 @@ export class KnowledgeService {
     );
 
     return {
-      items: credentials.map(({ totpSecretEnc, ...item }) => ({
+      // A lista nunca devolve segredo: só diz se há senha e quantos acessos o item guarda,
+      // para a tela não mostrar "••••" onde não existe senha nem esconder acessos extras.
+      items: credentials.map(({ totpSecretEnc, secretEnc, protectedContentEnc, ...item }) => ({
         ...item,
         hasTotp: !!totpSecretEnc,
+        ...this.credentialShape(secretEnc, protectedContentEnc),
       })),
       total,
       limit,
       offset,
     };
+  }
+
+  private credentialShape(secretEnc: string, protectedContentEnc: string | null) {
+    try {
+      const content = unpackVaultContent(
+        protectedContentEnc ? decryptSecret(protectedContentEnc) : null,
+      );
+      return {
+        hasSecret: decryptSecret(secretEnc) !== '',
+        accessCount: content.accessEntries.length,
+        hasProtectedText: content.text.trim() !== '',
+      };
+    } catch {
+      return { hasSecret: true, accessCount: 0, hasProtectedText: true };
+    }
   }
 
   async listCredentialProviders(
@@ -686,9 +706,11 @@ export class KnowledgeService {
     role: string,
     tx: Prisma.TransactionClient,
   ) {
-    const configured = Number(process.env.VAULT_REVEALS_PER_HOUR || 30);
+    // 120/h para analista (240 para gestão): sem a janela de senha, abrir a anotação de um item
+    // é um clique, e um plantão consulta dezenas de equipamentos por hora.
+    const configured = Number(process.env.VAULT_REVEALS_PER_HOUR || 120);
     const perHour =
-      (Number.isInteger(configured) && configured > 0 ? configured : 30) *
+      (Number.isInteger(configured) && configured > 0 ? configured : 120) *
       (role === 'analista' ? 1 : 2);
     const used = await tx.auditLog.count({
       where: {
@@ -768,6 +790,7 @@ export class KnowledgeService {
     id: string,
     reason?: string,
     currentPassword?: string,
+    entryIndex?: number,
   ) {
     if (!['super_admin', 'gerente', 'analista'].includes(role)) throw new ForbiddenException();
     await this.authorizeReveal(userId, reason, currentPassword);
@@ -781,10 +804,20 @@ export class KnowledgeService {
         username: true,
         secretEnc: true,
         totpSecretEnc: true,
+        protectedContentEnc: true,
       },
     });
     if (!row) throw new NotFoundException();
-    const url = webAccessUrl(row.host);
+    // Item com vários acessos: a tela diz qual deles abrir.
+    let access = { host: row.host, username: row.username, secret: decryptSecret(row.secretEnc) };
+    if (entryIndex !== undefined) {
+      const entry = unpackVaultContent(
+        row.protectedContentEnc ? decryptSecret(row.protectedContentEnc) : null,
+      ).accessEntries[entryIndex];
+      if (!entry) throw new NotFoundException('Acesso não encontrado neste item.');
+      access = { host: entry.host, username: entry.username, secret: entry.secret };
+    }
+    const url = webAccessUrl(access.host);
     if (!url)
       throw new BadRequestException('Esta credencial não tem um endereço web (http ou https).');
     await this.recordReveal(tenantId, userId, role, id, {
@@ -812,8 +845,8 @@ export class KnowledgeService {
     return {
       url: url.toString(),
       origin: url.origin,
-      username: row.username,
-      password: decryptSecret(row.secretEnc),
+      username: access.username,
+      password: access.secret,
       totp: codes.length ? { codes, serverTime: Date.now() } : null,
     };
   }

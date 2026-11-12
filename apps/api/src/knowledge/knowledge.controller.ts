@@ -290,7 +290,7 @@ export class KnowledgeController {
   async credentialAutofill(
     @Req() req: RequestWithAuth,
     @Param('id') id: string,
-    @Body() body?: { reason?: unknown; currentPassword?: unknown },
+    @Body() body?: { reason?: unknown; currentPassword?: unknown; entry?: unknown },
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException();
     return this.knowledgeService.credentialAutofill(
@@ -300,6 +300,9 @@ export class KnowledgeController {
       id,
       typeof body?.reason === 'string' ? body.reason : undefined,
       typeof body?.currentPassword === 'string' ? body.currentPassword : undefined,
+      Number.isInteger(body?.entry) && (body!.entry as number) >= 0
+        ? (body!.entry as number)
+        : undefined,
     );
   }
 

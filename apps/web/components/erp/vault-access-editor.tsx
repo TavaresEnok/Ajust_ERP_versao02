@@ -1,7 +1,7 @@
 'use client';
 import { useVaultConfirmation } from './vault-confirmation';
 import { useEffect, useRef, useState } from 'react';
-import { Eye, EyeOff, Copy, Plus, Trash2 } from 'lucide-react';
+import { Eye, EyeOff, Copy, ExternalLink, LogIn, Plus, Trash2 } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import {
   Dialog,
@@ -36,88 +36,148 @@ const blank = (): VaultAccess => ({
 });
 const input =
   'w-full rounded-lg border border-border bg-background px-3 py-2.5 text-sm outline-none focus-visible:ring-2 focus-visible:ring-ring';
-export function StructuredAccesses({ entries }: { entries: VaultAccess[] }) {
+export const ACCESS_METHOD_LABEL: Record<string, string> = {
+  WEB: 'Web',
+  SSH: 'SSH',
+  TELNET: 'Telnet',
+  WINBOX: 'Winbox',
+  RDP: 'Área de trabalho remota',
+  ANYDESK: 'AnyDesk',
+  BANCO: 'Banco de dados',
+};
+/** Um bloco por acesso do item: endereço, porta, usuário e senha, cada um com copiar. */
+export function StructuredAccesses({
+  entries,
+  onAutoLogin,
+  onOpenSite,
+}: {
+  entries: VaultAccess[];
+  /** Com a extensão Ajust Cofre instalada: entra no acesso web deste índice. */
+  onAutoLogin?: (index: number) => void;
+  onOpenSite?: (url: string) => void;
+}) {
   const [visible, setVisible] = useState<number[]>([]);
-  async function copy(value: string) {
-    if (await copyToClipboard(value)) toast.success('Valor copiado.');
+  async function copy(value: string, label: string) {
+    if (await copyToClipboard(value)) toast.success(`${label} copiado.`);
     else toast.error('Não foi possível copiar.');
   }
   return (
     <div className="space-y-4">
-      {entries.map((entry, index) => (
-        <section key={index} className="space-y-3 rounded-xl border border-border bg-muted/20 p-4">
-          <div className="flex items-start justify-between gap-3">
-            <h3 className="font-semibold">{entry.label}</h3>
-            <span className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary">
-              {entry.method}
-            </span>
-          </div>
-          {[
-            { label: 'Endereço', value: entry.host, color: 'text-warning' },
-            {
-              label: 'Porta',
-              value: entry.port === null ? '' : String(entry.port),
-              color: 'text-muted-foreground',
-            },
-            { label: 'Usuário', value: entry.username, color: 'text-info' },
-            { label: 'Senha', value: entry.secret, color: '', secret: true },
-          ].map((field) => (
-            <div key={field.label}>
-              <label className="mb-1 block text-[10px] font-semibold uppercase text-muted-foreground">
-                {field.label}
-              </label>
-              <div className="flex items-center gap-2">
-                <output
-                  className={`min-w-0 flex-1 break-all rounded-lg border border-border bg-card px-3 py-2 font-mono text-xs select-all ${field.color}`}
-                >
-                  {field.secret && !visible.includes(index)
-                    ? '••••••••••'
-                    : field.value || 'Não informado'}
-                </output>
-                {field.secret && (
-                  <Button
-                    size="icon"
-                    variant="outline"
-                    aria-label={
-                      visible.includes(index)
-                        ? 'Ocultar senha do acesso'
-                        : 'Mostrar senha do acesso'
-                    }
-                    onClick={() =>
-                      setVisible((current) =>
-                        current.includes(index)
-                          ? current.filter((i) => i !== index)
-                          : [...current, index],
-                      )
-                    }
-                  >
-                    {visible.includes(index) ? (
-                      <EyeOff className="size-4" />
-                    ) : (
-                      <Eye className="size-4" />
+      {entries.length > 1 && (
+        <p className="text-xs text-muted-foreground">
+          Este item tem {entries.length} acessos. Cada bloco abaixo é um acesso diferente.
+        </p>
+      )}
+      {entries.map((entry, index) => {
+        const web = /^https?:\/\//i.test(entry.host);
+        const method = ACCESS_METHOD_LABEL[entry.method];
+        const fields = [
+          { label: 'Endereço', value: entry.host, color: 'text-warning' },
+          ...(entry.port === null
+            ? []
+            : [{ label: 'Porta', value: String(entry.port), color: 'text-muted-foreground' }]),
+          { label: 'Usuário', value: entry.username, color: 'text-info' },
+          { label: 'Senha', value: entry.secret, color: '', secret: true },
+        ];
+        return (
+          <section
+            key={index}
+            className="space-y-3 rounded-xl border border-border bg-muted/20 p-4"
+          >
+            <div className="flex items-start justify-between gap-3">
+              <h3 className="min-w-0 break-words font-semibold">{entry.label}</h3>
+              {method && (
+                <span className="shrink-0 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
+                  {method}
+                  {entry.port !== null && !web ? ` · porta ${entry.port}` : ''}
+                </span>
+              )}
+            </div>
+            {fields.map((field) => (
+              <div key={field.label}>
+                <p className="mb-1 block text-[10px] font-semibold uppercase text-muted-foreground">
+                  {field.label}
+                </p>
+                {field.secret && !field.value ? (
+                  <p className="rounded-lg border border-dashed border-border px-3 py-2 text-xs text-muted-foreground">
+                    Sem senha cadastrada
+                  </p>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <output
+                      className={`min-w-0 flex-1 break-all rounded-lg border border-border bg-card px-3 py-2 font-mono text-xs select-all ${field.color}`}
+                    >
+                      {field.secret && !visible.includes(index)
+                        ? '••••••••••'
+                        : field.value || 'Não informado'}
+                    </output>
+                    {field.secret && (
+                      <Button
+                        size="icon"
+                        variant="outline"
+                        aria-label={
+                          visible.includes(index)
+                            ? 'Ocultar senha do acesso'
+                            : 'Mostrar senha do acesso'
+                        }
+                        onClick={() =>
+                          setVisible((current) =>
+                            current.includes(index)
+                              ? current.filter((i) => i !== index)
+                              : [...current, index],
+                          )
+                        }
+                      >
+                        {visible.includes(index) ? (
+                          <EyeOff className="size-4" />
+                        ) : (
+                          <Eye className="size-4" />
+                        )}
+                      </Button>
                     )}
+                    <Button
+                      size="icon"
+                      variant="outline"
+                      disabled={!field.value}
+                      aria-label={`Copiar ${field.label.toLowerCase()} do acesso`}
+                      onClick={() => void copy(field.value, field.label)}
+                    >
+                      <Copy className="size-4" />
+                    </Button>
+                  </div>
+                )}
+              </div>
+            ))}
+            {web && (onAutoLogin || onOpenSite) && (
+              <div className="flex flex-wrap gap-2 pt-1">
+                {onAutoLogin && (
+                  <Button type="button" size="sm" onClick={() => onAutoLogin(index)}>
+                    <LogIn className="size-3.5" />
+                    Entrar automaticamente
                   </Button>
                 )}
-                <Button
-                  size="icon"
-                  variant="outline"
-                  disabled={!field.value}
-                  aria-label={`Copiar ${field.label.toLowerCase()} do acesso`}
-                  onClick={() => void copy(field.value)}
-                >
-                  <Copy className="size-4" />
-                </Button>
+                {onOpenSite && (
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => onOpenSite(entry.host)}
+                  >
+                    <ExternalLink className="size-3.5" />
+                    Abrir site
+                  </Button>
+                )}
               </div>
-            </div>
-          ))}
-          {entry.context && (
-            <p className="text-xs text-muted-foreground">Rede / contexto: {entry.context}</p>
-          )}
-          {entry.notes && (
-            <p className="whitespace-pre-wrap break-words text-sm leading-6">{entry.notes}</p>
-          )}
-        </section>
-      ))}
+            )}
+            {entry.context && (
+              <p className="text-xs text-muted-foreground">Rede / contexto: {entry.context}</p>
+            )}
+            {entry.notes && (
+              <p className="whitespace-pre-wrap break-words text-sm leading-6">{entry.notes}</p>
+            )}
+          </section>
+        );
+      })}
     </div>
   );
 }

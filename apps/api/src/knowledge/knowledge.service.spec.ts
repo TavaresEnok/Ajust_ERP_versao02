@@ -263,6 +263,53 @@ describe('KnowledgeService', () => {
     );
   });
 
+  it('autofill de um acesso estruturado usa o endereço, usuário e senha daquele acesso', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(
+      credential({
+        host: '10.0.0.1',
+        protectedContentEnc:
+          'encrypted:' +
+          packVaultContent('', [
+            {
+              label: 'Web',
+              method: 'WEB',
+              host: 'https://painel.exemplo.net.br/',
+              port: null,
+              context: '',
+              username: 'operador',
+              secret: 'outra-senha',
+              notes: '',
+            },
+          ]),
+      }),
+    );
+    const result = await service.credentialAutofill(
+      'analista',
+      'user-1',
+      'tenant-1',
+      'credential-1',
+      undefined,
+      undefined,
+      0,
+    );
+    expect(result).toMatchObject({
+      origin: 'https://painel.exemplo.net.br',
+      username: 'operador',
+      password: 'outra-senha',
+    });
+    await expect(
+      service.credentialAutofill(
+        'analista',
+        'user-1',
+        'tenant-1',
+        'credential-1',
+        undefined,
+        undefined,
+        3,
+      ),
+    ).rejects.toBeInstanceOf(NotFoundException);
+  });
+
   it('autofill refuses credentials without an http(s) address', async () => {
     prisma.knowledgeCredential.findFirst.mockResolvedValue(credential({ host: '10.0.0.1' }));
     await expect(
@@ -396,7 +443,11 @@ describe('KnowledgeService', () => {
     expect(query).toEqual(
       expect.objectContaining({ skip: 5, take: 10, where: expect.any(Object) }),
     );
-    expect(query.select).not.toHaveProperty('secretEnc');
+    // Lê a senha cifrada só para dizer se existe; nada cifrado ou decifrado sai na resposta.
+    expect(result.items[0]).toMatchObject({ hasSecret: true, accessCount: 0 });
+    expect(result.items[0]).not.toHaveProperty('secretEnc');
+    expect(result.items[0]).not.toHaveProperty('protectedContentEnc');
+    expect(JSON.stringify(result)).not.toContain('strong-secret');
     expect(audit.log).toHaveBeenCalledWith(
       'tenant-1',
       'user-1',
@@ -480,7 +531,7 @@ describe('KnowledgeService', () => {
   });
 
   it('recusa revelar acima do limite por hora (C-054)', async () => {
-    prisma.auditLog.count.mockResolvedValue(30);
+    prisma.auditLog.count.mockResolvedValue(120);
     await expect(
       service.revealCredential(
         'analista',
@@ -492,7 +543,7 @@ describe('KnowledgeService', () => {
       ),
     ).rejects.toMatchObject({ status: 429 });
     // Gerente tem o dobro do limite do analista.
-    prisma.auditLog.count.mockResolvedValue(59);
+    prisma.auditLog.count.mockResolvedValue(239);
     await expect(
       service.revealCredential(
         'gerente',

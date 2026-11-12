@@ -51,7 +51,12 @@ import { cn } from '@/lib/utils';
 import { RecordDialog } from './record-dialog';
 import { useVaultConfirmation } from './vault-confirmation';
 import { CredentialTotp } from './credential-totp';
-import { VaultAccessEditor, StructuredAccesses, type VaultAccess } from './vault-access-editor';
+import {
+  ACCESS_METHOD_LABEL,
+  VaultAccessEditor,
+  StructuredAccesses,
+  type VaultAccess,
+} from './vault-access-editor';
 import { QueryState } from './contract-form';
 import useSWR from 'swr';
 
@@ -114,9 +119,15 @@ const CATEGORY_ORDER = [
   'CIRCUITOS',
   'ENLACE',
   'ACESSO REMOTO',
+  'REFERENCIA',
   'A CONFERIR',
   'DOCUMENTO',
 ];
+/** Nota padrão da importação: não é orientação, só diz de onde o item veio. */
+const IMPORT_NOTE = /^Importado da anotação SGP #(\d+)\./;
+const methodLabel = (value: unknown) => ACCESS_METHOD_LABEL[String(value || '')] || '';
+/** Texto curto de quantos acessos o item guarda (a lista não traz os acessos em si). */
+const accessCountOf = (item: ErpRecord | null | undefined) => Number(item?.accessCount || 0);
 const categoryOrder = (value: string) =>
   CATEGORY_ORDER.includes(value) ? CATEGORY_ORDER.indexOf(value) : 99;
 const when = (value: unknown) => {
@@ -510,13 +521,13 @@ export function CredentialsPage() {
 
   // Entrada automática pela extensão Ajust Cofre: o ERP confirma e audita a consulta, e a
   // extensão abre o site e preenche usuário, senha e 2FA. Nada vai na URL.
-  async function autoLogin(item: ErpRecord) {
+  async function autoLogin(item: ErpRecord, entry?: number) {
     const body = await confirmation.request();
     if (!body) return;
     try {
       const payload = await action.execute<AutofillPayload>({
         path: `/knowledge/credentials/${encodeURIComponent(item.id)}/autofill`,
-        body,
+        body: entry === undefined ? body : { ...body, entry },
         method: 'POST',
       });
       const result = await sendAutofill(payload);
@@ -541,6 +552,48 @@ export function CredentialsPage() {
   }
 
   const notes = text(selected?.notes, '');
+  const importedNote = notes.match(IMPORT_NOTE);
+  const selectedAccessCount = accessCountOf(selected);
+  // Anotação que não é acesso (aviso, link, documento): sem usuário, sem senha, sem acessos.
+  const infoOnly =
+    !!selected && !selected.username && selected.hasSecret === false && !selectedAccessCount;
+  const rowSummary = (item: ErpRecord) =>
+    [
+      methodLabel(item.accessMethod) ||
+        (!item.username && item.hasSecret === false && !accessCountOf(item)
+          ? 'Anotação'
+          : 'Acesso'),
+      accessCountOf(item) > 1 ? `${accessCountOf(item)} acessos` : '',
+      item.hasSecret === false && (item.username || item.equipmentType === 'A CONFERIR')
+        ? 'sem senha'
+        : '',
+      (item.sourceMetadata as { duplicateOf?: string } | null)?.duplicateOf
+        ? 'possível duplicado'
+        : '',
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  async function revealContent(item: ErpRecord) {
+    const body = await confirmation.request();
+    if (!body) return;
+    const version = ++revealVersion.current;
+    try {
+      const result = await action.execute<{
+        protectedContent?: string;
+        accessEntries: VaultAccess[];
+      }>({
+        path: `/knowledge/credentials/${item.id}/reveal`,
+        body,
+        method: 'POST',
+      });
+      if (version === revealVersion.current) {
+        setProtectedContent(result.protectedContent || '');
+        setAccessEntries(result.accessEntries || []);
+      }
+    } catch (e) {
+      toast.error(errorMessage(e));
+    }
+  }
   const summary = useErpQuery<{
     total: number;
     lastChange: { at: string; by: string; operation: string; label: string } | null;
@@ -591,7 +644,9 @@ export function CredentialsPage() {
       CIRCUITOS: 'Links e operadoras',
       ENLACE: 'Enlaces',
       FIREWALL: 'Firewall e CGNAT',
-      DOCUMENTO: 'Documentos originais',
+      DOCUMENTO: 'Documentos e avisos',
+      REFERENCIA: 'Referências e contatos',
+      OUTROS: 'Outros',
       'A CONFERIR': 'A conferir',
       'ACESSO REMOTO': 'Acesso remoto',
     })[value] || value;
@@ -819,37 +874,6 @@ export function CredentialsPage() {
             <RecordDialog title="Novo equipamento ou sistema" moduleKey="credentials" fields={[]} />
           </div>
         </div>
-        <div className="grid gap-3 sm:grid-cols-3">
-          {topStats.map((stat) => (
-            <div
-              key={stat.label}
-              className="flex items-center justify-between rounded-xl border border-border bg-card px-5 py-4"
-            >
-              <div>
-                <p className="text-xs text-muted-foreground">{stat.label}</p>
-                <p
-                  className={cn(
-                    'mt-1 font-semibold tabular-nums',
-                    stat.label === 'Última alteração' ? 'text-sm' : 'text-xl',
-                  )}
-                >
-                  {stat.value}
-                </p>
-                {stat.label === 'Última alteração' && summary.data?.lastChange && (
-                  <p className="mt-1 text-[10px] text-muted-foreground">
-                    {summary.data.lastChange.operation === 'delete'
-                      ? 'Exclusão'
-                      : summary.data.lastChange.operation === 'create'
-                        ? 'Novo cadastro'
-                        : summary.data.lastChange.label}{' '}
-                    · {summary.data.lastChange.by}
-                  </p>
-                )}
-              </div>
-              <stat.icon className="size-5 text-primary/60" />
-            </div>
-          ))}
-        </div>
         <QueryState
           loading={query.isLoading}
           error={query.error}
@@ -858,7 +882,7 @@ export function CredentialsPage() {
         <div className="grid items-start gap-5 lg:grid-cols-[215px_minmax(0,1fr)]">
           <nav
             aria-label="Categorias do cofre"
-            className="flex min-w-0 gap-1 overflow-x-auto rounded-2xl border border-border bg-card p-3 lg:sticky lg:top-4 lg:block lg:space-y-1"
+            className="flex min-w-0 flex-wrap gap-1 rounded-2xl border border-border bg-card p-3 lg:sticky lg:top-4 lg:block lg:space-y-1"
           >
             <p className="hidden px-3 pb-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground lg:block">
               Explorar inventário
@@ -983,15 +1007,18 @@ export function CredentialsPage() {
                           {categoryName(String(item.equipmentType))}
                         </span>
                       </div>
-                      <h3 className="text-sm font-semibold group-hover:text-primary">
+                      <h3
+                        className="line-clamp-2 text-sm font-semibold group-hover:text-primary"
+                        title={text(item.equipmentName)}
+                      >
                         {text(item.equipmentName)}
                       </h3>
                       <p className="mt-2 truncate font-mono text-xs text-muted-foreground">
-                        {text(item.host, 'Valores na ficha protegida')}
+                        {text(item.host, 'Sem endereço')}
                       </p>
                       <div className="mt-4 flex items-center justify-between border-t border-border pt-3 text-xs">
                         <span className="truncate text-muted-foreground">
-                          {text(item.username, 'Consultar orientações')}
+                          {text(item.username, rowSummary(item))}
                         </span>
                         <ArrowUpRight className="size-4 text-primary" />
                       </div>
@@ -1032,12 +1059,7 @@ export function CredentialsPage() {
                                 {text(item.equipmentName)}
                               </span>
                               <span className="mt-1 block text-[10px] text-muted-foreground">
-                                {text(item.accessMethod) === 'SEM_ACESSO'
-                                  ? 'Informação técnica'
-                                  : text(item.accessMethod) === 'OUTROS'
-                                    ? 'Acessos e orientações'
-                                    : text(item.accessMethod)}{' '}
-                                · {provider}
+                                {rowSummary(item)}
                               </span>
                             </button>
                             <div className="flex min-w-0 items-center gap-1">
@@ -1052,6 +1074,7 @@ export function CredentialsPage() {
                             <div className="flex min-w-0 items-center gap-1">
                               <span className="truncate font-mono text-[11px] text-muted-foreground">
                                 {text(item.username)}
+                                {accessCountOf(item) > 1 && ` +${accessCountOf(item) - 1}`}
                               </span>
                               {smallCopy(item.username, 'Copiar usuário')}
                             </div>
@@ -1121,11 +1144,14 @@ export function CredentialsPage() {
               aria-label="Detalhes da credencial"
             >
               <DialogHeader className="border-b border-border bg-muted/30 px-6 py-5 pr-12">
-                <DialogTitle className="text-xl font-semibold">
+                <DialogTitle
+                  className="line-clamp-3 text-lg font-semibold leading-snug"
+                  title={text(selected.equipmentName, text(selected.host))}
+                >
                   {text(selected.equipmentName, text(selected.host))}
                 </DialogTitle>
                 <DialogDescription>
-                  {text(selected.provider)} · Acessos e documentação técnica
+                  {text(selected.provider)} · {categoryName(text(selected.equipmentType, 'OUTROS'))}
                 </DialogDescription>
               </DialogHeader>
               <div className="border-b border-border p-4 flex flex-wrap gap-2">
@@ -1161,7 +1187,7 @@ export function CredentialsPage() {
                         typeMeta(selected.equipmentType).chip,
                       )}
                     >
-                      {text(selected.equipmentType, 'OUTROS')}
+                      {categoryName(text(selected.equipmentType, 'OUTROS'))}
                     </span>
                     <span className="truncate text-xs text-muted-foreground">
                       {text(selected.provider)}
@@ -1179,9 +1205,11 @@ export function CredentialsPage() {
                     }}
                   />
                 </div>
-                <p className="mt-1 text-[11px] text-muted-foreground">
-                  Ambiente: {text(selected.environment)}
-                </p>
+                {!!selected.environment && selected.environment !== 'NAO_INFORMADO' && (
+                  <p className="mt-1 text-[11px] text-muted-foreground">
+                    Ambiente: {text(selected.environment)}
+                  </p>
+                )}
               </div>
               <div
                 className="sticky top-0 z-10 flex gap-6 border-b border-border bg-card px-6"
@@ -1234,36 +1262,35 @@ export function CredentialsPage() {
                 >
                   <section className="order-2 rounded-xl border border-primary/15 bg-primary/[0.025] p-4 space-y-3">
                     {protectedContent === null ? (
-                      <Button
-                        variant="outline"
-                        disabled={action.pending}
-                        onClick={async () => {
-                          const body = await confirmation.request();
-                          if (!body) return;
-                          const version = ++revealVersion.current;
-                          try {
-                            const result = await action.execute<{
-                              protectedContent?: string;
-                              accessEntries: VaultAccess[];
-                            }>({
-                              path: `/knowledge/credentials/${selected.id}/reveal`,
-                              body,
-                              method: 'POST',
-                            });
-                            if (version === revealVersion.current) {
-                              setProtectedContent(result.protectedContent || '');
-                              setAccessEntries(result.accessEntries || []);
-                            }
-                          } catch (e) {
-                            toast.error(errorMessage(e));
-                          }
-                        }}
-                      >
-                        Consultar dados adicionais
-                      </Button>
+                      <div className="space-y-2">
+                        <Button
+                          variant={selectedAccessCount > 1 || infoOnly ? 'default' : 'outline'}
+                          disabled={action.pending}
+                          onClick={() => void revealContent(selected)}
+                        >
+                          {selectedAccessCount > 1
+                            ? `Ver os ${selectedAccessCount} acessos deste item`
+                            : infoOnly
+                              ? 'Ver anotação'
+                              : 'Ver anotação completa'}
+                        </Button>
+                        <p className="text-[11px] leading-5 text-muted-foreground">
+                          {selectedAccessCount > 1
+                            ? 'O primeiro acesso aparece acima; os demais ficam aqui, cada um com usuário e senha.'
+                            : 'Texto original da anotação: portas, observações e outros dados deste item.'}
+                        </p>
+                      </div>
                     ) : (
                       <>
-                        {!!accessEntries.length && <StructuredAccesses entries={accessEntries} />}
+                        {!!accessEntries.length && (
+                          <StructuredAccesses
+                            entries={accessEntries}
+                            onAutoLogin={
+                              cofre ? (index) => void autoLogin(selected, index) : undefined
+                            }
+                            onOpenSite={(url) => window.open(url, '_blank', 'noopener,noreferrer')}
+                          />
+                        )}
                         {!accessEntries.length ? (
                           <TechnicalFields
                             content={protectedContent || 'Nenhum dado adicional cadastrado.'}
@@ -1272,7 +1299,7 @@ export function CredentialsPage() {
                         ) : (
                           <details>
                             <summary className="cursor-pointer text-xs text-muted-foreground">
-                              Texto de referência preservado
+                              Ver o texto original da anotação
                             </summary>
                             <div className="mt-3">
                               <TechnicalFields
@@ -1297,13 +1324,13 @@ export function CredentialsPage() {
                     <div className="flex items-center justify-between">
                       <h3 className="flex items-center gap-2 text-xs font-semibold uppercase">
                         <KeyRound className="size-4 text-primary" />
-                        Autenticação direta
+                        {infoOnly ? 'Endereço' : 'Acesso'}
                       </h3>
-                      <span className="rounded bg-primary/5 px-2 py-1 text-[10px] font-mono text-primary">
-                        {selected.accessMethod === 'OUTROS'
-                          ? 'ACESSO'
-                          : text(selected.accessMethod)}
-                      </span>
+                      {methodLabel(selected.accessMethod) && (
+                        <span className="rounded bg-primary/5 px-2 py-1 text-[10px] font-medium text-primary">
+                          {methodLabel(selected.accessMethod)}
+                        </span>
+                      )}
                     </div>
                     {[
                       {
@@ -1312,40 +1339,62 @@ export function CredentialsPage() {
                         color: 'text-warning',
                         copy: 'Copiar host',
                       },
-                      {
-                        label: 'Usuário / login',
-                        value: text(selected.username, 'Não informado'),
-                        color: 'text-info',
-                        copy: 'Copiar usuário',
-                      },
-                    ].map((field) => (
-                      <div key={field.label}>
-                        <p className="mb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
-                          {field.label}
-                        </p>
-                        <div className="flex items-center gap-2">
-                          <output
-                            className={cn(
-                              'min-w-0 flex-1 break-all rounded-xl border border-border bg-card px-3 py-2.5 font-mono text-xs select-all',
-                              field.color,
-                            )}
-                          >
-                            {field.value}
-                          </output>
-                          <IconButton
-                            label={field.copy}
-                            onClick={() => void copy(field.value, field.label)}
-                          >
-                            <Copy />
-                          </IconButton>
+                      ...(infoOnly
+                        ? []
+                        : [
+                            {
+                              label: 'Usuário / login',
+                              value: text(selected.username, 'Não informado'),
+                              color: 'text-info',
+                              copy: 'Copiar usuário',
+                            },
+                          ]),
+                    ]
+                      .filter((field) => !(infoOnly && field.value === 'Não informado'))
+                      .map((field) => (
+                        <div key={field.label}>
+                          <p className="mb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                            {field.label}
+                          </p>
+                          <div className="flex items-center gap-2">
+                            <output
+                              className={cn(
+                                'min-w-0 flex-1 break-all rounded-xl border border-border bg-card px-3 py-2.5 font-mono text-xs select-all',
+                                field.color,
+                              )}
+                            >
+                              {field.value}
+                            </output>
+                            <IconButton
+                              label={field.copy}
+                              onClick={() => void copy(field.value, field.label)}
+                            >
+                              <Copy />
+                            </IconButton>
+                          </div>
                         </div>
-                      </div>
-                    ))}
-                    <div>
-                      <p className="mb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
-                        Senha de acesso criptografada
+                      ))}
+                    {infoOnly && !selected.host && (
+                      <p className="text-xs leading-5 text-muted-foreground">
+                        Este item é uma anotação, sem endereço, usuário ou senha.
                       </p>
-                      <div className="flex items-center gap-2">
+                    )}
+                    <div hidden={infoOnly}>
+                      <p className="mb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                        Senha
+                      </p>
+                      {selected.hasSecret === false && (
+                        <p className="rounded-xl border border-dashed border-border px-3 py-2.5 text-xs text-muted-foreground">
+                          Sem senha cadastrada
+                          {selected.equipmentType === 'A CONFERIR'
+                            ? '. Confira a anotação abaixo: ela pode ter mais de uma senha.'
+                            : ''}
+                        </p>
+                      )}
+                      <div
+                        className="flex items-center gap-2"
+                        hidden={selected.hasSecret === false}
+                      >
                         <output className="min-w-0 flex-1 break-all rounded-xl border border-border bg-card px-3 py-2.5 font-mono text-xs select-all">
                           {secret || MASK}
                         </output>
@@ -1389,7 +1438,7 @@ export function CredentialsPage() {
                       </div>
                     )}
                   </section>
-                  <div className="order-3">
+                  <div className="order-3" hidden={infoOnly}>
                     <CredentialTotp
                       key={selected.id}
                       id={selected.id}
@@ -1407,7 +1456,14 @@ export function CredentialsPage() {
                     Orientações e particularidades deste acesso
                   </h3>
                   <div className="rounded-xl border border-border bg-muted/40 p-4 text-sm leading-7 break-words whitespace-pre-wrap">
-                    {notes || <span className="text-muted-foreground">Sem observações.</span>}
+                    {importedNote ? (
+                      <span className="text-muted-foreground">
+                        Item importado do SGP (anotação nº {importedNote[1]}). O texto completo da
+                        anotação fica na aba Acessos, em “Ver anotação”.
+                      </span>
+                    ) : (
+                      notes || <span className="text-muted-foreground">Sem observações.</span>
+                    )}
                   </div>
                   {!!selected.parentCredentialId && (
                     <div className="mt-4">
@@ -1422,7 +1478,7 @@ export function CredentialsPage() {
                       </p>
                     </div>
                   )}
-                  {notes && (
+                  {notes && !importedNote && (
                     <Button
                       variant="outline"
                       size="sm"
