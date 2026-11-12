@@ -39,7 +39,7 @@ import {
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import { errorMessage, queryPath, type ErpRecord } from '@/lib/erp/contracts';
 import { copyToClipboard } from '@/lib/erp/clipboard';
-import { listRecords, useRouteBase } from '@/lib/erp/visual-data';
+import { listRecords } from '@/lib/erp/visual-data';
 import {
   EXTENSION_DOWNLOAD,
   isOutdated,
@@ -236,34 +236,35 @@ function QuickAccess({
 }
 
 /** Na barra do cofre: baixar a extensão Ajust Cofre, ou mostrar que ela já está ativa. */
-function ExtensionAction({ version, guide }: { version: string | null; guide: string }) {
-  if (version && !isOutdated(version))
-    return (
-      <a
-        href={guide}
-        title="A extensão Ajust Cofre está instalada neste navegador. Clique para ver como usar."
-        className="hidden items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-primary md:flex"
-      >
-        <LogIn className="size-3.5" />
-        Extensão ativa · v{version}
-      </a>
-    );
+function ExtensionAction({ version }: { version: string | null }) {
+  const current = !!version && !isOutdated(version);
   return (
-    <a
-      href={EXTENSION_DOWNLOAD}
-      download
-      title="Extensão para Chrome e Edge que entra nos sistemas preenchendo usuário, senha e 2FA"
-      onClick={() =>
-        toast('Extensão baixada. Agora é só instalar no navegador.', {
-          duration: 20000,
-          action: { label: 'Como instalar', onClick: () => window.location.assign(guide) },
-        })
-      }
-      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-primary/40 bg-card px-3 text-sm font-medium text-primary transition-colors hover:bg-primary/10 [&_svg]:size-4"
-    >
-      <Download />
-      {version ? 'Atualizar extensão' : 'Baixar extensão'}
-    </a>
+    <>
+      {current && (
+        <span
+          title="A extensão Ajust Cofre está instalada neste navegador."
+          className="hidden items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-primary md:flex"
+        >
+          <LogIn className="size-3.5" />
+          Extensão ativa · v{version}
+        </span>
+      )}
+      <a
+        href={EXTENSION_DOWNLOAD}
+        download
+        title="Extensão para Chrome e Edge que entra nos sistemas preenchendo usuário, senha e 2FA"
+        onClick={() =>
+          toast(
+            'Extensão baixada. Extraia o zip e, em chrome://extensions, use Carregar sem compactação.',
+            { duration: 15000 },
+          )
+        }
+        className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-primary/40 bg-card px-3 text-sm font-medium text-primary transition-colors hover:bg-primary/10 [&_svg]:size-4"
+      >
+        <Download />
+        {version && !current ? 'Atualizar extensão' : 'Baixar extensão'}
+      </a>
+    </>
   );
 }
 
@@ -287,7 +288,6 @@ export function CredentialsPage() {
   const [providerMode, setProviderMode] = useState<'cards' | 'table'>('cards');
   const confirmation = useVaultConfirmation();
   const cofre = useAjustCofre();
-  const routeBase = useRouteBase();
   const [detailTab, setDetailTab] = useState<'access' | 'notes' | 'history'>('access');
   const [providerSearch, setProviderSearch] = useState('');
   const [deleteChallenge, setDeleteChallenge] = useState<string | null>(null);
@@ -621,7 +621,7 @@ export function CredentialsPage() {
             </p>
           </div>
           <div className="flex flex-wrap items-center gap-3">
-            <ExtensionAction version={cofre} guide={`${routeBase}/guia#extensao-cofre`} />
+            <ExtensionAction version={cofre} />
             <RecordDialog title="Novo equipamento ou sistema" moduleKey="credentials" fields={[]} />
           </div>
         </div>
@@ -815,7 +815,7 @@ export function CredentialsPage() {
               <ShieldCheck className="size-3.5" />
               Consultas auditadas
             </span>
-            <ExtensionAction version={cofre} guide={`${routeBase}/guia#extensao-cofre`} />
+            <ExtensionAction version={cofre} />
             <RecordDialog title="Novo equipamento ou sistema" moduleKey="credentials" fields={[]} />
           </div>
         </div>
@@ -1379,7 +1379,8 @@ export function CredentialsPage() {
                         />
                         {!cofre && (
                           <a
-                            href={`${routeBase}/guia#extensao-cofre`}
+                            href={EXTENSION_DOWNLOAD}
+                            download
                             className="text-xs text-muted-foreground underline-offset-2 hover:text-primary hover:underline"
                           >
                             Entrar automaticamente? Instale a extensão Ajust Cofre
