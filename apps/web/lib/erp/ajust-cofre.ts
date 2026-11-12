@@ -7,6 +7,17 @@ import { useSyncExternalStore } from 'react';
  */
 const CHANNEL = 'ajust-cofre';
 
+/** Versão publicada em /extensao/ajust-cofre.zip (extensions/ajust-cofre/manifest.json). */
+export const EXTENSION_LATEST = '1.0.0';
+export const EXTENSION_DOWNLOAD = '/extensao/ajust-cofre.zip';
+
+export function isOutdated(installed: string) {
+  const a = installed.split('.').map(Number);
+  const b = EXTENSION_LATEST.split('.').map(Number);
+  for (let i = 0; i < 3; i++) if ((a[i] || 0) !== (b[i] || 0)) return (a[i] || 0) < (b[i] || 0);
+  return false;
+}
+
 export type AutofillPayload = {
   url: string;
   origin: string;

@@ -24,6 +24,7 @@ import {
   Building2,
   FolderKey,
   LogIn,
+  Download,
 } from 'lucide-react';
 import { useSearchParams } from 'next/navigation';
 import { toast } from 'sonner';
@@ -39,7 +40,13 @@ import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import { errorMessage, queryPath, type ErpRecord } from '@/lib/erp/contracts';
 import { copyToClipboard } from '@/lib/erp/clipboard';
 import { listRecords, useRouteBase } from '@/lib/erp/visual-data';
-import { sendAutofill, useAjustCofre, type AutofillPayload } from '@/lib/erp/ajust-cofre';
+import {
+  EXTENSION_DOWNLOAD,
+  isOutdated,
+  sendAutofill,
+  useAjustCofre,
+  type AutofillPayload,
+} from '@/lib/erp/ajust-cofre';
 import { cn } from '@/lib/utils';
 import { RecordDialog } from './record-dialog';
 import { useVaultConfirmation } from './vault-confirmation';
@@ -225,6 +232,38 @@ function QuickAccess({
       <ExternalLink />
       Abrir site
     </button>
+  );
+}
+
+/** Na barra do cofre: baixar a extensão Ajust Cofre, ou mostrar que ela já está ativa. */
+function ExtensionAction({ version, guide }: { version: string | null; guide: string }) {
+  if (version && !isOutdated(version))
+    return (
+      <a
+        href={guide}
+        title="A extensão Ajust Cofre está instalada neste navegador. Clique para ver como usar."
+        className="hidden items-center gap-1.5 rounded-full border border-primary/20 bg-primary/5 px-3 py-1.5 text-xs text-primary md:flex"
+      >
+        <LogIn className="size-3.5" />
+        Extensão ativa · v{version}
+      </a>
+    );
+  return (
+    <a
+      href={EXTENSION_DOWNLOAD}
+      download
+      title="Extensão para Chrome e Edge que entra nos sistemas preenchendo usuário, senha e 2FA"
+      onClick={() =>
+        toast('Extensão baixada. Agora é só instalar no navegador.', {
+          duration: 20000,
+          action: { label: 'Como instalar', onClick: () => window.location.assign(guide) },
+        })
+      }
+      className="inline-flex h-9 items-center gap-1.5 rounded-lg border border-primary/40 bg-card px-3 text-sm font-medium text-primary transition-colors hover:bg-primary/10 [&_svg]:size-4"
+    >
+      <Download />
+      {version ? 'Atualizar extensão' : 'Baixar extensão'}
+    </a>
   );
 }
 
@@ -581,7 +620,10 @@ export function CredentialsPage() {
               A infraestrutura dos seus clientes, organizada em um só lugar.
             </p>
           </div>
-          <RecordDialog title="Novo equipamento ou sistema" moduleKey="credentials" fields={[]} />
+          <div className="flex flex-wrap items-center gap-3">
+            <ExtensionAction version={cofre} guide={`${routeBase}/guia#extensao-cofre`} />
+            <RecordDialog title="Novo equipamento ou sistema" moduleKey="credentials" fields={[]} />
+          </div>
         </div>
         <div className="grid gap-4 sm:grid-cols-3">
           {topStats.map((stat) => (
@@ -773,6 +815,7 @@ export function CredentialsPage() {
               <ShieldCheck className="size-3.5" />
               Consultas auditadas
             </span>
+            <ExtensionAction version={cofre} guide={`${routeBase}/guia#extensao-cofre`} />
             <RecordDialog title="Novo equipamento ou sistema" moduleKey="credentials" fields={[]} />
           </div>
         </div>
