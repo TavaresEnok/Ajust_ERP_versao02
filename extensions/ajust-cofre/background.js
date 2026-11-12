@@ -145,12 +145,14 @@ async function fillPage(data) {
   window.__ajustCofre = true;
   const BANNER_ID = 'ajust-cofre-banner';
 
-  const visible = (el) =>
+  // Na tela: tem tamanho, não está escondido nem desabilitado. "Somente leitura" é aceito no
+  // 2FA porque alguns sistemas só liberam o campo quando ele recebe foco (anti-preenchimento).
+  const shown = (el) =>
     !!el &&
     el.getClientRects().length > 0 &&
     !el.disabled &&
-    !el.readOnly &&
     getComputedStyle(el).visibility !== 'hidden';
+  const visible = (el) => shown(el) && !el.readOnly;
   const describe = (el) => {
     const label = el.id ? document.querySelector(`label[for="${CSS.escape(el.id)}"]`) : null;
     return [
@@ -189,6 +191,7 @@ async function fillPage(data) {
     }
     box.style.background = tone === 'error' ? '#7f1d1d' : '#0f172a';
     box.style.color = '#fff';
+    box.style.whiteSpace = 'pre-line';
     box.textContent = 'Ajust Cofre · ' + text;
     clearTimeout(window.__ajustCofreBannerTimer);
     window.__ajustCofreBannerTimer = setTimeout(() => box.remove(), tone === 'wait' ? 60000 : 8000);
@@ -236,11 +239,9 @@ async function fillPage(data) {
     return { user, password, form: password.form };
   }
 
-  function findOtp() {
-    const inputs = [...document.querySelectorAll('input')].filter(
-      (el) => visible(el) && textual(el),
-    );
-    const single = inputs.find(isOtpField);
+  function findOtp({ lone = false } = {}) {
+    const inputs = [...document.querySelectorAll('input')].filter((el) => shown(el) && textual(el));
+    const single = inputs.find(isOtpField) || (lone && inputs.length === 1 ? inputs[0] : null);
     if (single) return { fields: [single], form: single.form };
     // Código em caixinhas separadas (uma por dígito).
     const boxes = inputs.filter((el) => el.maxLength === 1);
@@ -304,6 +305,9 @@ async function fillPage(data) {
 
   let loginDone = !data.login;
   let otpDone = !data.totp;
+  const otpSearchStart = Date.now();
+  let otpHelp = false;
+  let lastHelpCode = null;
   const deadline = Date.now() + 90_000;
   while (Date.now() < deadline && !(loginDone && otpDone)) {
     if (!loginDone) {
@@ -352,7 +356,36 @@ async function fillPage(data) {
       }
     }
     if (!otpDone && loginDone) {
-      const otp = findOtp();
+      // Tela do 2FA: um único campo na tela também conta (o rótulo pode não estar no campo).
+      const otp = findOtp({ lone: !data.login });
+      if (!otp && !otpHelp && Date.now() - otpSearchStart > 6000) {
+        otpHelp = true;
+      }
+      if (!otp && otpHelp) {
+        // Plano B: não achou o campo; mostra o código atual para colar e o que viu na tela.
+        const code = pickCode();
+        const seen = [...document.querySelectorAll('input')]
+          .filter((el) => el.type !== 'hidden')
+          .slice(0, 6)
+          .map(
+            (el) =>
+              `${el.type}${el.name ? ' name=' + el.name : ''}${el.id ? ' id=' + el.id : ''}` +
+              `${el.placeholder ? ' "' + el.placeholder + '"' : ''}` +
+              `${el.readOnly ? ' ro' : ''}${el.disabled ? ' off' : ''}${shown(el) ? '' : ' oculto'}`,
+          )
+          .join(' | ');
+        const frames = document.querySelectorAll('iframe').length;
+        if (code !== lastHelpCode) {
+          lastHelpCode = code;
+          banner(
+            (code
+              ? `Não achei o campo do 2FA. Código atual: ${code.replace(/(\d{3})(?=\d)/, '$1 ')}`
+              : 'O código 2FA expirou. Volte ao cofre e clique de novo em Entrar automaticamente.') +
+              `\n(campos: ${seen || 'nenhum'}${frames ? `; ${frames} iframe` : ''})`,
+            code ? 'wait' : 'error',
+          );
+        }
+      }
       if (otp) {
         const code = pickCode();
         if (!code) {
