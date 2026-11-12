@@ -175,8 +175,26 @@ async function fillPage(data) {
   const report = (step) => chrome.runtime.sendMessage({ type: 'step', step }).catch(() => {});
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  const OTP_HINT = /otp|totp|2fa|mfa|token|c[oó]digo|code|verifica|autentica|one-time/;
+  // Indício forte de campo 2FA: vale mesmo que o rótulo diga "senha" (o SGP usa "Senha OTP").
+  const OTP_STRONG = /otp|2fa|mfa|one-time|autenticador|authenticator|dois fatores|two-factor/;
+  // Indício fraco: só vale se o campo não parecer outra coisa.
+  const OTP_WEAK = /token|c[oó]digo|code|verifica|autentica/;
   const NOT_OTP = /captcha|altcha|cupom|coupon|cep|postal|promo|senha|password|user|login|e-?mail/;
+  const OTP_HINT = { test: (text) => OTP_STRONG.test(text) || OTP_WEAK.test(text) };
+  const isOtpField = (el) => {
+    const text = describe(el);
+    if (el.autocomplete === 'one-time-code' || OTP_STRONG.test(text)) return true;
+    return OTP_WEAK.test(text) && !NOT_OTP.test(text.replace(/token|code/g, ''));
+  };
+
+  /** querySelectorAll que também entra em shadow roots abertos (widgets como o ALTCHA). */
+  function deepAll(root, selector, out = []) {
+    if (root.shadowRoot) deepAll(root.shadowRoot, selector, out);
+    out.push(...root.querySelectorAll(selector));
+    for (const el of root.querySelectorAll('*'))
+      if (el.shadowRoot) deepAll(el.shadowRoot, selector, out);
+    return out;
+  }
 
   function findLogin() {
     const password = [...document.querySelectorAll('input[type="password"]')].find(
@@ -201,11 +219,7 @@ async function fillPage(data) {
     const inputs = [...document.querySelectorAll('input')].filter(
       (el) => visible(el) && textual(el),
     );
-    const single = inputs.find(
-      (el) =>
-        el.autocomplete === 'one-time-code' ||
-        (OTP_HINT.test(describe(el)) && !NOT_OTP.test(describe(el).replace(/token|code/g, ''))),
-    );
+    const single = inputs.find(isOtpField);
     if (single) return { fields: [single], form: single.form };
     // Código em caixinhas separadas (uma por dígito).
     const boxes = inputs.filter((el) => el.maxLength === 1);
@@ -231,7 +245,21 @@ async function fillPage(data) {
     const token = root.querySelector(
       'input[name="altcha"], textarea[name="g-recaptcha-response"], textarea[name="h-captcha-response"], input[name="cf-turnstile-response"]',
     );
-    return { present: true, solved: !!token?.value };
+    const altcha = widget.matches('altcha-widget') ? widget : null;
+    const verified = altcha && deepAll(altcha, '[data-state="verified"]').length > 0;
+    return { present: true, solved: !!token?.value || !!verified, altcha };
+  }
+
+  /**
+   * ALTCHA ("Não sou um robô" do SGP) é uma prova de trabalho que o próprio navegador calcula
+   * quando a caixa é marcada: a extensão marca a caixa pelo analista, que pediu a entrada.
+   * Captchas com desafio humano (reCAPTCHA, hCaptcha, Turnstile) continuam com o analista.
+   */
+  function clickAltcha(altcha) {
+    const box = deepAll(altcha, 'input[type="checkbox"]').find((el) => !el.disabled);
+    if (!box || box.checked) return false;
+    box.click();
+    return true;
   }
 
   function submit(form, field) {
@@ -276,14 +304,23 @@ async function fillPage(data) {
         }
         let captcha = captchaToken(login.form);
         if (captcha.present && !captcha.solved) {
+          const clicked = captcha.altcha && clickAltcha(captcha.altcha);
           banner(
-            'Usuário e senha preenchidos. Marque “Não sou um robô” e eu entro em seguida.',
+            clicked
+              ? 'Usuário e senha preenchidos. Verificando “Não sou um robô”…'
+              : 'Usuário e senha preenchidos. Marque “Não sou um robô” e eu entro em seguida.',
             'wait',
           );
+          const askedAt = Date.now();
+          let asked = !clicked;
           while (Date.now() < deadline) {
             await sleep(400);
             captcha = captchaToken(login.form);
             if (captcha.solved || !document.contains(login.password)) break;
+            if (!asked && Date.now() - askedAt > 10_000) {
+              asked = true;
+              banner('Marque “Não sou um robô” e eu entro em seguida.', 'wait');
+            }
           }
           if (!captcha.solved) return 'captcha-timeout';
         }

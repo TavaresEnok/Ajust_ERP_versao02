@@ -757,9 +757,9 @@ export class KnowledgeService {
 
   /**
    * Entrada automática pela extensão Ajust Cofre: devolve, numa única consulta auditada, o que a
-   * extensão precisa para preencher o login do site (usuário, senha e, se houver chave 2FA, o
-   * código atual e o seguinte — a tela do 2FA pode demorar alguns segundos para aparecer). A chave
-   * TOTP em si nunca sai do servidor.
+   * extensão precisa para preencher o login do site (usuário, senha e, se houver chave 2FA, os
+   * códigos dos próximos minutos — a tela do 2FA pode demorar a aparecer). A chave TOTP em si
+   * nunca sai do servidor.
    */
   async credentialAutofill(
     role: string,
@@ -795,10 +795,15 @@ export class KnowledgeService {
     });
     let codes: { code: string; validFrom: number; validUntil: number }[] = [];
     if (row.totpSecretEnc) {
+      // Códigos do período atual e dos seguintes, cobrindo os 3 minutos em que a extensão guarda
+      // o pedido: a tela do 2FA pode demorar (captcha, rede lenta). Cada código só é usado na sua
+      // própria janela de tempo.
       const seed = decryptSecret(row.totpSecretEnc);
-      const current = totp(seed);
-      const next = totp(seed, current.validUntil);
-      codes = [current, next].map((item) => ({
+      const first = totp(seed);
+      const steps = Math.ceil(210_000 / (first.period * 1000)) + 1;
+      const all = [first];
+      while (all.length < steps) all.push(totp(seed, all[all.length - 1].validUntil));
+      codes = all.map((item) => ({
         code: item.code,
         validFrom: item.validUntil - item.period * 1000,
         validUntil: item.validUntil,

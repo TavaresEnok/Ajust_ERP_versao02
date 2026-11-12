@@ -251,8 +251,10 @@ describe('KnowledgeService', () => {
       username: 'admin',
       password: 'strong-secret',
     });
-    expect(result.totp?.codes).toHaveLength(2);
-    expect(result.totp!.codes[1].validFrom).toBe(result.totp!.codes[0].validUntil);
+    const codes = result.totp!.codes;
+    expect(codes).toHaveLength(8); // 30 s cada, cobrindo os 3 minutos da extensão
+    codes.slice(1).forEach((c, i) => expect(c.validFrom).toBe(codes[i].validUntil));
+    expect(codes[codes.length - 1].validUntil - Date.now()).toBeGreaterThan(210_000);
     expect(JSON.stringify(result)).not.toContain('GEZDGNBV');
     expect(prisma.auditLog.create).toHaveBeenCalledWith(
       expect.objectContaining({

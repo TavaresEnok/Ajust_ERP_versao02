@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
 const CHANNEL = 'ajust-cofre';
 
 /** Versão publicada em /extensao/ajust-cofre.zip (extensions/ajust-cofre/manifest.json). */
-export const EXTENSION_LATEST = '1.0.0';
+export const EXTENSION_LATEST = '1.1.0';
 export const EXTENSION_DOWNLOAD = '/extensao/ajust-cofre.zip';
 
 export function isOutdated(installed: string) {
