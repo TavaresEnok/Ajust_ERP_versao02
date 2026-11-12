@@ -15,7 +15,7 @@ import { SCOPE_HEADER } from '@/lib/bff/scope';
  * interno. A autorização efetiva de dados continua no NestJS; isto é apenas navegação.
  */
 const PORTALS = ['/gerencia', '/analista', '/cliente'];
-const PUBLIC_PATHS = ['/login', '/forgot-password', '/reset-password'];
+const PUBLIC_PATHS = ['/login', '/forgot-password', '/reset-password', '/privacidade-extensao'];
 
 function portalOf(pathname: string) {
   return PORTALS.find((portal) => pathname === portal || pathname.startsWith(`${portal}/`));
