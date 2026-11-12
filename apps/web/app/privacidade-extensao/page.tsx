@@ -28,7 +28,7 @@ export default function ExtensionPrivacyPage() {
       <ul className="list-disc pl-6">
         <li>
           Informações de autenticação (usuário, senha e código 2FA de uso único) de um acesso que o
-          próprio usuário escolheu no cofre do Ajust ERP e confirmou com o motivo e a sua senha.
+          próprio usuário, logado no Ajust ERP, escolheu no cofre.
         </li>
         <li>O endereço do site desse acesso, para abrir a aba e conferir onde preencher.</li>
       </ul>
@@ -72,8 +72,8 @@ export default function ExtensionPrivacyPage() {
 
       <h2 className={h2}>Registro e auditoria</h2>
       <p>
-        Cada entrada automática fica registrada no histórico do Ajust ERP (quem, quando, qual acesso
-        e o motivo informado), como qualquer outra consulta ao cofre.
+        Cada entrada automática fica registrada no histórico do Ajust ERP (quem, quando e qual
+        acesso), como qualquer outra consulta ao cofre.
       </p>
 
       <h2 className={h2}>Contato</h2>

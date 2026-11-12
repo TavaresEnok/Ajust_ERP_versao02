@@ -304,8 +304,7 @@ const dayToDay: Chapter[] = [
             equipamento.
           </>,
           <>
-            Clique em <B>Ver acesso</B>. Para ver a senha, informe o <B>motivo</B> e a{' '}
-            <B>sua senha</B> do ERP.
+            Clique em <B>Ver acesso</B> e no ícone do olho para ver a senha.
           </>,
           <>Use o botão de copiar ao lado de cada campo.</>,
         ],
@@ -322,8 +321,8 @@ const dayToDay: Chapter[] = [
         ],
         warn: [
           <>
-            Toda consulta de senha fica registrada (quem, quando e por quê). A senha some sozinha
-            depois de 30 segundos ou quando você troca de aba.
+            Toda consulta de senha fica registrada (quem e quando). A senha some sozinha depois de
+            30 segundos ou quando você troca de aba.
           </>,
         ],
       },
@@ -358,10 +357,9 @@ const dayToDay: Chapter[] = [
             <B>Entrar automaticamente</B>.
           </>,
           <>
-            Para usar: clique em <B>Entrar automaticamente</B>, informe o motivo e a sua senha do
-            ERP. O sistema abre numa aba nova já preenchido. Se aparecer <B>Não sou um robô</B>{' '}
-            (como no SGP), marque a caixa: a extensão clica em entrar e depois preenche o código
-            2FA.
+            Para usar: clique em <B>Entrar automaticamente</B>. O sistema abre numa aba nova já
+            preenchido. Se aparecer <B>Não sou um robô</B> (como no SGP), marque a caixa: a extensão
+            clica em entrar e depois preenche o código 2FA.
           </>,
         ],
         tips: [

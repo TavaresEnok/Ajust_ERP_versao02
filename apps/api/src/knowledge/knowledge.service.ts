@@ -637,24 +637,22 @@ export class KnowledgeService {
 
   /**
    * Limite de revelações por pessoa e hora (C-054): um analista com a conta tomada ou mal-
-   * intencionado não esvazia o cofre em minutos. Gerente e super admin têm o dobro. O motivo
-   * é obrigatório e fica no histórico da credencial.
+   * intencionado não esvazia o cofre em minutos. Gerente e super admin têm o dobro.
+   *
+   * Desde 12/11/2026, por decisão da gestão, a consulta não pede mais motivo nem senha: basta a
+   * sessão ativa. Se um motivo vier, ele é validado e guardado no histórico; se uma senha vier,
+   * ela ainda é conferida (clientes antigos). Toda consulta segue auditada e limitada por hora.
    */
   private async authorizeReveal(userId: string, reason?: string, password?: string) {
-    if (!reason?.trim() || reason.trim().length > 300)
-      throw new BadRequestException('Informe o motivo da consulta (até 300 caracteres).');
-    if (!password || password.length > 256)
-      throw new ForbiddenException('Confirme sua senha para consultar o cofre.');
+    if (reason && reason.trim().length > 300)
+      throw new BadRequestException('Motivo da consulta com até 300 caracteres.');
     const user = await this.prisma.user.findUnique({
       where: { id: userId },
       select: { passwordHash: true, status: true, deletedAt: true },
     });
-    if (
-      !user ||
-      user.status !== 'ACTIVE' ||
-      user.deletedAt ||
-      !(await compare(password, user.passwordHash))
-    )
+    if (!user || user.status !== 'ACTIVE' || user.deletedAt)
+      throw new ForbiddenException('Usuário sem acesso ao cofre.');
+    if (password && (password.length > 256 || !(await compare(password, user.passwordHash))))
       throw new ForbiddenException('Senha atual inválida.');
   }
 
@@ -752,7 +750,7 @@ export class KnowledgeService {
       throw new BadRequestException('Cadastre a chave 2FA em Editar para gerar os códigos.');
     await this.recordReveal(tenantId, userId, role, id, {
       op: 'totp',
-      reason: reason!.trim(),
+      ...(reason?.trim() ? { reason: reason.trim().slice(0, 300) } : {}),
     });
     return totp(decryptSecret(row.totpSecretEnc));
   }
@@ -793,7 +791,7 @@ export class KnowledgeService {
       op: 'autofill',
       provider: row.provider,
       environment: row.environment,
-      reason: reason!.trim().slice(0, 300),
+      ...(reason?.trim() ? { reason: reason.trim().slice(0, 300) } : {}),
     });
     let codes: { code: string; validFrom: number; validUntil: number }[] = [];
     if (row.totpSecretEnc) {

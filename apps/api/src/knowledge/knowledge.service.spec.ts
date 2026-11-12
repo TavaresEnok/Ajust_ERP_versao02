@@ -261,21 +261,11 @@ describe('KnowledgeService', () => {
     );
   });
 
-  it('autofill refuses credentials without an http(s) address and without confirmation', async () => {
+  it('autofill refuses credentials without an http(s) address', async () => {
     prisma.knowledgeCredential.findFirst.mockResolvedValue(credential({ host: '10.0.0.1' }));
     await expect(
-      service.credentialAutofill(
-        'analista',
-        'user-1',
-        'tenant-1',
-        'credential-1',
-        'x',
-        'confirm-test',
-      ),
+      service.credentialAutofill('analista', 'user-1', 'tenant-1', 'credential-1'),
     ).rejects.toThrow(/endereço web/);
-    await expect(
-      service.credentialAutofill('analista', 'user-1', 'tenant-1', 'credential-1', 'x', undefined),
-    ).rejects.toBeInstanceOf(ForbiddenException);
   });
 
   it('never returns the encrypted TOTP seed in credential lists', async () => {
@@ -458,29 +448,33 @@ describe('KnowledgeService', () => {
     );
   });
 
-  it('requires a reason and the current password before reading secrets', async () => {
+  it('reveals without reason or password (12/11/2026), still audited and checking a sent password', async () => {
+    prisma.knowledgeCredential.findFirst.mockResolvedValue(credential());
+    const result = await service.revealCredential('analista', 'user-1', 'tenant-1', 'credential-1');
+    expect(result.secret).toBe('strong-secret');
+    expect(prisma.auditLog.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ metadata: expect.objectContaining({ op: 'reveal' }) }),
+      }),
+    );
     await expect(
       service.revealCredential(
         'analista',
         'user-1',
         'tenant-1',
         'credential-1',
-        '',
-        'confirm-test',
-      ),
-    ).rejects.toMatchObject({ status: 400 });
-    await expect(
-      service.revealCredential(
-        'analista',
-        'user-1',
-        'tenant-1',
-        'credential-1',
-        'Atendimento',
+        undefined,
         'wrong',
       ),
     ).rejects.toMatchObject({ status: 403 });
-    expect(prisma.knowledgeCredential.findFirst).not.toHaveBeenCalled();
-    expect(decryptSecret).not.toHaveBeenCalled();
+    prisma.user.findUnique.mockResolvedValueOnce({
+      passwordHash: 'x',
+      status: 'BLOCKED',
+      deletedAt: null,
+    });
+    await expect(
+      service.revealCredential('analista', 'user-1', 'tenant-1', 'credential-1'),
+    ).rejects.toMatchObject({ status: 403 });
   });
 
   it('recusa revelar acima do limite por hora (C-054)', async () => {
