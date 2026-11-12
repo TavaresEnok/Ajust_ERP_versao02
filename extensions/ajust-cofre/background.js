@@ -58,6 +58,18 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       // Só a página do ERP pode pedir uma entrada automática.
       if (!sender.tab || !ERP_ORIGINS.includes(originOf(sender.url)))
         return reply({ ok: false, error: 'Pedido fora do Ajust ERP.' });
+      // Mesmo pedido chegando duas vezes (duas pontes na aba): só o primeiro abre o site.
+      const seenKey = `seen:${message.requestId}`;
+      if (message.requestId) {
+        if ((await chrome.storage.session.get(seenKey))[seenKey])
+          return reply({ ok: false, duplicate: true });
+        await chrome.storage.session.set({ [seenKey]: Date.now() + 60_000 });
+        const all = await chrome.storage.session.get(null);
+        const expired = Object.keys(all).filter(
+          (k) => k.startsWith('seen:') && all[k] < Date.now(),
+        );
+        if (expired.length) await chrome.storage.session.remove(expired);
+      }
       const problem = validPayload(message.payload);
       if (problem) return reply({ ok: false, error: problem });
       const p = message.payload;
@@ -114,6 +126,15 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => void dropJob(tabId));
+
+// Instalou ou atualizou: reconecta as abas do ERP já abertas, sem precisar de F5.
+chrome.runtime.onInstalled.addListener(async () => {
+  const tabs = await chrome.tabs.query({ url: ERP_ORIGINS.map((origin) => `${origin}/*`) });
+  for (const tab of tabs)
+    await chrome.scripting
+      .executeScript({ target: { tabId: tab.id }, files: ['bridge.js'] })
+      .catch(() => {});
+});
 
 /**
  * Roda dentro da página do site (mundo isolado da extensão). Precisa ser autocontida: o Chrome

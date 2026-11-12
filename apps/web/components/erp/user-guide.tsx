@@ -350,7 +350,8 @@ const dayToDay: Chapter[] = [
           </>,
           <>
             Clique em <B>Carregar sem compactação</B> (no Edge: <B>Carregar descompactada</B>) e
-            escolha a pasta <B>ajust-cofre</B> que você extraiu.
+            escolha a pasta <B>ajust-cofre</B> que você extraiu (é a pasta onde aparece o arquivo{' '}
+            <B>manifest.json</B>).
           </>,
           <>
             Volte ao ERP e aperte <B>F5</B>. No cofre, os acessos web passam a ter o botão{' '}
@@ -381,6 +382,11 @@ const dayToDay: Chapter[] = [
           <>
             Ao abrir o navegador, o Chrome pode avisar sobre extensões em modo de desenvolvedor: é
             esperado, clique para manter.
+          </>,
+          <>
+            Quando houver versão nova, o cofre mostra <B>Atualizar extensão</B>: baixe, extraia{' '}
+            <B>por cima da mesma pasta</B> e clique no ícone <B>↻</B> da Ajust Cofre em
+            chrome://extensions.
           </>,
         ],
       },

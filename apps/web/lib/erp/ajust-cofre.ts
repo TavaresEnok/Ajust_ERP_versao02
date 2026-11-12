@@ -8,7 +8,7 @@ import { useSyncExternalStore } from 'react';
 const CHANNEL = 'ajust-cofre';
 
 /** Versão publicada em /extensao/ajust-cofre.zip (extensions/ajust-cofre/manifest.json). */
-export const EXTENSION_LATEST = '1.1.0';
+export const EXTENSION_LATEST = '1.1.1';
 export const EXTENSION_DOWNLOAD = '/extensao/ajust-cofre.zip';
 
 export function isOutdated(installed: string) {
@@ -56,7 +56,11 @@ export function sendAutofill(payload: AutofillPayload, timeoutMs = 5000) {
     const requestId = crypto.randomUUID();
     const timer = setTimeout(() => {
       window.removeEventListener('message', onMessage);
-      resolve({ ok: false, error: 'A extensão Ajust Cofre não respondeu. Recarregue a página.' });
+      resolve({
+        ok: false,
+        error:
+          'A extensão Ajust Cofre não respondeu. Aperte F5 nesta página e tente de novo; se continuar, confira em chrome://extensions se ela está ativada.',
+      });
     }, timeoutMs);
     function onMessage(event: MessageEvent) {
       const data = event.data;
