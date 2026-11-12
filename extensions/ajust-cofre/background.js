@@ -86,7 +86,7 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
           ? { codes: p.totp.codes, skew: Number(p.totp.serverTime) - Date.now() || 0 }
           : null,
         loginDone: false,
-        otpDone: !p.totp,
+        otpTries: 0,
         expiresAt: Date.now() + JOB_TTL_MS,
       });
       return reply({ ok: true, twoFactor: !!p.totp });
@@ -95,8 +95,15 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       const job = await getJob(sender.tab.id);
       if (!job || originOf(sender.url) !== job.origin) return reply({ ok: false });
       if (message.step === 'login') job.loginDone = true;
-      if (message.step === 'otp') job.otpDone = true;
-      if (job.loginDone && job.otpDone) await dropJob(sender.tab.id);
+      if (message.step === 'otp') {
+        // Enviou um código: guarda qual foi e segue olhando a próxima página por 1 minuto.
+        // Se o sistema recusar e voltar à tela do 2FA, tenta mais uma vez com o próximo código.
+        job.otpTries = (job.otpTries || 0) + 1;
+        job.lastCode = String(message.code || '');
+        job.expiresAt = Math.min(job.expiresAt, Date.now() + 60_000);
+      }
+      const finished = message.step === 'done' || (job.loginDone && !job.totp);
+      if (finished) await dropJob(sender.tab.id);
       else await saveJob(sender.tab.id, job);
       return reply({ ok: true });
     }
@@ -118,7 +125,8 @@ chrome.tabs.onUpdated.addListener(async (tabId, info, tab) => {
       args: [
         {
           login: job.loginDone ? null : { username: job.username, password: job.password },
-          totp: job.otpDone ? null : job.totp,
+          totp: job.totp,
+          retry: { tries: job.otpTries || 0, lastCode: job.lastCode || null },
         },
       ],
     })
@@ -196,7 +204,8 @@ async function fillPage(data) {
     clearTimeout(window.__ajustCofreBannerTimer);
     window.__ajustCofreBannerTimer = setTimeout(() => box.remove(), tone === 'wait' ? 60000 : 8000);
   };
-  const report = (step) => chrome.runtime.sendMessage({ type: 'step', step }).catch(() => {});
+  const report = (step, extra = {}) =>
+    chrome.runtime.sendMessage({ type: 'step', step, ...extra }).catch(() => {});
   const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // Indício forte de campo 2FA: vale mesmo que o rótulo diga "senha" (o SGP usa "Senha OTP").
@@ -322,9 +331,9 @@ async function fillPage(data) {
         if (sameFormOtp && sameFormOtp.form === login.form) {
           const code = pickCode();
           if (code) {
-            fillOtp(sameFormOtp, code);
+            await fillOtp(sameFormOtp, code);
             otpDone = true;
-            await report('otp');
+            await report('otp', { code });
           }
         }
         let captcha = captchaToken(login.form);
@@ -387,29 +396,70 @@ async function fillPage(data) {
         }
       }
       if (otp) {
-        const code = pickCode();
+        const tries = data.retry?.tries || 0;
+        let code = pickCode();
+        if (tries >= 2) {
+          // Já recusou duas vezes: não insiste (evita bloquear o usuário no sistema).
+          banner(
+            `O sistema recusou o código 2FA duas vezes. Código atual: ${code || '—'}` +
+              '\nConfira se a chave 2FA do cofre é a deste usuário.',
+            'error',
+          );
+          await report('done');
+          return 'otp-rejected';
+        }
+        if (tries > 0) {
+          // Voltou para a tela do 2FA: o código foi recusado (já usado, ou trocado pelo
+          // preenchimento do navegador). Espera o próximo código para não repetir o mesmo.
+          while (code && code === data.retry.lastCode && Date.now() < deadline) {
+            const end = data.totp.codes.find((c) => c.code === code)?.validUntil || 0;
+            const left = Math.max(0, Math.ceil((end - Date.now() - (data.totp.skew || 0)) / 1000));
+            banner(
+              `O sistema recusou o código 2FA. Tento de novo com o próximo em ${left}s…`,
+              'wait',
+            );
+            await sleep(1000);
+            code = pickCode();
+          }
+        }
         if (!code) {
           banner(
             'O código 2FA expirou. Volte ao cofre e clique de novo em Entrar automaticamente.',
             'error',
           );
+          await report('done');
           return 'otp-expired';
         }
-        fillOtp(otp, code);
+        await fillOtp(otp, code);
         otpDone = true;
-        await report('otp');
+        await report('otp', { code });
         banner('Código 2FA preenchido. Entrando…');
         await sleep(250);
         submit(otp.form, otp.fields[0]);
         return 'otp';
+      }
+      // Página depois do envio do código sem campo de 2FA: entrou. Encerra e apaga os dados.
+      if (!otp && (data.retry?.tries || 0) > 0 && Date.now() - otpSearchStart > 4000) {
+        await report('done');
+        return 'done';
       }
     }
     await sleep(400);
   }
   return loginDone && otpDone ? 'done' : 'timeout';
 
-  function fillOtp(otp, code) {
-    if (otp.fields.length === 1) setValue(otp.fields[0], code);
-    else otp.fields.forEach((field, i) => setValue(field, code[i] || ''));
+  // Preenche e confere: o preenchimento automático do navegador (senha salva) pode trocar o
+  // valor de um campo do tipo senha logo depois. Se trocar, coloca o código de novo.
+  async function fillOtp(otp, code) {
+    const put = () =>
+      otp.fields.length === 1
+        ? setValue(otp.fields[0], code)
+        : otp.fields.forEach((field, i) => setValue(field, code[i] || ''));
+    const value = () => otp.fields.map((f) => f.value).join('');
+    for (let i = 0; i < 4; i++) {
+      put();
+      await sleep(300);
+      if (value() === code) return;
+    }
   }
 }
