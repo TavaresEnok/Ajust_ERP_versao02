@@ -43,4 +43,21 @@ describe('service-order-queries', () => {
       { id: 'asc' },
     ]);
   });
+
+  it('filtra por activitySince mantendo ativas e movimentações do período', () => {
+    const since = '2026-10-01T03:00:00.000Z';
+    const where = buildOrderWhere('t1', { activitySince: since });
+    expect(where.AND).toEqual(
+      expect.arrayContaining([
+        {
+          OR: [
+            { status: { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] } },
+            { createdAt: { gte: new Date(since) } },
+            { resolvedAt: { gte: new Date(since) } },
+            { closedAt: { gte: new Date(since) } },
+          ],
+        },
+      ]),
+    );
+  });
 });

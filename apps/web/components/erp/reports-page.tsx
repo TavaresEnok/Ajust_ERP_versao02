@@ -233,7 +233,7 @@ export function ReportsPage() {
               description="Entradas por criação e entregas por resolução ou fechamento, em dias de Fortaleza."
             />
             <div className="px-6 pb-5">
-              <VolumeChart period={period} />
+              <VolumeChart period={period} series={report?.series} />
             </div>
           </section>
           <section className="panel">

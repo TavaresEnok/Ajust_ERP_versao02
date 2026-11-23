@@ -25,7 +25,7 @@ const normalized = (value: string) =>
     .toLowerCase();
 
 export function SlaPage() {
-  const source = useOperationalOrders('operation');
+  const source = useOperationalOrders('operation', { situation: 'active' });
   const [filter, setFilter] = useState('Todas');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);

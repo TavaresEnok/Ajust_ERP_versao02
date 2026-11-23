@@ -53,6 +53,22 @@ export function buildOrderWhere(
     };
   }
 
+  if (input.activitySince) {
+    const since = new Date(input.activitySince);
+    const restrictions = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];
+    where.AND = [
+      ...restrictions,
+      {
+        OR: [
+          { status: { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] } },
+          { createdAt: { gte: since } },
+          { resolvedAt: { gte: since } },
+          { closedAt: { gte: since } },
+        ],
+      },
+    ];
+  }
+
   if (input.customerId) where.occurrence = { customerId: input.customerId, tenantId };
   if (input.provider && !input.customerId) {
     const restrictions = Array.isArray(where.AND) ? where.AND : where.AND ? [where.AND] : [];

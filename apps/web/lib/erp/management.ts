@@ -13,6 +13,7 @@ export function isDemonstration(row: ErpRecord) {
 export interface ManagementOverview {
   generatedAt: string;
   period: { start: string; end: string; days: number; timeZone: string };
+  series?: { day: string; opened: number; closed: number }[];
   population: { excludedDemonstrations: number; scope: string };
   operation: {
     totalOpen: number;

@@ -2,11 +2,19 @@
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Pie, PieChart, Cell } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
-import { buildAnalystOverview, ANALYST_TIMEZONE } from '@/lib/erp/analyst-workspace';
+import { buildAnalystOverview, ANALYST_TIMEZONE, localDay } from '@/lib/erp/analyst-workspace';
 import { orderStatuses, type ErpRecord } from '@/lib/erp/contracts';
 import { isDemonstration } from '@/lib/erp/management';
+
+function periodStartIso(days: number) {
+  const today = localDay(new Date());
+  return new Date(
+    new Date(`${today}T00:00:00-03:00`).getTime() - (days - 1) * 86_400_000,
+  ).toISOString();
+}
+
 export function useStatusData(rows?: ErpRecord[]) {
-  const query = useOperationalOrders('operation');
+  const query = useOperationalOrders('operation', { situation: 'active', enabled: !rows });
   return Object.entries(orderStatuses)
     .map(([status, name], index) => ({
       name,
@@ -22,20 +30,23 @@ export function VolumeChart({
   period = 'month',
   tenantId,
   rows: suppliedRows,
+  series: suppliedSeries,
 }: {
   period?: string;
   tenantId?: string;
   rows?: ErpRecord[];
+  series?: { day: string; opened: number; closed: number }[];
 }) {
-  const query = useOperationalOrders('operation');
+  const days = period === 'week' ? 7 : period === 'quarter' ? 90 : 30;
+  const query = useOperationalOrders('operation', {
+    activitySince: periodStartIso(days),
+    enabled: !suppliedSeries && !suppliedRows,
+  });
   const rows = (suppliedRows || query.data || []).filter(
     (row) => !isDemonstration(row) && (!tenantId || row.tenantId === tenantId),
   );
-  const data = buildAnalystOverview(
-    rows,
-    period === 'week' ? 7 : period === 'quarter' ? 90 : 30,
-    new Date(),
-  ).series.map((row) => ({
+  const rawSeries = suppliedSeries ?? buildAnalystOverview(rows, days, new Date()).series;
+  const data = rawSeries.map((row) => ({
     ...row,
     day: new Date(`${row.day}T12:00:00-03:00`).toLocaleDateString('pt-BR', {
       timeZone: ANALYST_TIMEZONE,

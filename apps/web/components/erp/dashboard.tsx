@@ -78,7 +78,7 @@ export function Dashboard() {
   const [page, setPage] = useState(0);
   const [orderOpen, setOrderOpen] = useState(false);
   const report = useErpQuery<ManagementOverview>(`/reports/management-overview?daysBack=${days}`);
-  const orders = useOperationalOrders('operation');
+  const orders = useOperationalOrders('operation', { situation: 'active' });
   const overview = !report.error ? report.data : undefined;
   const now = overview ? new Date(overview.generatedAt) : null;
   const agenda = useErpQuery<unknown>(
@@ -482,14 +482,14 @@ export function Dashboard() {
             description="Eventos por dia no período dos resultados."
           />
           <QueryState
-            loading={orders.isLoading}
-            error={orders.error}
-            onRetry={() => void orders.mutate()}
+            loading={!overview?.series && report.isLoading}
+            error={report.error}
+            onRetry={() => void reportMutate()}
           />
-          {usableList && (
+          {overview?.series && (
             <div className="px-5 pb-5">
               <VolumeChart
-                rows={rows}
+                series={overview.series}
                 period={days === 7 ? 'week' : days === 90 ? 'quarter' : 'month'}
               />
             </div>

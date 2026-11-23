@@ -37,6 +37,7 @@ import {
   ANALYST_TIMEZONE,
   buildAnalystOverview,
   isOwnOrder,
+  localDay,
   type OrderFocus,
 } from '@/lib/erp/analyst-workspace';
 import { Metric, PageHeading, PanelHeading, ViewLink } from './primitives';
@@ -64,7 +65,13 @@ function AnalystHistory() {
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
-  const orders = useOperationalOrders(view);
+  const activitySince =
+    period === 'all'
+      ? undefined
+      : new Date(
+          new Date(`${localDay(now)}T00:00:00-03:00`).getTime() - (Number(period) - 1) * 86_400_000,
+        ).toISOString();
+  const orders = useOperationalOrders(view, { activitySince });
   const me = useErpQuery<{ user?: { name?: string }; name?: string }>('/auth/me');
   const calendar = useErpQuery<ErpRecord[]>('/calendar/events');
   const rows = listRecords(orders.data).filter(

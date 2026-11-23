@@ -29,13 +29,17 @@ export function isDemonstration(order: { sourceMetadata?: unknown }) {
   );
 }
 
-export function managementPeriod(days: number, now: Date) {
-  const today = new Intl.DateTimeFormat('en-CA', {
+function localDay(value: Date) {
+  return new Intl.DateTimeFormat('en-CA', {
     timeZone: MANAGEMENT_TIMEZONE,
     year: 'numeric',
     month: '2-digit',
     day: '2-digit',
-  }).format(now);
+  }).format(value);
+}
+
+export function managementPeriod(days: number, now: Date) {
+  const today = localDay(now);
   return {
     start: new Date(new Date(`${today}T00:00:00-03:00`).getTime() - (days - 1) * DAY),
     end: now,
@@ -125,9 +129,31 @@ export function buildManagementOverview(orders: ManagementOrder[], days: number,
     deliveriesByPerson.set(item.id, group);
   }
   for (const [key, group] of deliveriesByPerson) team.get(key)!.tmrHours = averageHours(group);
+  const dailyGroups = new Map<string, { day: string; opened: number; closed: number }>();
+  for (let t = period.start.getTime(); t <= nowMs; t += DAY) {
+    const dayKey = localDay(new Date(t));
+    if (!dailyGroups.has(dayKey)) dailyGroups.set(dayKey, { day: dayKey, opened: 0, closed: 0 });
+  }
+  const todayKey = localDay(now);
+  if (!dailyGroups.has(todayKey))
+    dailyGroups.set(todayKey, { day: todayKey, opened: 0, closed: 0 });
+  for (const row of rows) {
+    if (inPeriod(row.createdAt)) {
+      const bucket = dailyGroups.get(localDay(row.createdAt));
+      if (bucket) bucket.opened += 1;
+    }
+    if (validCompletion(row)) {
+      const bucket = dailyGroups.get(localDay(finishedAt(row)!));
+      if (bucket) bucket.closed += 1;
+    }
+  }
+  const series = [...dailyGroups.entries()]
+    .sort(([a], [b]) => a.localeCompare(b))
+    .map(([, value]) => value);
   return {
     period,
     generatedAt: now,
+    series,
     population: {
       excludedDemonstrations: orders.length - rows.length,
       scope: 'CURRENT_PENDING_AND_PERIOD_EVENTS',

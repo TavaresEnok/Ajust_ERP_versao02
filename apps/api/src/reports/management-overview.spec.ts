@@ -143,6 +143,9 @@ describe('Management overview', () => {
     );
     expect(result.results.opened).toBe(1);
     expect(result.operation.totalOpen).toBe(2);
+    expect(result.series).toHaveLength(7);
+    expect(result.series[0]).toEqual({ day: '2026-10-22', opened: 1, closed: 0 });
+    expect(result.series[6]).toEqual({ day: '2026-10-28', opened: 0, closed: 0 });
   });
 
   it('consulta o tenant e removidas no banco e inclui antigas ainda pendentes ou entregues agora', async () => {
