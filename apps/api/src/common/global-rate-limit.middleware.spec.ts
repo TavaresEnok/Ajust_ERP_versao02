@@ -44,7 +44,7 @@ describe('GlobalRateLimitMiddleware', () => {
   it('usa cota individual para usuário autenticado via JWT válido e devolve 429 ao exceder', async () => {
     const secret = process.env.JWT_ACCESS_SECRET || 'dev-access-secret';
     const token = jwt.sign({ sub: 'user-42' }, secret);
-    const incrEx = jest.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(31);
+    const incrEx = jest.fn().mockResolvedValueOnce(1).mockResolvedValueOnce(81);
     const middleware = new GlobalRateLimitMiddleware({ incrEx } as unknown as RedisService);
     const next = jest.fn() as NextFunction;
 
@@ -60,8 +60,8 @@ describe('GlobalRateLimitMiddleware', () => {
       next,
     );
     expect(incrEx).toHaveBeenCalledWith('rate-limit:global:user:user-42', 1);
-    expect(first.headers.get('x-ratelimit-limit')).toBe('30');
-    expect(first.headers.get('x-ratelimit-remaining')).toBe('29');
+    expect(first.headers.get('x-ratelimit-limit')).toBe('80');
+    expect(first.headers.get('x-ratelimit-remaining')).toBe('79');
     expect(next).toHaveBeenCalledTimes(1);
 
     const second = createRes();

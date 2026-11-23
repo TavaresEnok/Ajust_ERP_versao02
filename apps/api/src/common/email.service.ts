@@ -34,6 +34,13 @@ export class EmailService implements OnModuleInit {
     }
   }
 
+  private maskRecipient(to: string): string {
+    const [local, domain] = to.split('@');
+    if (!domain) return '***';
+    const prefix = local.length > 2 ? `${local.slice(0, 2)}***` : '***';
+    return `${prefix}@${domain}`;
+  }
+
   /**
    * Enfileira o envio de e-mail de forma assíncrona (fire-and-forget).
    * Nunca lança exceção para o chamador — falhas são retentadas e logadas.
@@ -41,8 +48,9 @@ export class EmailService implements OnModuleInit {
    */
   sendEmail(to: string, subject: string, text: string, html?: string): void {
     if (!this.transporter || !process.env.SMTP_HOST) {
-      this.logger.log(`[MOCK EMAIL] To: ${to} | Subject: ${subject}`);
-      this.logger.debug(`[MOCK EMAIL CONTENT]\n${text}`);
+      this.logger.warn(
+        `[SMTP NOT CONFIGURED] Email not delivered to ${this.maskRecipient(to)} | Subject: "${subject}" (body suppressed for security)`,
+      );
       return;
     }
     const transporter = this.transporter;
@@ -96,8 +104,9 @@ export class EmailService implements OnModuleInit {
     html?: string,
   ): Promise<void> {
     if (!this.transporter || !process.env.SMTP_HOST) {
-      this.logger.log(`[MOCK EMAIL SYNC] To: ${to} | Subject: ${subject}`);
-      this.logger.debug(`[MOCK EMAIL CONTENT]\n${text}`);
+      this.logger.warn(
+        `[SMTP NOT CONFIGURED] Sync email not delivered to ${this.maskRecipient(to)} | Subject: "${subject}" (body suppressed for security)`,
+      );
       return;
     }
     await this.transporter.sendMail({

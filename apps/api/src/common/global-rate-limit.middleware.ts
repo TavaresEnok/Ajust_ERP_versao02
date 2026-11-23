@@ -5,7 +5,7 @@ import { RedisService } from './redis.service';
 import { RequestWithAuth } from './request-with-auth';
 
 const EXEMPT_PATHS = new Set(['/monitoring/health', '/monitoring/ready']);
-const DEFAULT_USER_LIMIT_PER_SEC = 30;
+const DEFAULT_USER_LIMIT_PER_SEC = 80;
 const DEFAULT_IP_LIMIT_PER_SEC = 200;
 
 function parsePositiveInt(raw: string | undefined, fallback: number): number {

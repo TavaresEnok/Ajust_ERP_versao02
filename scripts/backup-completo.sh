@@ -13,19 +13,25 @@ ROOT=${BACKUP_ROOT:-/home/app/backups/ajust_erp}
 DEST="$ROOT/auto/$(date +%Y%m%d_%H%M%S)"
 KEEP_DAYS=${BACKUP_KEEP_DAYS:-14}
 PG=${PG_CONTAINER:-ajust_erp-postgres-1}
+if [ -z "${VAULT_KEY_HOST_FILE:-}" ] && [ -f "$PROJECT/.env" ]; then
+  VAULT_KEY_HOST_FILE=$(grep -E '^VAULT_KEY_HOST_FILE=' "$PROJECT/.env" | tail -n 1 | cut -d= -f2- | tr -d '"' | tr -d "'")
+fi
+VAULT_KEY_SOURCE="${VAULT_KEY_HOST_FILE:-/home/app/secrets/ajust_erp/vault.key}"
 log() { echo "[$(date -Iseconds)] $*"; }
 
 mkdir -p "$DEST"
 chmod 700 "$ROOT" "$ROOT/auto" "$DEST"
 trap 'log "FALHOU: backup incompleto em $DEST"; rm -rf "$DEST"' ERR
 
+[ -r "$VAULT_KEY_SOURCE" ] || { log "chave do cofre ausente em $VAULT_KEY_SOURCE"; exit 1; }
+
 docker exec "$PG" sh -c 'pg_dump --format=custom --no-owner -U "$POSTGRES_USER" "$POSTGRES_DB"' \
   > "$DEST/ajust_erp.dump"
 TABLES=$(docker exec -i "$PG" pg_restore --list < "$DEST/ajust_erp.dump" | grep -c 'TABLE DATA')
 [ "$TABLES" -gt 0 ] || { log "dump sem tabelas"; exit 1; }
 
-tar -C "$PROJECT" -czf "$DEST/uploads.tgz" uploads
-cp "$PROJECT/uploads/.keys/vault.key" "$DEST/vault.key"
+tar --exclude='uploads/.keys' -C "$PROJECT" -czf "$DEST/uploads.tgz" uploads
+cp "$VAULT_KEY_SOURCE" "$DEST/vault.key"
 cp "$PROJECT/.env" "$DEST/env"
 (cd "$DEST" && sha256sum ajust_erp.dump uploads.tgz vault.key env > SHA256SUMS)
 chmod 600 "$DEST"/*

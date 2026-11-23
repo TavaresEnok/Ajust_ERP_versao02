@@ -136,7 +136,7 @@ export async function fetchMe(accessToken: string): Promise<ApiMeResponse | null
       headers: { authorization: `Bearer ${accessToken}` },
       cache: 'no-store',
     });
-    if (response.status >= 500) throw new BackendUnavailableError();
+    if (response.status === 429 || response.status >= 500) throw new BackendUnavailableError();
     if (!response.ok) return null;
     return (await response.json()) as ApiMeResponse;
   } catch {
@@ -161,7 +161,7 @@ export function refreshSession(refreshToken: string): Promise<RefreshApiResponse
         body: JSON.stringify({ refreshToken }),
         cache: 'no-store',
       });
-      if (response.status >= 500) throw new BackendUnavailableError();
+      if (response.status === 429 || response.status >= 500) throw new BackendUnavailableError();
       if (!response.ok) return null;
       return (await response.json()) as RefreshApiResponse;
     } catch {
