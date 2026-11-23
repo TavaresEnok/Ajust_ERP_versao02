@@ -35,13 +35,27 @@ const days = [
   'Sábado',
 ];
 type CalendarDay = { isWorkDay: boolean; startTime: string; endTime: string };
+type CalendarException = {
+  id: string;
+  date: string;
+  isWorkDay: boolean;
+  startTime?: string | null;
+  endTime?: string | null;
+  reason?: string | null;
+};
+/** Data da exceção (dia de calendário, sem fuso) no formato brasileiro. */
+const exceptionDate = (value: string) => {
+  const [year, month, dayOfMonth] = value.slice(0, 10).split('-');
+  return year && month && dayOfMonth ? `${dayOfMonth}/${month}/${year}` : value;
+};
 export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: string }) {
   const { scope } = useErp();
   const manager = !scope || ['super_admin', 'gerente'].includes(scope.role);
   const policies = useErpQuery<ErpRecord[]>(manager ? '/sla-policies' : null);
   const calendar = useErpQuery<Record<string, CalendarDay>>('/sla/calendar');
+  const exceptions = useErpQuery<CalendarException[]>('/sla/calendar/exceptions');
   const action = useErpAction();
-  const [dialog, setDialog] = useState<'policy' | 'day' | 'exception' | null>(null);
+  const [dialog, setDialog] = useState<'policy' | 'base' | 'day' | 'exception' | null>(null);
   const [editing, setEditing] = useState<ErpRecord | null>(null);
   const [day, setDay] = useState(1);
   const [simulation, setSimulation] = useState<{
@@ -51,17 +65,20 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
   } | null>(null);
   const [validated, setValidated] = useState('');
   const [removePath, setRemovePath] = useState<string | null>(null);
+  const [removeLabel, setRemoveLabel] = useState('');
   const policyFields: FieldSpec[] = [
-    ...(!editing
-      ? [
-          {
-            name: 'serviceOrderType',
-            label: 'Tipo de serviço',
-            options: orderTypes,
-            required: true,
-          },
-        ]
-      : []),
+    ...(!editing && dialog === 'base'
+      ? [{ name: 'priority', label: 'Prioridade', options: priorities, required: true }]
+      : !editing
+        ? [
+            {
+              name: 'serviceOrderType',
+              label: 'Tipo de serviço',
+              options: orderTypes,
+              required: true,
+            },
+          ]
+        : []),
     {
       name: 'hours',
       label: 'Prazo de resolução em horas',
@@ -115,21 +132,35 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
         <TabsContent value="Políticas">
           <section className="panel">
             <PanelHeading
-              title="Prazos por tipo de serviço"
-              description="O prazo do tipo vale para todos os provedores e prioridades. A mudança aplica-se ao cálculo de novas O.S.; prazos já registrados não mudam automaticamente. Sem política, o padrão é 48 horas úteis."
+              title="Prazos por prioridade e por tipo de serviço"
+              description="A regra base define o prazo de cada prioridade; a exceção por tipo vale para todas as prioridades daquele tipo. A mudança aplica-se ao cálculo de novas O.S.; prazos já registrados não mudam automaticamente. Sem política, o padrão é 48 horas úteis."
             >
               {manager && (
-                <Button
-                  size="sm"
-                  onClick={() => {
-                    setEditing(null);
-                    setValidated('');
-                    setDialog('policy');
-                  }}
-                >
-                  <Plus data-icon="inline-start" />
-                  Nova política
-                </Button>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setEditing(null);
+                      setValidated('');
+                      setDialog('base');
+                    }}
+                  >
+                    <Plus data-icon="inline-start" />
+                    Regra por prioridade
+                  </Button>
+                  <Button
+                    size="sm"
+                    onClick={() => {
+                      setEditing(null);
+                      setValidated('');
+                      setDialog('policy');
+                    }}
+                  >
+                    <Plus data-icon="inline-start" />
+                    Exceção por tipo
+                  </Button>
+                </div>
               )}
             </PanelHeading>
             <QueryState
@@ -154,7 +185,7 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                         <td>
                           {policy.isOverride
                             ? orderTypes[policy.serviceOrderType as keyof typeof orderTypes]
-                            : 'Regra base'}
+                            : `Regra base · prioridade ${priorities[policy.priority as keyof typeof priorities] || policy.priority}`}
                         </td>
                         <td>{displayValue(policy.hours)}h</td>
                         <td>
@@ -172,7 +203,10 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                           </Button>
                           <Button
                             variant="ghost"
-                            onClick={() => setRemovePath(`/sla-policies/${policy.id}`)}
+                            onClick={() => {
+                              setRemoveLabel('');
+                              setRemovePath(`/sla-policies/${policy.id}`);
+                            }}
                           >
                             Remover
                           </Button>
@@ -239,7 +273,10 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                               <Button
                                 variant="ghost"
                                 disabled={!calendar.connected}
-                                onClick={() => setRemovePath(`/sla/calendar/${index}`)}
+                                onClick={() => {
+                                  setRemoveLabel('');
+                                  setRemovePath(`/sla/calendar/${index}`);
+                                }}
                               >
                                 Restaurar padrão
                               </Button>
@@ -258,9 +295,8 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
           <section className="panel p-6">
             <h2 className="section-title mb-3">Feriados e jornadas especiais</h2>
             <p className="mb-5 text-xs leading-6 text-muted-foreground">
-              Cadastre uma data sem expediente ou um horário excepcional. O controller do ZIP
-              permite criar e remover exceções, mas não expõe uma listagem; a consulta por período
-              precisa ser definida com o backend.
+              Cadastre uma data sem expediente (feriado) ou um dia com horário especial. A exceção
+              passa a valer no cálculo dos prazos assim que é salva.
             </p>
             {manager && (
               <Button onClick={() => setDialog('exception')}>
@@ -268,17 +304,60 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                 Nova exceção
               </Button>
             )}
-            <div className="mt-6">
-              <ContractForm
-                fields={[
-                  { name: 'id', label: 'UUID da exceção a remover', type: 'uuid', required: true },
-                ]}
-                connected={action.connected && manager}
-                pending={action.pending}
-                onSubmit={async (values) => setRemovePath(`/sla/calendar/exceptions/${values.id}`)}
-                label="Revisar remoção"
-              />
-            </div>
+            <QueryState
+              loading={exceptions.isLoading}
+              error={exceptions.error}
+              onRetry={() => void exceptions.mutate()}
+            />
+            {exceptions.data?.length ? (
+              <div className="table-wrap mt-6">
+                <table className="data-table">
+                  <thead>
+                    <tr>
+                      <th>Data</th>
+                      <th>Tipo</th>
+                      <th>Motivo</th>
+                      {manager && <th>Ações</th>}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {exceptions.data.map((item) => (
+                      <tr key={item.id}>
+                        <td>{exceptionDate(item.date)}</td>
+                        <td>
+                          {item.isWorkDay
+                            ? `Dia útil especial · ${item.startTime || '—'} às ${item.endTime || '—'}`
+                            : 'Feriado · sem expediente'}
+                        </td>
+                        <td>{item.reason || '—'}</td>
+                        {manager && (
+                          <td>
+                            <Button
+                              variant="ghost"
+                              onClick={() => {
+                                setRemoveLabel(
+                                  `Remover a exceção de ${exceptionDate(item.date)}${item.reason ? ` (${item.reason})` : ''}? Os prazos calculados a partir de agora voltam a seguir a semana de atendimento nesse dia.`,
+                                );
+                                setRemovePath(`/sla/calendar/exceptions/${item.id}`);
+                              }}
+                            >
+                              Remover
+                            </Button>
+                          </td>
+                        )}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              !exceptions.isLoading &&
+              !exceptions.error && (
+                <p className="mt-6 text-sm text-muted-foreground">
+                  Nenhum feriado ou dia especial cadastrado.
+                </p>
+              )
+            )}
           </section>
         </TabsContent>
         <TabsContent value="Simulação">
@@ -335,10 +414,12 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
         <DialogContent className="max-h-[90dvh] overflow-y-auto sm:max-w-xl">
           <DialogHeader>
             <DialogTitle>
-              {dialog === 'policy'
+              {dialog === 'policy' || dialog === 'base'
                 ? editing
                   ? 'Editar prazo da política'
-                  : 'Nova política de SLA'
+                  : dialog === 'base'
+                    ? 'Nova regra por prioridade'
+                    : 'Nova exceção por tipo de serviço'
                 : dialog === 'day'
                   ? `Configurar ${days[day]}`
                   : 'Exceção do calendário'}
@@ -350,7 +431,7 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
           <ContractForm
             key={`${dialog}-${editing?.id}-${day}`}
             fields={
-              dialog === 'policy'
+              dialog === 'policy' || dialog === 'base'
                 ? policyFields
                 : [
                     ...(dialog === 'exception'
@@ -379,23 +460,29 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                   ]
             }
             values={
-              dialog === 'policy' ? editing || {} : dialog === 'day' ? calendar.data?.[day] : {}
+              dialog === 'policy' || dialog === 'base'
+                ? editing || {}
+                : dialog === 'day'
+                  ? calendar.data?.[day]
+                  : {}
             }
             connected={action.connected && manager}
             pending={action.pending}
             draft={!action.connected}
             label={
-              dialog === 'policy'
+              dialog === 'policy' || dialog === 'base'
                 ? 'Salvar política de SLA'
                 : dialog === 'day'
                   ? 'Salvar dia de atendimento'
                   : 'Salvar exceção'
             }
             onSubmit={async (values) => {
-              if (dialog === 'policy') {
+              if (dialog === 'policy' || dialog === 'base') {
                 if (!Number.isInteger(values.hours)) throw new Error('O prazo deve ser inteiro.');
-                if (!editing && !values.serviceOrderType)
+                if (!editing && dialog === 'policy' && !values.serviceOrderType)
                   throw new Error('Selecione o tipo de serviço.');
+                if (!editing && dialog === 'base' && !values.priority)
+                  throw new Error('Selecione a prioridade.');
               }
               if (!action.connected) {
                 setValidated('Campos e regras validados. Nenhuma alteração enviada.');
@@ -403,14 +490,14 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
               }
               await action.execute({
                 path:
-                  dialog === 'policy'
+                  dialog === 'policy' || dialog === 'base'
                     ? editing
                       ? `/sla-policies/${editing.id}`
                       : '/sla-policies'
                     : dialog === 'day'
                       ? '/sla/calendar'
                       : '/sla/calendar/exceptions',
-                method: dialog === 'policy' && editing ? 'PATCH' : 'POST',
+                method: (dialog === 'policy' || dialog === 'base') && editing ? 'PATCH' : 'POST',
                 body:
                   dialog === 'day'
                     ? { ...values, dayOfWeek: day }
@@ -418,7 +505,7 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                       ? { ...values, priority: 'NORMAL', isOverride: true }
                       : values,
               });
-              await Promise.all([policies.mutate(), calendar.mutate()]);
+              await Promise.all([policies.mutate(), calendar.mutate(), exceptions.mutate()]);
               setDialog(null);
               toast.success('Configuração confirmada pelo ERP');
             }}
@@ -435,8 +522,8 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
           <DialogHeader>
             <DialogTitle>Confirmar alteração de SLA</DialogTitle>
             <DialogDescription>
-              Remover uma regra ou restaurar um dia pode modificar cálculos futuros. Confirme a
-              operação no servidor.
+              {removeLabel ||
+                'Remover uma regra ou restaurar um dia pode modificar cálculos futuros. Confirme a operação no servidor.'}
             </DialogDescription>
           </DialogHeader>
           <Button
@@ -445,7 +532,7 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
               try {
                 await action.execute({ path: removePath!, method: 'DELETE' });
                 setRemovePath(null);
-                await Promise.all([calendar.mutate(), policies.mutate()]);
+                await Promise.all([calendar.mutate(), policies.mutate(), exceptions.mutate()]);
                 toast.success('Operação confirmada pelo ERP');
               } catch (error) {
                 toast.error(errorMessage(error));

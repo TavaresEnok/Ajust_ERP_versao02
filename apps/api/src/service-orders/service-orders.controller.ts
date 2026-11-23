@@ -144,10 +144,15 @@ const TransitionSchema = z.object({
   expectedVersion: z.coerce.number().int().positive(),
 });
 
-const ApprovalSchema = z.object({
-  decision: z.nativeEnum(ApprovalStatus),
-  reason: z.string().optional(),
-});
+const ApprovalSchema = z
+  .object({
+    decision: z.enum([ApprovalStatus.APPROVED, ApprovalStatus.REJECTED]),
+    reason: z.string().optional(),
+  })
+  .refine((v) => v.decision !== ApprovalStatus.REJECTED || (v.reason?.trim().length ?? 0) >= 3, {
+    message: 'Informe o motivo da recusa.',
+    path: ['reason'],
+  });
 
 const ListSchema = z.object({
   customerId: z.string().uuid().optional(),
@@ -161,6 +166,7 @@ const ListSchema = z.object({
   search: z.string().trim().min(2).optional(),
   from: z.string().datetime().optional(),
   to: z.string().datetime().optional(),
+  activitySince: z.string().datetime().optional(),
   limit: z.coerce.number().int().min(1).max(200).optional(),
   offset: z.coerce.number().int().min(0).optional(),
   orderBy: z
@@ -218,6 +224,7 @@ export class ServiceOrdersController {
     @Query('provider') provider?: string,
     @Query('deadline') deadline?: string,
     @Query('situation') situation?: string,
+    @Query('activitySince') activitySince?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
@@ -233,6 +240,7 @@ export class ServiceOrdersController {
       search,
       from,
       to,
+      activitySince,
       limit,
       offset,
       orderBy,
@@ -422,10 +430,30 @@ export class ServiceOrdersController {
     @Query('to') to?: string,
     @Query('orderBy') orderBy?: string,
     @Query('orderDir') orderDir?: string,
+    @Query('situation') situation?: string,
+    @Query('deadline') deadline?: string,
+    @Query('scope') scope?: string,
+    @Query('provider') provider?: string,
+    @Query('customerId') customerId?: string,
   ) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
 
-    const input = ListSchema.parse({ status, priority, type, search, from, to, orderBy, orderDir });
+    // Mesmos filtros da listagem: o arquivo traz exatamente o conjunto que a tela mostra.
+    const input = ListSchema.parse({
+      status,
+      priority,
+      type,
+      search,
+      from,
+      to,
+      orderBy,
+      orderDir,
+      situation,
+      deadline,
+      scope,
+      provider,
+      customerId,
+    });
     if (input.from && input.to && new Date(input.from).getTime() > new Date(input.to).getTime()) {
       throw new BadRequestException('from must be less than or equal to to.');
     }
@@ -434,7 +462,7 @@ export class ServiceOrdersController {
       req.auth.tenantId,
       req.auth.userId,
       req.auth.role || '',
-      input,
+      { ...input, responsibleUserId: input.scope === 'mine' ? req.auth.userId : undefined },
     );
 
     res.setHeader('content-type', 'text/csv; charset=utf-8');

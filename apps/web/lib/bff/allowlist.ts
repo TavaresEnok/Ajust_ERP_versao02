@@ -163,7 +163,7 @@ const ROUTES: Record<string, Method[]> = {
   '/sla/breaches': ['GET'],
   '/sla/calendar': ['GET', 'POST'],
   '/sla/calendar/:id': ['DELETE'],
-  '/sla/calendar/exceptions': ['POST'],
+  '/sla/calendar/exceptions': ['GET', 'POST'],
   '/sla/calendar/exceptions/:id': ['DELETE'],
   '/sla/simulate': ['GET'],
 

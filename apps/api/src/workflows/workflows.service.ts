@@ -460,6 +460,8 @@ export class WorkflowsService {
   /** Gatilhos que dependem do conteúdo da O.S., não só do tipo de evento (C-036). */
   private triggerMatchesOrder(node: WorkflowNode, order: Record<string, any>): boolean {
     if (node.subtype === 'os_critica') return order.priority === 'CRITICA';
+    // "Implantação" é a O.S. de instalação; antes disparava para qualquer O.S.
+    if (node.subtype === 'start_implantacao') return order.type === 'INSTALACAO';
     return true;
   }
 
@@ -597,6 +599,8 @@ export class WorkflowsService {
   }
 
   private evaluateCondition(node: WorkflowNode, order: Record<string, any>): boolean {
+    // "Sem analista": verdadeiro só quando a O.S. não tem responsável (antes era sempre true).
+    if (node.subtype === 'cond_no_analyst') return !order.assigneeUserId && !order.analystName;
     const { field, operator, value } = node.config || {};
     if (!field) return true;
     const actual = order[field];
@@ -702,6 +706,12 @@ export class WorkflowsService {
             `Condition node "${node.id}" with 2 branches must use labels "true" and "false".`,
           );
         }
+        // Saída única sem rótulo nunca é seguida: a regra terminaria sem executar nada.
+        if (outgoing.length === 1 && !labels.has('true') && !labels.has('false')) {
+          throw new BadRequestException(
+            `A condição "${node.id}" precisa rotular a saída como "true" ou "false".`,
+          );
+        }
       } else if (outgoing.length > 1) {
         throw new BadRequestException(`Node "${node.id}" must have at most one outgoing edge.`);
       }
@@ -744,6 +754,15 @@ export class WorkflowsService {
       };
       const fields = requiredByAction[node.subtype];
       if (fields) requireFields(fields);
+      // O executor só entrega POST, PUT ou PATCH; recusar aqui evita regra salva que falha
+      // (e é retentada) em toda execução.
+      if (
+        node.subtype === 'action_webhook' &&
+        !['POST', 'PUT', 'PATCH'].includes(String(cfg.method).toUpperCase())
+      )
+        throw new BadRequestException(
+          `Webhook de "${node.id}" aceita apenas os métodos POST, PUT ou PATCH.`,
+        );
     }
   }
 

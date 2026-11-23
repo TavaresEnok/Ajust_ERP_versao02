@@ -84,6 +84,12 @@ export class SlaController {
     return this.slaEngine.resetCalendarDay(this.tenant(req), parsedDay);
   }
 
+  @Get('calendar/exceptions')
+  @ApiOperation({ summary: 'List calendar exceptions (holidays and special days)' })
+  async listExceptions(@Req() req: RequestWithAuth) {
+    return this.slaEngine.listCalendarExceptions(this.tenant(req));
+  }
+
   @Post('calendar/exceptions')
   @ApiOperation({ summary: 'Add a calendar exception (holiday or special day)' })
   async addException(@Req() req: RequestWithAuth, @Body() body: unknown) {

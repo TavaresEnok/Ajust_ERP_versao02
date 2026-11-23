@@ -358,7 +358,7 @@ export function ExecutionTracking({
                   · {labels[s.status as keyof typeof labels] || s.status}
                 </p>
                 <p className="mt-2 text-xs text-muted-foreground">
-                  {new Date(s.enteredAt).toLocaleString('pt-BR')}
+                  {new Date(s.enteredAt).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' })}
                   {s.outcome ? ` · Resultado: ${s.outcome}` : ''}
                 </p>
                 {Object.entries(s.evidence || {}).map(([name, value]) => (

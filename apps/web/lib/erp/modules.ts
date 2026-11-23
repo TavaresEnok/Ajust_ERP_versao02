@@ -364,6 +364,10 @@ export const modules: Record<string, ResourceDefinition> = {
   },
 };
 export function createPayload(key: string, values: Record<string, unknown>) {
+  // Catálogo: campo deixado em branco é enviado vazio, para o servidor desvincular o fluxo e
+  // limpar descrição e orientações (campo omitido manteria o valor antigo).
+  if (key === 'catalog')
+    return { workflowTemplateCode: null, description: '', checklist: [], ...values };
   if (key !== 'occurrences') return values;
   const {
     firstOrderType,

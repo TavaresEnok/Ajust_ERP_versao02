@@ -49,6 +49,7 @@ export function StatusBadge({ status }: { status: string }) {
     'Dentro do prazo',
     'Publicado',
     'Ativa',
+    'Encerrada',
   ].includes(status)
     ? 'success'
     : [
@@ -57,11 +58,12 @@ export function StatusBadge({ status }: { status: string }) {
           'Atenção',
           'Em campo',
           'Aguardando terceiros',
+          'Pendente',
         ].includes(status)
       ? 'warning'
       : ['Crítica', 'Atrasada', 'Crítico', 'Revogada'].includes(status)
         ? 'danger'
-        : ['Em análise', 'Aberta', 'Agendado'].includes(status)
+        : ['Em análise', 'Aberta', 'Agendado', 'Em execução'].includes(status)
           ? 'info'
           : 'neutral';
   return (

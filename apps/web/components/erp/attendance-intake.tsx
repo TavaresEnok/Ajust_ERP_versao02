@@ -92,7 +92,11 @@ export function AttendanceIntake({
               type="button"
               role="radio"
               aria-checked={mode === value}
-              onClick={() => setMode(value)}
+              onClick={() => {
+                setMode(value);
+                // "Trabalho já realizado" só existe em atendimento novo.
+                if (value === 'existing') setCompleted(false);
+              }}
               className={`rounded-md px-3 py-1.5 transition-colors ${
                 mode === value
                   ? 'bg-muted font-medium text-foreground'
@@ -123,8 +127,9 @@ export function AttendanceIntake({
         connected={connected}
         pending={pending}
         onDirtyChange={onDirtyChange}
+        recordCompleted={completed && mode === 'new'}
         label={
-          completed
+          completed && mode === 'new'
             ? 'Registrar atendimento concluído'
             : mode === 'new'
               ? 'Abrir atendimento'
@@ -157,7 +162,7 @@ export function AttendanceIntake({
               description: order.description,
               firstOrder: {
                 ...order,
-                recordCompleted: completed,
+                recordCompleted: completed && mode === 'new',
                 requester: customer.tradeName || customer.legalName,
               },
             });

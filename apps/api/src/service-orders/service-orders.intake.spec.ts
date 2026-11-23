@@ -1,3 +1,4 @@
+import * as protocols from './order-protocol';
 import { ServiceOrdersService } from './service-orders.service';
 
 describe('Occurrence intake with first order', () => {
@@ -23,6 +24,7 @@ describe('Occurrence intake with first order', () => {
     const tx = {
       occurrence: { create: jest.fn().mockResolvedValue({ id: 'occ', number: 'INC-1' }) },
       serviceOrder: { create: jest.fn().mockResolvedValue({ id: 'order', protocol: 'OS-1' }) },
+      $executeRaw: jest.fn().mockResolvedValue(1),
     };
     const db = {
       customer: {
@@ -46,7 +48,7 @@ describe('Occurrence intake with first order', () => {
       } as never,
       undefined,
     );
-    jest.spyOn(service as any, 'buildProtocol').mockResolvedValue('OS-1');
+    jest.spyOn(protocols, 'nextOrderProtocolInTransaction').mockResolvedValue('OS-1');
     jest.spyOn(service as any, 'buildOccurrenceNumber').mockResolvedValue('INC-1');
     jest.spyOn(service as any, 'logAudit').mockResolvedValue(undefined);
     jest.spyOn(service, 'getOccurrenceById').mockResolvedValue({ id: 'occ' } as never);

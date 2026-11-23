@@ -7,7 +7,7 @@ const dbDescribe = process.env.PROCESS_DB_TESTS === '1' ? describe : describe.sk
 dbDescribe('Concurrent vault reveals with real PostgreSQL', () => {
   const prisma = new PrismaClient();
   afterAll(() => prisma.$disconnect());
-  it('allows only one of two simultaneous reveals when one slot remains', async () => {
+  it('allows only one of two simultaneous reveals of different credentials when one slot remains', async () => {
     const tenant = await prisma.tenant.findFirstOrThrow();
     const user = await prisma.user.create({
       data: {
@@ -17,28 +17,30 @@ dbDescribe('Concurrent vault reveals with real PostgreSQL', () => {
       },
     });
     const oldLimit = process.env.VAULT_REVEALS_PER_HOUR;
-    let credentialId: string | undefined;
+    const credentialIds: string[] = [];
     try {
-      const credential = await prisma.knowledgeCredential.create({
-        data: {
-          tenantId: tenant.id,
-          provider: 'CI',
-          environment: 'CI',
-          host: '',
-          username: '',
-          secretEnc: 'test',
-        },
-      });
-      credentialId = credential.id;
+      for (const provider of ['CI-A', 'CI-B']) {
+        const credential = await prisma.knowledgeCredential.create({
+          data: {
+            tenantId: tenant.id,
+            provider,
+            environment: 'CI',
+            host: '',
+            username: '',
+            secretEnc: 'test',
+          },
+        });
+        credentialIds.push(credential.id);
+      }
       process.env.VAULT_REVEALS_PER_HOUR = '1';
       const service = new KnowledgeService(prisma as never, {} as never);
       const outcomes = await Promise.allSettled(
-        [1, 2].map(() =>
+        credentialIds.map((id) =>
           service.revealCredential(
             'analista',
             user.id,
             tenant.id,
-            credential.id,
+            id,
             'Teste concorrente',
             'test-confirmation',
           ),
@@ -56,11 +58,16 @@ dbDescribe('Concurrent vault reveals with real PostgreSQL', () => {
           where: { actorUserId: user.id, action: 'CREDENTIAL_ACCESS' },
         }),
       ).toBe(1);
+      // A credencial já consultada continua liberada: reabrir não gasta limite.
+      const allowed = credentialIds[outcomes.findIndex((o) => o.status === 'fulfilled')];
+      await expect(
+        service.revealCredential('analista', user.id, tenant.id, allowed),
+      ).resolves.toHaveProperty('secret');
     } finally {
       if (oldLimit === undefined) delete process.env.VAULT_REVEALS_PER_HOUR;
       else process.env.VAULT_REVEALS_PER_HOUR = oldLimit;
       await prisma.auditLog.deleteMany({ where: { actorUserId: user.id } });
-      if (credentialId) await prisma.knowledgeCredential.delete({ where: { id: credentialId } });
+      await prisma.knowledgeCredential.deleteMany({ where: { id: { in: credentialIds } } });
       await prisma.user.delete({ where: { id: user.id } });
     }
   });

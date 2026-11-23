@@ -490,7 +490,8 @@ model ServiceOrderOccurrence {
   externalId        String?
   sourceAuthorName  String?
   message           String
-  isCustomerVisible Boolean      @default(true)
+  /// Interno por padrão; só a conclusão do atendimento aparece no portal do cliente.
+  isCustomerVisible Boolean      @default(false)
   createdAt         DateTime     @default(now())
 
   serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
@@ -897,7 +898,7 @@ model OccurrenceAnnotation {
   occurrenceId      String
   actorUserId       String?
   message           String
-  isCustomerVisible Boolean  @default(true)
+  isCustomerVisible Boolean  @default(false)
   createdAt         DateTime @default(now())
 
   tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)

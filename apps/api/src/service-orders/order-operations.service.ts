@@ -23,6 +23,7 @@ import {
   statusDates,
 } from './service-order-rules';
 import { ServiceOrderLifecycleService } from './service-order-lifecycle.service';
+import { PROCESS_PAUSE_PREFIX, deadlineAfterStop } from './sla-pause';
 
 type Command = {
   action: 'start' | 'pause' | 'resume' | 'schedule' | 'unschedule' | 'assign' | 'finish' | 'reopen';
@@ -124,10 +125,22 @@ export class OrderOperationsService {
     if (input.action === 'reopen') {
       if (order.status !== 'FECHADA' && order.status !== 'RESOLVIDA')
         throw new BadRequestException('Somente O.S. resolvida ou fechada pode ser reaberta.');
+      // O período em que a O.S. ficou encerrada não consome prazo: ela volta com o tempo útil
+      // que restava na entrega (mesma conta da retomada de pausa).
+      const stoppedAt = order.resolvedAt ?? order.closedAt;
+      const reopened =
+        order.slaEligible && !order.pausedAt && stoppedAt
+          ? await deadlineAfterStop(this.sla, tenantId, stoppedAt, order.deadlineAt)
+          : null;
+      const deadlineAt = reopened?.deadlineAt ?? order.deadlineAt;
       await this.prisma.$transaction(async (tx) => {
         const changed = await tx.serviceOrder.updateMany({
           where: { id, tenantId, version: input.expectedVersion },
           data: {
+            deadlineAt,
+            ...(reopened && reopened.minutes > 0
+              ? { originalDeadlineAt: order.originalDeadlineAt ?? order.deadlineAt }
+              : {}),
             status: 'EM_ANALISE',
             closedAt: null,
             resolvedAt: null,
@@ -136,24 +149,68 @@ export class OrderOperationsService {
           },
         });
         if (changed.count !== 1) throw new ConflictException('O.S. alterada.');
+        if (reopened && reopened.minutes > 0)
+          await tx.slaAuditEvent.create({
+            data: {
+              tenantId,
+              orderId: id,
+              eventType: 'REOPENED',
+              deadlineAt,
+              reason: input.reason,
+              metadata: {
+                actorId,
+                previousDeadline: order.deadlineAt.toISOString(),
+                pausedBusinessMinutes: Math.round(reopened.minutes),
+              },
+            },
+          });
         if (order.processInstanceId) {
+          const instance = await tx.serviceProcessInstance.findFirst({
+            where: { id: order.processInstanceId, tenantId },
+          });
+          // Fluxo cancelado, pausado ou em falha só volta pela ação da gestão na tela do
+          // processo; reabrir a O.S. não pode reativá-lo por fora.
+          if (!instance || !['ACTIVE', 'COMPLETED'].includes(instance.status))
+            throw new BadRequestException(
+              'O fluxo deste atendimento não está em execução (cancelado, pausado ou em falha). Peça à gestão para reabrir ou retomar o processo.',
+            );
+          const definition = validateOperational(storedProcessDefinition(instance.definition));
           const last = await tx.serviceProcessStep.findFirst({
             where: { instanceId: order.processInstanceId, orderId: id, status: 'COMPLETED' },
             orderBy: { completedAt: 'desc' },
           });
-          if (!last || last.attempt >= 5)
+          const visits = last
+            ? await tx.serviceProcessStep.count({
+                where: { instanceId: order.processInstanceId, nodeId: last.nodeId },
+              })
+            : 0;
+          if (!last || visits >= definition.maxVisits)
             throw new BadRequestException(
               'Não foi possível reabrir esta entrega. Revise o fluxo com a gestão.',
             );
+          // Como na reabertura pelo processo: junção e fim já concluídos voltam a valer, para
+          // a nova conclusão da etapa encerrar o fluxo de novo.
+          await tx.serviceProcessStep.updateMany({
+            where: {
+              instanceId: order.processInstanceId,
+              status: 'COMPLETED',
+              nodeId: {
+                in: definition.nodes
+                  .filter((n) => ['join', 'end'].includes(n.kind))
+                  .map((n) => n.id),
+              },
+            },
+            data: { status: 'SUPERSEDED' },
+          });
           await tx.serviceProcessStep.create({
             data: {
               tenantId,
               instanceId: order.processInstanceId,
               nodeId: last.nodeId,
               orderId: id,
-              attempt: last.attempt + 1,
+              attempt: visits + 1,
               status: 'ACTIVE',
-              dueAt: order.deadlineAt,
+              dueAt: deadlineAt,
             },
           });
           await tx.serviceProcessInstance.update({
@@ -176,6 +233,7 @@ export class OrderOperationsService {
             serviceOrderId: id,
             actorUserId: actorId,
             message: `O.S. reaberta sem recriar entregas: ${input.reason}`,
+            isCustomerVisible: false,
           },
         });
       });
@@ -244,6 +302,7 @@ export class OrderOperationsService {
     const now = new Date();
     const data: Prisma.ServiceOrderUncheckedUpdateManyInput = { version: { increment: 1 } };
     let message = input.reason;
+    let resumedMinutes: number | undefined;
     if (input.action === 'pause') {
       if (order.pausedAt) throw new BadRequestException('O.S. já pausada.');
       data.pausedAt = now;
@@ -253,11 +312,19 @@ export class OrderOperationsService {
     }
     if (input.action === 'resume') {
       if (!order.pausedAt) throw new BadRequestException('O.S. não está pausada.');
-      const minutes = await this.sla.calculateBusinessPauseDuration(order.pausedAt, now, tenantId);
-      data.deadlineAt =
-        minutes > 0
-          ? await this.sla.calculateTargetDate(order.deadlineAt, minutes / 60, tenantId)
-          : order.deadlineAt;
+      if (order.pauseReason?.startsWith(PROCESS_PAUSE_PREFIX))
+        throw new BadRequestException(
+          'O fluxo deste atendimento está pausado. Retome o processo na tela de acompanhamento; o prazo volta a contar junto.',
+        );
+      const { minutes, deadlineAt: resumedDeadline } = await deadlineAfterStop(
+        this.sla,
+        tenantId,
+        order.pausedAt,
+        order.deadlineAt,
+        now,
+      );
+      resumedMinutes = Math.round(minutes);
+      data.deadlineAt = resumedDeadline;
       data.pausedAt = null;
       data.pauseReason = null;
       message = `SLA retomado; ${Math.round(minutes)} minutos úteis em pausa. ${input.reason}`;
@@ -298,8 +365,10 @@ export class OrderOperationsService {
         throw new BadRequestException(
           'A O.S. está resolvida. Use "Reabrir" para voltar a trabalhar nela.',
         );
-      data.status = 'EM_ANALISE';
-      data.scheduleStartedAt = order.scheduledAt ? now : null;
+      // Já em análise: não registra outra mudança de status nem reinicia o agendamento.
+      if (order.status !== 'EM_ANALISE') data.status = 'EM_ANALISE';
+      if (order.status !== 'EM_ANALISE' || !order.scheduleStartedAt)
+        data.scheduleStartedAt = order.scheduledAt ? now : null;
       message = input.reason ? `Execução iniciada: ${input.reason}` : 'Execução iniciada.';
     }
     if (input.action === 'finish') {
@@ -393,6 +462,7 @@ export class OrderOperationsService {
               actorId,
               pausedAt: order.pausedAt?.toISOString() || now.toISOString(),
               previousDeadline: order.deadlineAt.toISOString(),
+              ...(resumedMinutes !== undefined ? { pausedBusinessMinutes: resumedMinutes } : {}),
             },
           },
         });
@@ -524,6 +594,23 @@ export class OrderOperationsService {
         expectedVersion: order.version,
         reason: input.reason,
       });
+    // Concluir a etapa atual pode só avançar o fluxo ou abrir entregas novas. A conclusão
+    // conjunta só vale se nada ficou em aberto; senão desfaz tudo (transação) e orienta.
+    const remaining = await this.prisma.serviceOrder.findMany({
+      where: {
+        tenantId,
+        occurrenceId: id,
+        deletedAt: null,
+        status: { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] },
+      },
+      select: { protocol: true },
+    });
+    if (remaining.length)
+      throw new BadRequestException(
+        `Nenhuma O.S. foi concluída: o fluxo ainda tem etapas ou entregas depois da etapa atual (${remaining
+          .map((o) => o.protocol)
+          .join(', ')}). Conclua as etapas pelo acompanhamento do atendimento.`,
+      );
     await this.syncOccurrence(tenantId, id);
     return this.prisma.occurrence.findUniqueOrThrow({ where: { id } });
   }

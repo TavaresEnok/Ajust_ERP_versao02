@@ -1,5 +1,5 @@
 'use client';
-import { useCallback, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { Plus, Workflow, Trash2, GitBranch, Settings2 } from 'lucide-react';
@@ -49,6 +49,12 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
     allowed && id && id !== 'novo' ? `/workflows/${encodeURIComponent(id)}` : null,
   );
   const selected = detail.data;
+  // O editor só é recarregado com os dados do servidor quando não há edição pendente: a regra
+  // muda de updatedAt a cada execução, e isso não pode apagar o que está sendo digitado.
+  const [dirty, setDirty] = useState(false);
+  const [stamp, setStamp] = useState<string | undefined>();
+  const serverStamp = selected?.updatedAt as string | undefined;
+  if (!dirty && stamp !== serverStamp) setStamp(serverStamp);
   if (!allowed)
     return (
       <PageHeading
@@ -70,11 +76,19 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
           <>
             <OperationControl
               title={selected.enabled ? 'Desativar workflow' : 'Ativar workflow'}
-              description="Altera a ativação da regra no motor original, somente após confirmação do ERP."
+              description={
+                'Altera a ativação da regra no motor original, somente após confirmação do ERP.' +
+                (dirty
+                  ? ' ATENÇÃO: há alterações não salvas nesta automação; ao confirmar, elas serão descartadas. Para mantê-las, feche esta janela e salve antes.'
+                  : '')
+              }
               path={`/workflows/${encodeURIComponent(selected.id)}/toggle`}
               method="PATCH"
               roles={['super_admin', 'gerente']}
-              after={() => detail.mutate()}
+              after={() => {
+                setDirty(false);
+                return detail.mutate();
+              }}
             />
             <OperationControl
               title="Remover workflow"
@@ -124,10 +138,13 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
             />
           ) : (
             <WorkflowDraft
-              key={(selected?.updatedAt as string) || id}
+              key={`${id}:${stamp || ''}`}
               initial={selected}
               connected={query.connected}
+              dirty={dirty}
+              onDirtyChange={setDirty}
               onSaved={async (savedId) => {
+                setDirty(false);
                 await query.mutate();
                 if (id === 'novo' && savedId) router.replace(`/gerencia/automacoes/${savedId}`);
                 else if (id && id !== 'novo') await detail.mutate();
@@ -142,13 +159,19 @@ export function WorkflowEditorPage({ id }: { id?: string }) {
 function WorkflowDraft({
   initial,
   connected,
+  dirty,
+  onDirtyChange,
   onSaved,
 }: {
   initial?: WorkflowRecord;
   connected: boolean;
+  dirty: boolean;
+  onDirtyChange: (dirty: boolean) => void;
   onSaved: (id?: string) => Promise<void>;
 }) {
   const action = useErpAction();
+  // Editor recém-aberto (ou recarregado do servidor) começa sem edição pendente.
+  useEffect(() => onDirtyChange(false), [onDirtyChange]);
   const [definition, setDefinition] = useState<WorkflowDefinition>(
     initial?.definition || { nodes: [], edges: [], governance: {} },
   );
@@ -172,11 +195,15 @@ function WorkflowDraft({
       `${nodeLabels[node.subtype] || node.subtype} · ${index + 1}`,
     ]),
   );
-  const updateDefinition = useCallback((next: WorkflowDefinition) => {
-    setDefinition(next);
-    setChecked(false);
-    setLastSaved(null);
-  }, []);
+  const updateDefinition = useCallback(
+    (next: WorkflowDefinition) => {
+      setDefinition(next);
+      setChecked(false);
+      setLastSaved(null);
+      onDirtyChange(true);
+    },
+    [onDirtyChange],
+  );
   const editNode = useCallback((node: WorkflowNode) => {
     setEditing(node);
     setNodeType(node.type);
@@ -374,7 +401,8 @@ function WorkflowDraft({
               if (
                 (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) &&
                 ['name', 'description', 'enabled'].includes(target.name)
-              )
+              ) {
+                onDirtyChange(true);
                 setMetadata((previous) => ({
                   ...previous,
                   [target.name]:
@@ -382,6 +410,7 @@ function WorkflowDraft({
                       ? target.checked
                       : target.value,
                 }));
+              }
             }}
           >
             {warnings.length > 0 && (
@@ -485,6 +514,7 @@ function WorkflowDraft({
           id={initial?.id}
           definition={definition}
           current={metadata}
+          dirty={dirty}
           onSaved={onSaved}
         />
       </TabsContent>

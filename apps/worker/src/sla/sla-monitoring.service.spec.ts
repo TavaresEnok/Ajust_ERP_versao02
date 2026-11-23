@@ -34,7 +34,9 @@ describe('SlaMonitoringService & Processor', () => {
       },
       slaAuditEvent: {
         findFirst: jest.fn().mockResolvedValue(null),
+        findMany: jest.fn().mockResolvedValue([]),
         create: jest.fn().mockResolvedValue({ id: 'audit-1' }),
+        delete: jest.fn().mockResolvedValue({ id: 'audit-1' }),
       },
       slaEvent: {
         findFirst: jest.fn().mockResolvedValue(null),
@@ -62,6 +64,37 @@ describe('SlaMonitoringService & Processor', () => {
   });
 
   describe('evaluateOpenOrders', () => {
+    it('tempo pausado não conta como consumo: sem aviso de 75% logo após uma pausa longa', async () => {
+      const now = new Date();
+      // SLA de 10 h; 1 h trabalhada, 54 h pausada (prazo estendido em 54 h na retomada).
+      prismaMock.serviceOrder.findMany.mockResolvedValue([
+        {
+          id: 'order-paused',
+          tenantId: 'tenant-1',
+          protocol: 'OS-PAUSED',
+          title: 'Aguardou o cliente',
+          status: 'EM_ANALISE',
+          priority: 'NORMAL',
+          type: 'DNS',
+          createdAt: new Date(now.getTime() - 55 * 3600 * 1000),
+          deadlineAt: new Date(now.getTime() + 9 * 3600 * 1000),
+          tenant: { id: 'tenant-1', tradeName: 'Provedor Delta' },
+        },
+      ]);
+      prismaMock.slaAuditEvent.findMany.mockResolvedValue([
+        {
+          orderId: 'order-paused',
+          metadata: { pausedBusinessMinutes: 54 * 60 },
+          createdAt: now,
+        },
+      ]);
+
+      const result = await service.evaluateOpenOrders();
+
+      expect(result).toMatchObject({ evaluated: 1, warnings75: 0, warnings90: 0, breaches: 0 });
+      expect(prismaMock.slaAuditEvent.create).not.toHaveBeenCalled();
+    });
+
     it('returns zeroes when no open orders exist', async () => {
       prismaMock.serviceOrder.findMany.mockResolvedValue([]);
 
@@ -285,8 +318,11 @@ describe('SlaMonitoringService & Processor', () => {
       const result = await service.evaluateOpenOrders();
 
       expect(result.evaluated).toBe(2);
-      expect(result.alertsSent).toBe(2);
+      // A primeira O.S. não chegou a ninguém: o registro é desfeito para nova tentativa
+      // na próxima avaliação (C-028); a segunda foi entregue normalmente.
+      expect(result.alertsSent).toBe(1);
       expect(prismaMock.slaAuditEvent.create).toHaveBeenCalledTimes(2);
+      expect(prismaMock.slaAuditEvent.delete).toHaveBeenCalledTimes(1);
     });
   });
 

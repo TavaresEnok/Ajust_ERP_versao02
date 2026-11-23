@@ -41,7 +41,7 @@ export function WorkflowNodeForm({
       {
         name: 'method',
         label: 'Método HTTP',
-        options: { POST: 'POST', PUT: 'PUT', PATCH: 'PATCH', GET: 'GET', DELETE: 'DELETE' },
+        options: { POST: 'POST', PUT: 'PUT', PATCH: 'PATCH' },
         required: true,
         defaultValue: 'POST',
       },
@@ -129,19 +129,25 @@ export function WorkflowNodeForm({
       )}
       {subtype === 'cond_no_analyst' && (
         <Alert>
-          <AlertTitle>Condição legada</AlertTitle>
+          <AlertTitle>Sem analista</AlertTitle>
           <AlertDescription>
-            O motor do ZIP não implementa uma verificação específica para cond_no_analyst. Sem
-            campo, retorna true. Use uma comparação explícita compatível e valide com o backend.
+            Verdadeira só quando a O.S. não tem responsável (nenhum analista atribuído e nenhum nome
+            de analista). Rotule a saída como true (ou false, para o caso com responsável); saída
+            sem rótulo nunca é seguida.
           </AlertDescription>
         </Alert>
+      )}
+      {subtype === 'start_implantacao' && (
+        <p className="text-xs text-muted-foreground">
+          Dispara só para O.S. do tipo Instalação; demais tipos não acionam esta regra.
+        </p>
       )}
       {subtype === 'gateway_parallel_join' && (
         <Alert>
           <AlertTitle>Junção do motor original</AlertTitle>
           <AlertDescription>
-            Após reunir as entradas, o motor do ZIP avalia uma condição e segue a saída true. Rotule
-            a conexão de saída como true; valide o fluxo completo com o backend.
+            Depois de reunir as entradas, a junção segue por uma única saída. Rotule essa conexão
+            como true.
           </AlertDescription>
         </Alert>
       )}

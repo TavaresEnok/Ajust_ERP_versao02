@@ -166,7 +166,16 @@ export class ServiceOrderLifecycleService implements OnModuleInit {
 
     // A pesquisa só sai no fechamento efetivo: RESOLVIDA ainda pode voltar (C-032).
     if (to === 'FECHADA' && this.csat)
-      await effect('CSAT', () => this.csat!.createForOrder(tenantId, orderId, !!eventId));
+      await effect('CSAT', async () => {
+        // Reaberta antes de o efeito rodar: este fechamento deixou de valer e a pesquisa sai
+        // no próximo. Sem isso o efeito falharia e seria retentado para sempre.
+        const current = await this.prisma.serviceOrder.findFirst({
+          where: { id: orderId, tenantId },
+          select: { status: true },
+        });
+        if (current?.status !== 'FECHADA') return;
+        return this.csat!.createForOrder(tenantId, orderId, !!eventId);
+      });
 
     // Aviso próprio de fechamento (não o de escalonamento) e só no fechamento efetivo (C-033).
     if (to === 'FECHADA' && this.notifications)
@@ -278,20 +287,7 @@ export class ServiceOrderLifecycleService implements OnModuleInit {
   }
 
   private workflowPayload(order: ServiceOrder) {
-    return {
-      id: order.id,
-      protocol: order.protocol,
-      title: order.title,
-      type: order.type,
-      priority: order.priority,
-      status: order.status,
-      requester: order.requester,
-      sector: order.sector,
-      analystName: order.analystName,
-      approvalCompleted: order.approvalCompleted,
-      changeRequestId: order.changeRequestId,
-      deadlineAt: order.deadlineAt?.toISOString(),
-    };
+    return workflowOrderPayload(order);
   }
 
   private writeAudit(
@@ -327,3 +323,25 @@ export class ServiceOrderLifecycleService implements OnModuleInit {
   exports: [ServiceOrderLifecycleService],
 })
 export class ServiceOrderLifecycleModule {}
+
+/**
+ * Recorte da O.S. entregue às automações e webhooks: sem descrição, notas internas nem
+ * metadados de origem.
+ */
+export function workflowOrderPayload(order: ServiceOrder) {
+  return {
+    id: order.id,
+    protocol: order.protocol,
+    title: order.title,
+    type: order.type,
+    priority: order.priority,
+    status: order.status,
+    requester: order.requester,
+    sector: order.sector,
+    analystName: order.analystName,
+    assigneeUserId: order.assigneeUserId,
+    approvalCompleted: order.approvalCompleted,
+    changeRequestId: order.changeRequestId,
+    deadlineAt: order.deadlineAt?.toISOString(),
+  };
+}

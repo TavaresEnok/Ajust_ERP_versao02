@@ -95,7 +95,7 @@ const dayToDay: Chapter[] = [
       {
         id: 'minhas-ordens',
         title: 'Encontrar suas O.S.',
-        what: 'Em Minhas ordens ficam as O.S. em que você é o responsável, com prazo e situação.',
+        what: 'Em Minhas ordens ficam as O.S. em que você é o responsável e também as que você abriu, com prazo e situação.',
         steps: [
           <>
             Abra <B>Minhas ordens</B> no menu lateral.
@@ -182,6 +182,10 @@ const dayToDay: Chapter[] = [
         },
         tips: [
           <>O botão fica apagado enquanto faltar alguma evidência obrigatória.</>,
+          <>
+            Algumas etapas só podem ser concluídas por um perfil (por exemplo, a gerência). Nesse
+            caso a tela avisa quem conclui, e você pode encaminhar a O.S.
+          </>,
           <>
             <B>Acessos e orientações técnicas</B> (à direita) leva direto ao cofre daquele provedor.
           </>,
@@ -519,7 +523,8 @@ const management: Chapter[] = [
           </>,
           <>
             Cada <B>Etapa atual</B> tem prazo, evidências, <B>O que foi feito</B> e o botão{' '}
-            <B>Concluir etapa</B>. Em <B>Encaminhar esta etapa</B> você passa para outra pessoa.
+            <B>Concluir etapa</B>. Em <B>Encaminhar esta etapa</B> você passa para outra pessoa. Se
+            a etapa for restrita a outro perfil, a tela diz quem conclui e só oferece encaminhar.
           </>,
         ],
         image: {
@@ -572,13 +577,19 @@ const management: Chapter[] = [
       {
         id: 'aprovacao',
         title: 'Aprovação de fechamento',
-        what: 'Só a gerência aprova. Ela é exigida apenas quando a O.S. é de prioridade Alta ou Crítica, está marcada como “exige aprovação” e passou do prazo. Nos outros casos, o analista encerra direto.',
+        what: 'Só a gerência aprova. Ela é exigida apenas quando a O.S. é de prioridade Alta ou Crítica, está marcada como “exige aprovação” e foi resolvida depois do prazo. Nos outros casos, o analista encerra direto.',
         steps: [
           <>
-            Quando houver, a O.S. fica em <B>Resolvida</B> aguardando a sua aprovação.
+            Quando houver, a O.S. fica em <B>Resolvida</B> aguardando a sua aprovação. Em{' '}
+            <B>Ordens de serviço</B>, o atalho <B>Aguardando aprovação</B> lista as resolvidas.
           </>,
           <>
-            Abra a O.S., aba <B>Aprovações</B>, e aprove ou recuse com o motivo.
+            Abra a O.S., aba <B>Aprovações</B>. <B>Aprovar</B> fecha a O.S. na hora (se o fluxo
+            ainda tiver entregas abertas, ela fecha quando a última terminar).
+          </>,
+          <>
+            <B>Recusar</B> exige o motivo: a O.S. continua resolvida e volta ao responsável, que vê
+            o motivo e reabre a O.S. para corrigir.
           </>,
         ],
       },
@@ -599,8 +610,8 @@ const management: Chapter[] = [
             os serviços que o usam. Clique para abrir.
           </>,
           <>
-            Clique numa caixa do diagrama: a etapa abre à direita. Ajuste nome, setor, prazo,
-            responsável padrão, evidências e quem pode concluir.
+            Clique numa caixa do diagrama: a etapa abre à direita. Ajuste nome, setor, duração de
+            referência, responsável padrão, evidências e quem pode concluir.
           </>,
           <>
             Em <B>Depois desta etapa</B>, cada resultado (ex.: “Concluído”, “Sem acesso”) leva a uma
@@ -665,11 +676,15 @@ const management: Chapter[] = [
       {
         id: 'sla',
         title: 'Prazos (SLA) e calendário',
-        what: 'As políticas de SLA definem o prazo de cada O.S. por prioridade e tipo. O calendário define dias e horários úteis e os feriados, que não contam no prazo.',
+        what: 'O prazo de cada O.S. vem, nesta ordem: do prazo próprio do serviço do catálogo, da exceção por tipo de serviço, da política da prioridade e, sem nenhuma delas, do padrão de 48 h. O calendário define dias e horários úteis e os feriados, que não contam no prazo.',
         steps: [
           <>
-            <B>Políticas de SLA</B>: crie o prazo por prioridade (ex.: Crítica 4 h, Alta 8 h). Sem
-            política, vale o padrão de 48 h.
+            <B>Políticas de SLA</B>: crie o prazo por prioridade (ex.: Crítica 4 h, Alta 8 h) e as
+            exceções por tipo de serviço. Sem política, vale o padrão de 48 h.
+          </>,
+          <>
+            <B>Tipos de serviço</B>: um serviço do catálogo pode ter prazo próprio, que vale antes
+            das políticas.
           </>,
           <>
             <B>Calendário de SLA</B>: horário de trabalho por dia da semana e feriados.
@@ -678,7 +693,8 @@ const management: Chapter[] = [
         image: {
           src: '/guia/g-politicas-sla.jpg',
           alt: 'Políticas de SLA',
-          caption: 'Prazo da O.S. = política de SLA (não o prazo da etapa do fluxo).',
+          caption:
+            'Prazo da O.S. = prazo do serviço ou política de SLA. A etapa do fluxo usa o prazo da O.S. dela; a duração no editor de fluxos é só referência.',
         },
       },
     ],
@@ -778,7 +794,10 @@ const faqAnalyst: [string, ReactNode][] = [
   ],
   [
     'O botão de concluir está apagado.',
-    <>Falta preencher alguma evidência com *, ou a O.S. está pausada (retome antes).</>,
+    <>
+      Falta preencher alguma evidência com *, a O.S. está pausada (retome antes; se a pausa foi do
+      fluxo inteiro, quem retoma é a gerência) ou a etapa é restrita a outro perfil.
+    </>,
   ],
   [
     'Apareceram O.S. novas que eu não abri.',
@@ -797,7 +816,15 @@ const faqAnalyst: [string, ReactNode][] = [
     'Registrei algo errado.',
     <>
       Escreva a correção em <B>Anotações</B>. O histórico guarda tudo. Se a O.S. já foi encerrada,
-      peça à gerência para reabrir.
+      use <B>Reabrir O.S.</B> na própria O.S. e informe o motivo.
+    </>,
+  ],
+  [
+    'A O.S. ficou “Aguardando aprovação da gestão”.',
+    <>
+      Acontece com O.S. Alta ou Crítica resolvida depois do prazo. Se a gerência aprovar, a O.S.
+      fecha sozinha. Se recusar, a aba Atendimento mostra o motivo: use <B>Reabrir O.S.</B>, corrija
+      e registre o resultado de novo.
     </>,
   ],
   ['Esqueci minha senha.', <>Peça à gerência para redefinir o seu acesso.</>],

@@ -5,7 +5,7 @@
  * (próxima etapa, entregas paralelas, validação, simulação e publicação) são as mesmas
  * do editor anterior; só a apresentação mudou.
  */
-import { useEffect, useMemo, useState, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import dynamic from 'next/dynamic';
 import Link from 'next/link';
 import { useRouter } from 'next/navigation';
@@ -21,7 +21,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
-import { orderTypes } from '@/lib/erp/contracts';
+import { ErpError, orderTypes } from '@/lib/erp/contracts';
 import {
   simulateFlow,
   type FlowDefinition,
@@ -163,7 +163,7 @@ export function WorkflowsHub({ id }: { id?: string }) {
           onDirtyChange={setDirty}
         />
       ) : (
-        <WorkflowsPage id={id?.startsWith('ATEND_') ? undefined : id} />
+        <WorkflowsPage id={id && /^(ATEND_|AJUST_)/.test(id) ? undefined : id} />
       )}
       <ConfirmDialog
         open={pendingTab !== null}
@@ -203,7 +203,7 @@ function OperationalTemplates({
   if (fresh || row) {
     return (
       <FlowEditor
-        key={`${row?.code || fresh!.code}:${row?.version || 0}`}
+        key={row?.code || fresh!.code}
         initial={row?.draft || row?.definition || fresh!}
         template={row}
         revision={row?.version || 0}
@@ -347,6 +347,9 @@ function FlowEditor({
   onSaved: (code: string) => Promise<void>;
 }) {
   const [draft, setDraft] = useState(() => structuredClone(initial));
+  // Versão sobre a qual a edição começou: é ela que vai no envio (conflito vira 409).
+  const [base, setBase] = useState({ initial, revision });
+  const saving = useRef(false);
   const [selected, setSelected] = useState(initial.start);
   const [error, setError] = useState('');
   const [preview, setPreview] = useState(false);
@@ -357,7 +360,29 @@ function FlowEditor({
   const node = draft.nodes.find((n) => n.id === selected) || draft.nodes[0];
   const simulation = useMemo(() => simulateFlow(draft, decisions), [draft, decisions]);
   const routes = Object.entries(node.routes);
-  const dirty = useMemo(() => JSON.stringify(draft) !== JSON.stringify(initial), [draft, initial]);
+  const dirty = useMemo(
+    () =>
+      JSON.stringify({ ...draft, version: 0 }) !== JSON.stringify({ ...base.initial, version: 0 }),
+    [draft, base.initial],
+  );
+  // Outra pessoa salvou este fluxo: sem edição pendente, carrega a versão nova; com edição
+  // pendente, mantém o que foi digitado e avisa.
+  const changedElsewhere = revision > base.revision;
+  function loadCurrent() {
+    setBase({ initial, revision });
+    setDraft(structuredClone(initial));
+    setFieldDrafts({});
+    setError('');
+  }
+  if (changedElsewhere && !dirty) loadCurrent();
+  const fixedSimple = draft.code === 'AJUST_SIMPLES';
+  /** Responsável só é mantido se a pessoa existe, está liberada e tem um dos perfis da etapa. */
+  const assigneeFor = (source: FlowNode, roles = source.roles) => {
+    const person = people.data?.find((p) => p.id === source.assigneeUserId);
+    return person && roles.includes(person.role) && !person.accessBlocked
+      ? source.assigneeUserId
+      : undefined;
+  };
   const [confirm, setConfirm] = useState<'leave' | 'publish' | null>(null);
   // Serviço que já segue outro fluxo: trocar exige confirmação.
   const [pendingLink, setPendingLink] = useState<CatalogItem | null>(null);
@@ -385,8 +410,12 @@ function FlowEditor({
       setError(errorText(e));
     }
   }
-  const canAddNext = node.kind === 'task' && routes.length === 1;
+  // Entrega paralela (O.S. separada) tem uma única etapa ligada direto à junção.
+  const parallelDelivery = node.kind === 'task' && node.orderKey !== 'root';
+  const canAddNext =
+    node.kind === 'task' && routes.length === 1 && !parallelDelivery && !fixedSimple;
   const canAddParallel =
+    !fixedSimple &&
     node.kind === 'task' &&
     node.orderKey === 'root' &&
     routes.length === 1 &&
@@ -408,6 +437,7 @@ function FlowEditor({
       ...node,
       id,
       name: 'Nova etapa',
+      assigneeUserId: assigneeFor(node),
       requiredFields: ['Resultado técnico'],
       routes: { Concluído: target },
       closeOn: node.closeOn.includes(outcome) ? ['Concluído'] : [],
@@ -438,6 +468,7 @@ function FlowEditor({
       ...node,
       id: `entrega_${number}_${suffix}`,
       name: `Entrega complementar ${number}`,
+      assigneeUserId: assigneeFor(node),
       orderKey: `entrega_${number}_${suffix}`,
       requiredFields: ['Resultado técnico'],
       routes: { Concluído: join },
@@ -445,7 +476,13 @@ function FlowEditor({
       waitFor: [],
       position: { x: node.position.x + 560, y: node.position.y + (number - 1) * 200 },
     }));
-    const control = { ...node, closeOn: [], requiredFields: [], waitFor: [] };
+    const control = {
+      ...node,
+      assigneeUserId: undefined,
+      closeOn: [],
+      requiredFields: [],
+      waitFor: [],
+    };
     setDraft({
       ...draft,
       nodes: [
@@ -488,6 +525,7 @@ function FlowEditor({
           ...node,
           id,
           name: 'Nova etapa',
+          assigneeUserId: assigneeFor(node),
           kind: 'task',
           orderKey: 'root',
           routes: { Concluído: endId },
@@ -505,15 +543,78 @@ function FlowEditor({
       ...draft,
       nodes: draft.nodes
         .filter((n) => n.id !== node.id)
-        .map((n) => ({
-          ...n,
-          routes: Object.fromEntries(
+        .map((n) => {
+          const kept = Object.fromEntries(
             Object.entries(n.routes).filter(([, target]) => target !== node.id),
-          ),
-          waitFor: n.waitFor.filter((id) => id !== node.id),
-        })),
+          );
+          return {
+            ...n,
+            routes: kept,
+            // Resultado que deixou de existir não pode continuar marcado como "encerra a O.S.".
+            closeOn: n.closeOn.filter((outcome) => outcome in kept),
+            waitFor: n.waitFor.filter((id) => id !== node.id),
+          };
+        }),
     });
     setSelected(draft.start);
+  }
+  /** Alterações vindas do diagrama (religar setas): remove fechamentos sem resultado. */
+  function applyGraph(next: FlowDefinition) {
+    setDraft({
+      ...next,
+      nodes: next.nodes.map((n) =>
+        n.closeOn.every((outcome) => outcome in n.routes)
+          ? n
+          : { ...n, closeOn: n.closeOn.filter((outcome) => outcome in n.routes) },
+      ),
+    });
+  }
+  /** Troca "nodes.7.slaMinutes" pelo nome da etapa nas mensagens do servidor. */
+  function readable(message: string) {
+    const fields: Record<string, string> = {
+      name: 'nome',
+      sector: 'setor',
+      roles: 'quem pode concluir',
+      slaMinutes: 'duração de referência',
+      requiredFields: 'evidências',
+      routes: 'resultados',
+      assigneeUserId: 'responsável',
+    };
+    return message.replace(
+      /nodes\.(\d+)(?:\.(\w+))?[\w.]*/g,
+      (_, index: string, field?: string) =>
+        `etapa “${draft.nodes[Number(index)]?.name || Number(index) + 1}”${field ? ` (${fields[field] || field})` : ''}`,
+    );
+  }
+  /** O que o servidor recusaria até para salvar rascunho, dito com o nome da etapa. */
+  function problems() {
+    const list: string[] = [];
+    if (draft.name.trim().length < 3 || draft.name.length > 120)
+      list.push('O nome do fluxo precisa ter de 3 a 120 caracteres.');
+    if (!Number.isInteger(draft.maxVisits) || draft.maxVisits < 1 || draft.maxVisits > 10)
+      list.push('Em Avançado, a repetição de etapas deve ser um número inteiro de 1 a 10.');
+    if (draft.nodes.length > 60) list.push('O fluxo aceita no máximo 60 etapas.');
+    for (const n of draft.nodes) {
+      const where = `Etapa “${n.name || n.id}”:`;
+      if (n.name.trim().length < 3)
+        list.push(`${where} o nome precisa de pelo menos 3 caracteres.`);
+      if (n.sector.trim().length < 2) list.push(`${where} informe o setor.`);
+      if (!n.roles.length)
+        list.push(`${where} marque pelo menos um perfil em “Quem pode concluir”.`);
+      if (!Number.isInteger(n.slaMinutes) || n.slaMinutes < 1 || n.slaMinutes > 43200)
+        list.push(
+          `${where} a duração de referência deve ser um número inteiro de 1 a 43.200 minutos.`,
+        );
+      if (n.requiredFields.length > 20) list.push(`${where} no máximo 20 evidências.`);
+    }
+    if (
+      fixedSimple &&
+      (draft.nodes.length !== 2 ||
+        draft.nodes.filter((n) => n.kind === 'task').length !== 1 ||
+        draft.nodes.filter((n) => n.kind === 'end').length !== 1)
+    )
+      list.push('O fluxo padrão “Atendimento simples” precisa ter exatamente uma etapa e um fim.');
+    return list;
   }
   async function validate() {
     setError('');
@@ -522,22 +623,35 @@ function FlowEditor({
       toast.success('Fluxo válido');
       return true;
     } catch (e) {
-      setError(errorText(e));
+      setError(readable(errorText(e)));
       return false;
     }
   }
   async function save(publish: boolean) {
+    // Um segundo clique durante o envio ou a recarga não gera conflito de versão.
+    if (saving.current) return;
     setError('');
+    const found = problems();
+    if (found.length) return setError(found.join(' '));
+    saving.current = true;
     try {
-      await action.execute({
+      const sent = structuredClone(draft);
+      const result = await action.execute<{ version: number }>({
         path: `${endpoint}/templates`,
         method: 'PUT',
-        body: { definition: draft, expectedVersion: revision, publish },
+        body: { definition: sent, expectedVersion: base.revision, publish },
       });
+      setBase({ initial: sent, revision: result.version });
       toast.success(publish ? 'Versão publicada' : 'Rascunho salvo');
       await onSaved(draft.code);
     } catch (e) {
-      setError(errorText(e));
+      setError(
+        e instanceof ErpError && e.status === 409
+          ? 'Outra pessoa salvou este fluxo enquanto você editava. O que você alterou continua na tela e não foi enviado. Para continuar, use “Carregar a versão atual” e refaça os ajustes.'
+          : readable(errorText(e)),
+      );
+    } finally {
+      saving.current = false;
     }
   }
 
@@ -647,6 +761,31 @@ function FlowEditor({
           {error}
         </p>
       )}
+      {changedElsewhere && dirty && (
+        <div
+          role="status"
+          className="flex flex-wrap items-center gap-3 rounded-lg border border-warning/30 bg-warning-surface p-4 text-sm text-warning"
+        >
+          <span>
+            Este fluxo foi salvo por outra pessoa enquanto você editava. Suas alterações continuam
+            na tela, mas não podem ser salvas por cima da versão dela.
+          </span>
+          <Button variant="outline" size="sm" onClick={loadCurrent}>
+            Carregar a versão atual (descarta minhas alterações)
+          </Button>
+        </div>
+      )}
+      {fixedSimple && (
+        <p
+          role="note"
+          className="rounded-lg border border-border p-4 text-sm text-muted-foreground"
+        >
+          Este é o fluxo padrão de etapa única: toda O.S. sem serviço do catálogo e todo “trabalho
+          já realizado” usam ele. Você pode ajustar nome, prazo, evidências e quem conclui, mas não
+          acrescentar nem remover etapas. Para um atendimento com mais etapas, crie outro fluxo e
+          vincule a um serviço.
+        </p>
+      )}
 
       <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_380px]">
         {/* Diagrama: clicar numa caixa abre a etapa no painel ao lado. */}
@@ -663,12 +802,14 @@ function FlowEditor({
                   Trabalho em paralelo
                 </Button>
               )}
-              <Button variant="ghost" size="sm" onClick={addLoose}>
+              <Button variant="ghost" size="sm" disabled={fixedSimple} onClick={addLoose}>
                 <Plus />
                 Etapa avulsa
               </Button>
               <span className="ml-auto text-[11px] text-muted-foreground">
-                Clique numa caixa para editar · arraste para reorganizar
+                {parallelDelivery
+                  ? 'Entrega paralela tem uma única etapa; para continuar, use a etapa depois da junção.'
+                  : 'Clique numa caixa para editar · arraste para reorganizar'}
               </span>
             </div>
           )}
@@ -678,7 +819,7 @@ function FlowEditor({
             definition={draft}
             selected={selected}
             onSelect={setSelected}
-            onChange={manager && !preview ? setDraft : undefined}
+            onChange={manager && !preview ? applyGraph : undefined}
             active={preview ? simulation.active : []}
             completed={preview ? simulation.completed : []}
           />
@@ -720,7 +861,7 @@ function FlowEditor({
                         ? 'A primeira etapa não pode ser removida'
                         : 'Remover esta etapa'
                     }
-                    disabled={node.id === draft.start}
+                    disabled={node.id === draft.start || fixedSimple}
                     onClick={removeNode}
                   >
                     <Trash2 />
@@ -805,7 +946,10 @@ function FlowEditor({
                             onChange={(e) => change({ sector: e.target.value })}
                           />
                         </Labeled>
-                        <Labeled label="Prazo da etapa (min)">
+                        <Labeled
+                          label="Duração de referência (min)"
+                          hint="Só referência para planejar. O prazo da etapa é o prazo (SLA) da O.S. dela."
+                        >
                           <input
                             className="native-select"
                             type="number"
@@ -830,7 +974,7 @@ function FlowEditor({
                       </Labeled>
                       <Labeled
                         label="Responsável"
-                        hint="O prazo da etapa serve para acompanhar o fluxo; o SLA da O.S. vem das políticas de SLA."
+                        hint="O prazo de cada etapa é o prazo (SLA) da O.S. dela, definido pelo serviço ou pelas políticas de SLA."
                       >
                         <select
                           className="native-select"
@@ -845,6 +989,11 @@ function FlowEditor({
                           }}
                         >
                           <option value="">Fila do setor (quem pegar primeiro)</option>
+                          {node.assigneeUserId && people.data && !assigneeFor(node) && (
+                            <option value={node.assigneeUserId}>
+                              Responsável indisponível · escolha outro ou a fila
+                            </option>
+                          )}
                           {people.data
                             ?.filter((p) => node.roles.includes(p.role) && !p.accessBlocked)
                             .map((p) => (
@@ -888,13 +1037,20 @@ function FlowEditor({
                               type="checkbox"
                               className="size-4 accent-primary"
                               checked={node.roles.includes(role)}
-                              onChange={(e) =>
+                              onChange={(e) => {
+                                const roles = e.target.checked
+                                  ? [...node.roles, role]
+                                  : node.roles.filter((x) => x !== role);
+                                // Sem o perfil da pessoa escolhida, a etapa volta para a fila.
                                 change({
-                                  roles: e.target.checked
-                                    ? [...node.roles, role]
-                                    : node.roles.filter((x) => x !== role),
-                                })
-                              }
+                                  roles,
+                                  ...(node.assigneeUserId &&
+                                  people.data &&
+                                  !assigneeFor(node, roles)
+                                    ? { assigneeUserId: undefined }
+                                    : {}),
+                                });
+                              }}
                             />
                             {ROLE_LABEL[role]}
                           </label>

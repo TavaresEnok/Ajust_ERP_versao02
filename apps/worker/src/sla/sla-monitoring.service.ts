@@ -19,6 +19,8 @@ const urgentHint = (threshold: SlaThreshold, priority: string) =>
   (threshold === 'BREACHED' || threshold === 'WARNING_90') &&
   (priority === 'ALTA' || priority === 'CRITICA');
 
+type Delivery = { attempted: number; delivered: number };
+
 @Injectable()
 export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SlaMonitoringService.name);
@@ -139,6 +141,19 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
 
       result.evaluated += openOrders.length;
 
+      // Retomadas e reaberturas já estenderam o prazo pelo tempo útil parado. Esse tempo não
+      // é consumo de SLA: sai da conta do percentual, senão os avisos de 75%/90% disparam
+      // logo depois de uma pausa longa.
+      const stopEvents = openOrders.length
+        ? await this.prisma.slaAuditEvent.findMany({
+            where: {
+              orderId: { in: openOrders.map((order) => order.id) },
+              eventType: { in: ['RESUMED', 'REOPENED'] },
+            },
+            select: { orderId: true, metadata: true, createdAt: true },
+          })
+        : [];
+
       for (const order of openOrders) {
         try {
           // Percentual em minutos úteis, com o mesmo calendário do prazo (C-027): sem avisos
@@ -148,8 +163,25 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
             order.tenant?.timezone,
             calendars,
           );
-          const totalBiz = businessMinutesBetween(order.createdAt, order.deadlineAt, calendar);
-          const elapsedBiz = businessMinutesBetween(order.createdAt, now, calendar);
+          let stoppedBiz = 0;
+          for (const event of stopEvents) {
+            if (event.orderId !== order.id) continue;
+            const meta = (event.metadata ?? {}) as Record<string, unknown>;
+            if (typeof meta.pausedBusinessMinutes === 'number')
+              stoppedBiz += meta.pausedBusinessMinutes;
+            else if (typeof meta.pausedAt === 'string')
+              stoppedBiz += businessMinutesBetween(
+                new Date(meta.pausedAt),
+                event.createdAt,
+                calendar,
+              );
+          }
+          const totalBiz =
+            businessMinutesBetween(order.createdAt, order.deadlineAt, calendar) - stoppedBiz;
+          const elapsedBiz = Math.max(
+            0,
+            businessMinutesBetween(order.createdAt, now, calendar) - stoppedBiz,
+          );
           const percentElapsed =
             totalBiz > 0
               ? (elapsedBiz / totalBiz) * 100
@@ -193,7 +225,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
           );
 
           // Record persistent SLA audit event
-          await this.prisma.slaAuditEvent.create({
+          const audit = await this.prisma.slaAuditEvent.create({
             data: {
               tenantId: order.tenantId,
               orderId: order.id,
@@ -212,9 +244,10 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
           });
 
           // Record in SlaEvent if breached
+          let workflow: boolean | null = null;
           if (primaryThreshold === 'BREACHED') {
             await this.recordSlaBreachEvent(order, now);
-            await this.publishBreachToWorkflows(order.tenantId, order.id);
+            workflow = await this.publishBreachToWorkflows(order.tenantId, order.id);
           }
 
           // Dispatch notifications via configured channels
@@ -222,7 +255,24 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
             0,
             Math.round((now.getTime() - order.deadlineAt.getTime()) / 60000),
           );
-          await this.dispatchNotifications(order, primaryThreshold, percentElapsed, delayMinutes);
+          const delivery = await this.dispatchNotifications(
+            order,
+            primaryThreshold,
+            percentElapsed,
+            delayMinutes,
+          );
+          const attempted = delivery.attempted + (workflow === null ? 0 : 1);
+          const delivered = delivery.delivered + (workflow ? 1 : 0);
+          if (attempted > 0 && delivered === 0) {
+            // Nenhum destino recebeu (webhook, WhatsApp, e-mail ou API fora do ar): desfaz o
+            // registro para o alerta ser tentado de novo na próxima avaliação (C-028). Com ao
+            // menos uma entrega, não reenvia, para não duplicar aviso a quem já recebeu.
+            await this.prisma.slaAuditEvent.delete({ where: { id: audit.id } });
+            this.logger.warn(
+              `Alerta ${primaryThreshold} da O.S. ${order.protocol} não foi entregue; nova tentativa na próxima avaliação.`,
+            );
+            continue;
+          }
           // Trava gravada só depois do registro e do envio: uma falha não bloqueia o alerta (C-028).
           await this.markAlerted(order.id, primaryThreshold, order.deadlineAt);
 
@@ -359,10 +409,11 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
   }
 
   /** Publica a violação para as regras de workflow "SLA violado" da API (C-036). */
+  /** null = integração não configurada; true/false = entregue ou não. */
   private async publishBreachToWorkflows(tenantId: string, orderId: string) {
     const token = process.env.WORKER_API_TOKEN;
     const base = (process.env.API_INTERNAL_URL || 'http://api:3001').replace(/\/+$/, '');
-    if (!token) return;
+    if (!token) return null;
     try {
       const response = await fetch(`${base}/workflows/internal/sla-breach`, {
         method: 'POST',
@@ -370,9 +421,14 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         body: JSON.stringify({ tenantId, orderId }),
         signal: AbortSignal.timeout(10000),
       });
-      if (!response.ok) this.logger.warn(`Workflow de SLA violado respondeu ${response.status}`);
+      if (!response.ok) {
+        this.logger.warn(`Workflow de SLA violado respondeu ${response.status}`);
+        return false;
+      }
+      return true;
     } catch (err) {
       this.logger.warn(`Falha ao publicar SLA violado: ${(err as Error).message}`);
+      return false;
     }
   }
 
@@ -429,7 +485,10 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
     threshold: SlaThreshold,
     percentElapsed: number,
     delayMinutes: number,
-  ) {
+  ): Promise<Delivery> {
+    // Quantos destinos foram tentados e quantos receberam: sem nenhuma entrega, o alerta
+    // volta a ser tentado na próxima avaliação.
+    const delivery: Delivery = { attempted: 0, delivered: 0 };
     try {
       const configs = await this.prisma.notificationConfig.findMany({
         where: {
@@ -440,7 +499,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
       });
 
       if (configs.length === 0 && !urgentHint(threshold, order.priority)) {
-        return;
+        return delivery;
       }
 
       // "Cliente" é o provedor atendido, não o tenant (a própria Ajust) (C-029).
@@ -484,6 +543,8 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
       };
 
       for (const cfg of configs) {
+        if (cfg.channel === 'EMAIL' && !this.emailTransporter) continue;
+        delivery.attempted++;
         try {
           if (cfg.channel === 'WEBHOOK' || cfg.channel === 'SLACK') {
             await assertSafeUrl(cfg.target);
@@ -493,9 +554,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
               body: JSON.stringify(payload),
               signal: AbortSignal.timeout(10000),
             });
-            if (!response.ok) {
-              this.logger.warn(`Webhook ${cfg.target} returned status ${response.status}`);
-            }
+            if (!response.ok) throw new Error(`status ${response.status}`);
           } else if ((cfg.channel as string) === 'WHATSAPP') {
             await assertSafeUrl(cfg.target);
             const messageText =
@@ -517,12 +576,13 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
               metadata: payload,
             });
 
-            await safeFetch(cfg.target, {
+            const response = await safeFetch(cfg.target, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
               body: waBody,
               signal: AbortSignal.timeout(10000),
             });
+            if (!response.ok) throw new Error(`status ${response.status}`);
           } else if (cfg.channel === 'EMAIL' && this.emailTransporter) {
             await this.emailTransporter.sendMail({
               from: process.env.SMTP_FROM || 'noreply@ajusterp.com.br',
@@ -540,6 +600,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
                 (threshold === 'BREACHED' ? `Atraso: ${delayMinutes} minutos\n` : ''),
             });
           }
+          delivery.delivered++;
         } catch (deliveryErr) {
           this.logger.warn(
             `Failed to dispatch SLA alert to ${cfg.channel} (${cfg.target}): ${(deliveryErr as Error).message}`,
@@ -547,6 +608,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         }
       }
       if (onCall?.email && this.emailTransporter) {
+        delivery.attempted++;
         try {
           await this.emailTransporter.sendMail({
             from: process.env.SMTP_FROM || 'noreply@ajusterp.com.br',
@@ -556,6 +618,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
               `${label}\n\nProtocolo: ${order.protocol}\nCliente: ${clientName}\n` +
               `Título: ${order.title}\nPrioridade: ${order.priority}\nPrazo Limite: ${deadlineText}\n`,
           });
+          delivery.delivered++;
         } catch (mailErr) {
           this.logger.warn(`Falha ao avisar o plantonista: ${(mailErr as Error).message}`);
         }
@@ -565,6 +628,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         `Error in dispatchNotifications for order ${order.id}: ${(err as Error).message}`,
       );
     }
+    return delivery;
   }
 
   private async currentOnCall(tenantId: string) {

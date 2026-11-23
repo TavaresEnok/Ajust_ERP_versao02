@@ -1,6 +1,12 @@
 'use client';
 import Link from 'next/link';
-import { nextStatusOptions, orderStatuses, priorities, type ErpRecord } from '@/lib/erp/contracts';
+import {
+  FLOW_TRANSITION_NOTE,
+  orderStatuses,
+  priorities,
+  transitionOptions,
+  type ErpRecord,
+} from '@/lib/erp/contracts';
 import { StatusBadge } from './primitives';
 import { OperationControl } from './operation-controls';
 import { displayValue } from './resource-page';
@@ -63,35 +69,42 @@ export function OrderBoard({
                   <p className="text-[10px] text-muted-foreground">
                     Prazo: {displayValue(row.deadlineAt)}
                   </p>
-                  {base !== '/cliente' && (
-                    <OperationControl
-                      title="Alterar etapa"
-                      description="O ERP valida as transições permitidas e a versão da ordem antes de salvar."
-                      path={`/service-orders/${encodeURIComponent(row.id)}/transition`}
-                      roles={['super_admin', 'gerente', 'analista']}
-                      body={
-                        typeof row.version === 'number'
-                          ? { expectedVersion: row.version }
-                          : undefined
-                      }
-                      fields={[
-                        {
-                          name: 'toStatus',
-                          label: 'Etapa de destino',
-                          options: nextStatusOptions(row.status),
-                          required: true,
-                        },
-                        {
-                          name: 'reason',
-                          label: 'Justificativa',
-                          type: 'textarea',
-                          required: true,
-                          min: 3,
-                        },
-                      ]}
-                      after={refresh}
-                    />
-                  )}
+                  {base !== '/cliente' &&
+                    Object.keys(transitionOptions(row.status, !!row.processInstanceId)).length >
+                      0 && (
+                      <OperationControl
+                        title="Alterar etapa"
+                        description={
+                          row.processInstanceId
+                            ? FLOW_TRANSITION_NOTE
+                            : 'O ERP valida as transições permitidas e a versão da ordem antes de salvar.'
+                        }
+                        path={`/service-orders/${encodeURIComponent(row.id)}/transition`}
+                        method="PATCH"
+                        roles={['super_admin', 'gerente', 'analista']}
+                        body={
+                          typeof row.version === 'number'
+                            ? { expectedVersion: row.version }
+                            : undefined
+                        }
+                        fields={[
+                          {
+                            name: 'toStatus',
+                            label: 'Etapa de destino',
+                            options: transitionOptions(row.status, !!row.processInstanceId),
+                            required: true,
+                          },
+                          {
+                            name: 'reason',
+                            label: 'Justificativa',
+                            type: 'textarea',
+                            required: true,
+                            min: 3,
+                          },
+                        ]}
+                        after={refresh}
+                      />
+                    )}
                 </article>
               ))}
               {!rows.length && (

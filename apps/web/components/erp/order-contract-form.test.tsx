@@ -89,7 +89,9 @@ describe('OrderContractForm (abertura com catálogo)', () => {
     fireEvent.change(select, { target: { value: 's1' } });
     expect(input('Título').value).toBe('Cliente sem internet no quarto');
     expect(input('Tipo').value).toBe('TROCA_SENHA');
-    expect(screen.getByRole('status').textContent).toContain('Mantivemos o que você digitou em Título');
+    expect(screen.getByRole('status').textContent).toContain(
+      'Mantivemos o que você digitou em Título',
+    );
   });
 
   it('trocar de serviço substitui só as sugestões anteriores', () => {

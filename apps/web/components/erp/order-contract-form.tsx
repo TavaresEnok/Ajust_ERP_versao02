@@ -28,7 +28,13 @@ const isBlank = (value: unknown) =>
   value === undefined || value === null || String(value).trim() === '';
 const same = (a: unknown, b: unknown) => String(a ?? '').trim() === String(b ?? '').trim();
 
-export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
+export function OrderContractForm({
+  recordCompleted = false,
+  ...props
+}: ComponentProps<typeof ContractForm> & {
+  /** "Registrar trabalho já realizado" marcado por quem abriu o formulário. */
+  recordCompleted?: boolean;
+}) {
   const { scope } = useErp();
   const allowed = !scope || ['super_admin', 'gerente', 'analista', 'cliente'].includes(scope.role);
   const catalog = useErpQuery<unknown>(allowed ? '/service-catalog?activeOnly=true' : null);
@@ -160,6 +166,16 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
             necessárias aparecerão em cada etapa.
           </p>
         )}
+      {recordCompleted &&
+        service &&
+        typeof service.workflowTemplateCode === 'string' &&
+        !!service.workflowTemplateCode &&
+        service.workflowTemplateCode !== 'AJUST_SIMPLES' && (
+          <p role="alert" className="text-sm text-warning">
+            Este serviço tem fluxo próprio e não aceita registro já concluído. Desmarque “Registrar
+            trabalho já realizado” e conclua as etapas na O.S., ou escolha “Sem serviço”.
+          </p>
+        )}
       <QueryState
         loading={catalog.isLoading}
         error={catalog.error}
@@ -173,11 +189,7 @@ export function OrderContractForm(props: ComponentProps<typeof ContractForm>) {
             <summary className="cursor-pointer text-muted-foreground">
               Referência do serviço
               {typeof service.slaHours === 'number' &&
-                ` · prazo ${
-                  service.slaHours % 24 === 0
-                    ? `${service.slaHours / 24} ${service.slaHours === 24 ? 'dia útil' : 'dias úteis'}`
-                    : `${service.slaHours} horas úteis`
-                }`}
+                ` · prazo de ${service.slaHours} horas úteis (calendário de SLA)`}
             </summary>
             {Array.isArray(service.checklist) && (
               <ul className="mt-2 flex list-disc flex-col gap-1 pl-4">

@@ -180,6 +180,37 @@ dbDescribe('Atendimento Ajust: operações integradas com rollback', () => {
               reason: 'Outra empresa',
             }),
           ).rejects.toThrow();
+          // Pausar o fluxo para o SLA das entregas abertas; retomar devolve o relógio.
+          const pauseProcess = async (action: 'pause' | 'resume') =>
+            processes.act(tenantId, actor, 'gerente', order.processInstanceId!, {
+              action,
+              reason: 'Aguardando janela do cliente',
+              expectedVersion: (
+                await tx.serviceProcessInstance.findUniqueOrThrow({
+                  where: { id: order.processInstanceId! },
+                })
+              ).version,
+            });
+          await pauseProcess('pause');
+          children = await tx.serviceOrder.findMany({ where: { parentOrderId: order.id } });
+          expect(
+            children.every((c) => c.pausedAt && c.pauseReason?.startsWith('Fluxo pausado: ')),
+          ).toBe(true);
+          await expect(
+            operations.run(tenantId, actor, 'gerente', children[0].id, {
+              action: 'resume',
+              expectedVersion: children[0].version,
+              reason: 'Retomar só a O.S.',
+            }),
+          ).rejects.toThrow('Retome o processo');
+          await pauseProcess('resume');
+          children = await tx.serviceOrder.findMany({ where: { parentOrderId: order.id } });
+          expect(children.every((c) => c.pausedAt === null && c.pauseReason === null)).toBe(true);
+          expect(
+            await tx.slaAuditEvent.count({
+              where: { orderId: children[0].id, eventType: { in: ['PAUSED', 'RESUMED'] } },
+            }),
+          ).toBe(2);
           for (const child of children)
             await operations.run(tenantId, actor, 'gerente', child.id, {
               action: 'finish',
@@ -197,7 +228,12 @@ dbDescribe('Atendimento Ajust: operações integradas com rollback', () => {
           expect(
             (await tx.occurrence.findUniqueOrThrow({ where: { id: occurrence.id } })).status,
           ).toBe('ENCERRADA');
-          expect(await tx.slaAuditEvent.count({ where: { orderId: order.id } })).toBe(2);
+          // Pausa e retomada manuais; a reabertura pode acrescentar um REOPENED (extensão do prazo).
+          expect(
+            await tx.slaAuditEvent.count({
+              where: { orderId: order.id, eventType: { in: ['PAUSED', 'RESUMED'] } },
+            }),
+          ).toBe(2);
           const simple = ajustFlow('AJUST_SIMPLES');
           await tx.serviceProcessTemplate.upsert({
             where: { tenantId_code: { tenantId, code: simple.code } },

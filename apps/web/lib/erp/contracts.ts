@@ -65,6 +65,24 @@ export function nextStatusOptions(current: unknown): Record<string, string> {
   if (!targets) return orderStatuses;
   return Object.fromEntries(targets.map((code) => [code, orderStatuses[code]]));
 }
+/** Estados de trabalho entre os quais uma O.S. com etapa de fluxo ativa pode transitar. */
+const workStatuses: OrderStatus[] = ['EM_ANALISE', 'AG_CAMPO', 'AG_TERCEIROS'];
+/**
+ * Opções de transição manual. Com fluxo, só a troca entre estados de trabalho: resolver,
+ * fechar e cancelar acontecem pelo fluxo, e reabrir é pelo botão "Reabrir O.S." do Atendimento.
+ */
+export function transitionOptions(current: unknown, withFlow: boolean): Record<string, string> {
+  const options = nextStatusOptions(current);
+  if (!withFlow) return options;
+  return Object.fromEntries(
+    Object.entries(options).filter(
+      ([code]) =>
+        workStatuses.includes(code as OrderStatus) && workStatuses.includes(current as OrderStatus),
+    ),
+  );
+}
+export const FLOW_TRANSITION_NOTE =
+  'O.S. com fluxo de atendimento: aqui só se alterna entre os estados de trabalho (Em análise, Aguardando campo, Aguardando terceiros). Concluir ou cancelar é pelo fluxo; para reabrir, use “Reabrir O.S.” na aba Atendimento.';
 export type PriorityCode = keyof typeof priorities;
 export type RoleCode = 'super_admin' | 'gerente' | 'analista' | 'cliente';
 export interface ErpScope {
@@ -306,9 +324,21 @@ export class ErpError extends Error {
 export function errorMessage(error: unknown): string {
   if (error instanceof ErpError) {
     if (error.status === 401) return 'Sua sessão expirou. Entre novamente antes de continuar.';
-    if (error.status === 403) return 'Seu perfil não tem permissão para esta operação.';
+    // A mensagem específica da API explica o motivo; o texto genérico fica só como reserva.
+    const specific =
+      error.message &&
+      !/^(forbidden|conflict|precondition failed)( resource)?\.?$/i.test(error.message.trim()) &&
+      !error.message.startsWith('O servidor recusou a operação') &&
+      // Mensagens em inglês vêm de trechos antigos da API e não ajudam quem atende.
+      /[áàâãéêíóôõúç]|\b(O\.S\.|não|para|esta|este|uma?|com|que|de)\b/i.test(error.message)
+        ? error.message
+        : '';
+    if (error.status === 403) return specific || 'Seu perfil não tem permissão para esta operação.';
     if (error.status === 409 || error.status === 412)
-      return 'O ERP identificou um conflito de versão, agenda ou regra operacional. Atualize os dados e revise a operação antes de reenviar.';
+      return (
+        specific ||
+        'O ERP identificou um conflito de versão, agenda ou regra operacional. Atualize os dados e revise a operação antes de reenviar.'
+      );
   }
   return error instanceof Error
     ? error.message

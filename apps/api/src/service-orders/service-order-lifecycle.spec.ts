@@ -6,6 +6,7 @@ import {
   statusDates,
 } from './service-order-rules';
 import { ServiceOrderLifecycleService } from './service-order-lifecycle.service';
+import { occurrenceStatusFor } from './occurrence-sync';
 import { ServiceOrdersService } from './service-orders.service';
 
 const past = new Date(Date.now() - 3_600_000);
@@ -62,7 +63,7 @@ describe('regras do ciclo de vida da O.S.', () => {
 });
 
 describe('ServiceOrdersService.updateOrder — prazo (C-005/C-025)', () => {
-  function setup(role: string) {
+  function setup(role: string, extra: Record<string, unknown> = {}, audit: unknown[] = []) {
     const order = {
       id: 'o1',
       protocol: '2026100001',
@@ -75,19 +76,32 @@ describe('ServiceOrdersService.updateOrder — prazo (C-005/C-025)', () => {
       originalDeadlineAt: null,
       pausedAt: null,
       slaEligible: true,
-    };
+      sourceMetadata: null,
+      ...extra,
+    } as any;
     const prisma: any = {
       serviceOrder: {
         findFirst: jest.fn().mockResolvedValue(order),
         update: jest.fn().mockResolvedValue({ ...order, version: 4 }),
       },
       userTenant: { findMany: jest.fn().mockResolvedValue([]) },
-      slaAuditEvent: { create: jest.fn() },
+      slaAuditEvent: {
+        create: jest.fn(),
+        // Eventos de SLA já gravados para a O.S. (prazo gerencial, retomadas, reaberturas).
+        findFirst: jest.fn(
+          async ({ where }: any) => audit.find((e: any) => e.eventType === where.eventType) ?? null,
+        ),
+        findMany: jest.fn(async ({ where }: any) =>
+          audit.filter((e: any) => where.eventType.in.includes(e.eventType)),
+        ),
+      },
+      serviceProcessStep: { updateMany: jest.fn() },
       auditLog: { create: jest.fn() },
     };
     const sla: any = {
       findApplicablePolicy: jest.fn().mockResolvedValue({ hours: 8 }),
       calculateTargetDate: jest.fn().mockResolvedValue(new Date(Date.now() + 8 * 3_600_000)),
+      calculateBusinessPauseDuration: jest.fn().mockResolvedValue(90),
     };
     prisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(prisma));
     const service = new ServiceOrdersService(prisma, { emitTenantEvent: jest.fn() } as any, sla);
@@ -141,6 +155,46 @@ describe('ServiceOrdersService.updateOrder — prazo (C-005/C-025)', () => {
       data: expect.objectContaining({ eventType: 'RECALCULATED' }),
     });
   });
+
+  it('prazo próprio do serviço do catálogo não é recalculado pela política', async () => {
+    const { run, prisma, sla } = setup('analista', {
+      sourceMetadata: { slaSource: 'catalog', slaHours: 8 },
+    });
+    await run({ priority: 'ALTA' });
+    expect(sla.calculateTargetDate).not.toHaveBeenCalled();
+    expect(prisma.serviceOrder.update.mock.calls[0][0].data.deadlineAt).toBeUndefined();
+    expect(prisma.slaAuditEvent.create).not.toHaveBeenCalled();
+  });
+
+  it('prazo definido pela gestão não é sobrescrito ao mudar a prioridade', async () => {
+    const { run, prisma, sla } = setup('analista', {}, [{ eventType: 'DEADLINE_CHANGED' }]);
+    await run({ priority: 'BAIXA' });
+    expect(sla.calculateTargetDate).not.toHaveBeenCalled();
+    expect(prisma.serviceOrder.update.mock.calls[0][0].data.deadlineAt).toBeUndefined();
+  });
+
+  it('recalcular devolve o tempo útil já parado em pausas e reaberturas', async () => {
+    const { run, sla, order } = setup('analista', {}, [
+      { eventType: 'RESUMED', metadata: { pausedBusinessMinutes: 120 }, createdAt: past },
+      { eventType: 'REOPENED', metadata: { pausedBusinessMinutes: 60 }, createdAt: past },
+      // Retomada antiga: só guarda o início da pausa; a duração útil é recalculada (90 min).
+      { eventType: 'RESUMED', metadata: { pausedAt: past.toISOString() }, createdAt: past },
+    ]);
+    await run({ type: 'DNS' });
+    expect(sla.calculateTargetDate).toHaveBeenCalledWith(order.createdAt, 8 + 270 / 60, 't');
+  });
+
+  it('recalcula também com a O.S. pausada e sincroniza o prazo da etapa do fluxo', async () => {
+    const { run, prisma, sla } = setup('analista', { pausedAt: past });
+    await run({ priority: 'CRITICA' });
+    expect(sla.findApplicablePolicy).toHaveBeenCalledWith('t', 'CRITICA', 'ROMPIMENTO');
+    const deadlineAt = prisma.serviceOrder.update.mock.calls[0][0].data.deadlineAt;
+    expect(deadlineAt).toBeInstanceOf(Date);
+    expect(prisma.serviceProcessStep.updateMany).toHaveBeenCalledWith({
+      where: { tenantId: 't', orderId: 'o1', status: 'ACTIVE' },
+      data: { dueAt: deadlineAt },
+    });
+  });
 });
 
 describe('ServiceOrderLifecycleService', () => {
@@ -151,11 +205,13 @@ describe('ServiceOrderLifecycleService', () => {
       protocol: 'P',
       occurrenceId: 'occ',
       processInstanceId: null,
+      status: 'FECHADA',
     };
     const prisma: any = {
       serviceOrder: {
         findFirst: jest.fn().mockResolvedValue(order),
         count: jest.fn().mockResolvedValue(0),
+        findMany: jest.fn().mockResolvedValue([]),
       },
       serviceProcessInstance: { count: jest.fn().mockResolvedValue(0) },
       occurrence: { updateMany: jest.fn() },
@@ -291,6 +347,8 @@ describe('abertura principal dispara workflow order_created (C-010)', () => {
     const tx: any = {
       occurrence: { create: jest.fn().mockResolvedValue({ id: 'occ', number: 'N' }) },
       serviceOrder: { create: jest.fn().mockResolvedValue(created) },
+      $executeRaw: jest.fn().mockResolvedValue(1),
+      $queryRaw: jest.fn().mockResolvedValue([{ max: null }]),
     };
     const prisma: any = {
       customer: {
@@ -448,5 +506,141 @@ describe('Aguardando terceiros pausa o SLA (C-030)', () => {
       expectedVersion: 1,
     });
     expect(prisma.serviceOrder.update.mock.calls[0][0].data.pausedAt).toBeUndefined();
+  });
+
+  it('não resolve nem fecha com pausa manual ativa: pede para retomar antes', async () => {
+    const { prisma, service } = setup({
+      ...base,
+      status: 'EM_ANALISE',
+      pausedAt: new Date(),
+      pauseReason: 'Cliente pediu para aguardar',
+    });
+    await expect(
+      service.transition('t', 'o1', 'u1', 'analista', {
+        toStatus: 'RESOLVIDA' as never,
+        reason: 'Resolvido',
+        expectedVersion: 1,
+      }),
+    ).rejects.toThrow('Retome a O.S. antes de encerrar.');
+    expect(prisma.serviceOrder.update).not.toHaveBeenCalled();
+  });
+
+  it('reabrir estende o prazo pelo tempo útil em que ficou encerrada', async () => {
+    const resolvedAt = new Date('2029-12-31T22:00:00Z');
+    const { prisma, service, sla } = setup({
+      ...base,
+      status: 'RESOLVIDA',
+      pausedAt: null,
+      resolvedAt,
+    });
+    await service.transition('t', 'o1', 'u1', 'gerente', {
+      toStatus: 'EM_ANALISE' as never,
+      reason: 'Cliente relatou que voltou a falhar',
+      expectedVersion: 1,
+    });
+    expect(sla.calculateBusinessPauseDuration.mock.calls[0].slice(0, 1)).toEqual([resolvedAt]);
+    expect(sla.calculateTargetDate).toHaveBeenCalledWith(base.deadlineAt, 2, 't');
+    const data = prisma.serviceOrder.update.mock.calls[0][0].data;
+    expect(data.deadlineAt).toEqual(new Date('2030-01-01T02:00:00Z'));
+    expect(data.originalDeadlineAt).toEqual(base.deadlineAt);
+    expect(prisma.slaAuditEvent.create.mock.calls[0][0].data).toMatchObject({
+      eventType: 'REOPENED',
+      metadata: expect.objectContaining({ pausedBusinessMinutes: 120 }),
+    });
+  });
+
+  it('O.S. com fluxo não reabre pela transição manual (a etapa precisa ser recriada)', async () => {
+    const { prisma, service } = setup({
+      ...base,
+      status: 'FECHADA',
+      pausedAt: null,
+      processInstanceId: 'p1',
+      closedAt: new Date(),
+    });
+    prisma.serviceProcessStep = { count: jest.fn().mockResolvedValue(0) };
+    await expect(
+      service.transition('t', 'o1', 'u1', 'gerente', {
+        toStatus: 'EM_ANALISE' as never,
+        reason: 'Reabrir',
+        expectedVersion: 1,
+      }),
+    ).rejects.toThrow('Reabrir O.S.');
+  });
+
+  it('anotação de transição é interna (não aparece no portal do cliente)', async () => {
+    const { prisma, service } = setup({ ...base, status: 'EM_ANALISE', pausedAt: null });
+    await service.transition('t', 'o1', 'u1', 'analista', {
+      toStatus: 'AG_CAMPO' as never,
+      reason: 'Equipe a caminho',
+      expectedVersion: 1,
+    });
+    expect(
+      prisma.serviceOrder.update.mock.calls[0][0].data.occurrences.create.isCustomerVisible,
+    ).toBe(false);
+  });
+});
+
+describe('estado da ocorrência a partir das O.S. (occurrenceStatusFor)', () => {
+  const o = (status: string, pausedAt: Date | null = null) => ({ status, pausedAt }) as any;
+  it('encerrada sem O.S. abertas nem fluxo em andamento', () => {
+    expect(occurrenceStatusFor([], 0)).toBe('ENCERRADA');
+    expect(occurrenceStatusFor([], 1)).toBe('EM_EXECUCAO');
+  });
+  it('aberta enquanto ninguém começou', () => {
+    expect(occurrenceStatusFor([o('ABERTA'), o('ABERTA')], 1)).toBe('ABERTA');
+  });
+  it('pendente quando tudo o que falta depende de outro', () => {
+    expect(occurrenceStatusFor([o('RESOLVIDA'), o('AG_TERCEIROS')], 1)).toBe('PENDENTE');
+    expect(occurrenceStatusFor([o('EM_ANALISE', past)], 1)).toBe('PENDENTE');
+  });
+  it('em execução com trabalho em andamento', () => {
+    expect(occurrenceStatusFor([o('EM_ANALISE'), o('RESOLVIDA')], 1)).toBe('EM_EXECUCAO');
+    expect(occurrenceStatusFor([o('ABERTA'), o('AG_CAMPO')], 1)).toBe('EM_EXECUCAO');
+  });
+});
+
+describe('aprovação gerencial do fechamento', () => {
+  it('atraso é medido na entrega: resolvida no prazo e fechada depois não exige aprovação', () => {
+    const base = { requiresApproval: true, priority: 'ALTA' as const, deadlineAt: past };
+    expect(needsClosingApproval({ ...base, resolvedAt: new Date(past.getTime() - 1) })).toBe(false);
+    expect(needsClosingApproval({ ...base, resolvedAt: new Date() })).toBe(true);
+  });
+
+  function setup(processInstanceId: string | null, openSteps = 0) {
+    const order = { id: 'o1', tenantId: 't', status: 'RESOLVIDA', processInstanceId };
+    const prisma: any = {
+      serviceOrder: { findFirst: jest.fn().mockResolvedValue(order) },
+      serviceOrderApproval: { create: jest.fn().mockResolvedValue({ id: 'a1' }) },
+      serviceProcessStep: { count: jest.fn().mockResolvedValue(openSteps) },
+      auditLog: { create: jest.fn() },
+    };
+    const service = new ServiceOrdersService(
+      prisma,
+      { emitTenantEvent: jest.fn() } as any,
+      {} as any,
+    );
+    const transition = jest.spyOn(service, 'transition').mockResolvedValue({} as never);
+    return { service, transition };
+  }
+
+  it('aprovar fecha a O.S. na hora', async () => {
+    const { service, transition } = setup(null);
+    await service.approve('t', 'o1', 'g1', 'gerente', 'APPROVED' as never, 'Ok');
+    expect(transition).toHaveBeenCalledWith('t', 'o1', 'g1', 'gerente', {
+      toStatus: 'FECHADA',
+      reason: 'Ok',
+    });
+  });
+
+  it('com entregas paralelas abertas, a O.S. fecha sozinha depois (não fecha agora)', async () => {
+    const { service, transition } = setup('p1', 2);
+    await service.approve('t', 'o1', 'g1', 'gerente', 'APPROVED' as never);
+    expect(transition).not.toHaveBeenCalled();
+  });
+
+  it('recusar mantém a O.S. resolvida', async () => {
+    const { service, transition } = setup(null);
+    await service.approve('t', 'o1', 'g1', 'gerente', 'REJECTED' as never, 'Faltou evidência');
+    expect(transition).not.toHaveBeenCalled();
   });
 });

@@ -101,17 +101,53 @@ export function AnalystOrderWork({
       workflowBlocked ||
       roleBlocked);
   const closed = ['FECHADA', 'CANCELADA'].includes(String(order.status));
+  // Vale só a decisão mais recente desta resolução (mesma regra da API).
+  const decision = (Array.isArray(order.approvals) ? (order.approvals as ErpRecord[]) : [])
+    .filter(
+      (item) =>
+        ['APPROVED', 'REJECTED'].includes(String(item.status)) &&
+        (!order.resolvedAt ||
+          new Date(String(item.createdAt)).getTime() >=
+            new Date(String(order.resolvedAt)).getTime()),
+    )
+    .sort(
+      (a, b) => new Date(String(b.createdAt)).getTime() - new Date(String(a.createdAt)).getTime(),
+    )[0];
+  const rejected = order.status === 'RESOLVIDA' && decision?.status === 'REJECTED';
   const awaitingApproval =
     order.status === 'RESOLVIDA' &&
+    !decision &&
     !!order.requiresApproval &&
     ['ALTA', 'CRITICA'].includes(String(order.priority)) &&
     new Date(String(order.deadlineAt)).getTime() < new Date(String(order.resolvedAt)).getTime();
+  // Resolvida aguardando a gestão ou recusada: não há o que encerrar até reabrir.
+  const approvalHold = awaitingApproval || rejected;
   const pendingOrders = (
     process.data?.orders ||
     process.data?.links?.map((link) => link.order) ||
     []
   ).filter((item) => item.id !== order.id && !['FECHADA', 'CANCELADA'].includes(item.status));
   const paused = !!order.pausedAt;
+  // Pausa feita no processo inteiro: quem retoma é a gestão, na tela do processo.
+  const flowPaused =
+    process.data?.status === 'PAUSED' ||
+    (paused && String(order.pauseReason || '').startsWith('Fluxo pausado: '));
+  const flowPauseNote = (
+    <>
+      O fluxo deste atendimento está pausado pela gestão: o prazo está parado. A retomada é feita
+      pela gestão na tela do processo
+      {scope?.role !== 'analista' && order.processInstanceId ? (
+        <>
+          {' · '}
+          <Link className="text-link" href={`${base}/processos/${order.processInstanceId}`}>
+            Abrir o processo para retomar →
+          </Link>
+        </>
+      ) : (
+        '.'
+      )}
+    </>
+  );
   const primaryAction = paused ? 'resume' : order.status === 'ABERTA' ? 'start' : 'finish';
   const finishAssignedElsewhere =
     scope?.role === 'analista' &&
@@ -249,6 +285,13 @@ export function AnalystOrderWork({
           </Link>
         )}
       </div>
+      {rejected && (
+        <p role="alert" className="rounded-lg border border-danger/30 p-3 text-sm">
+          Fechamento recusado pela gestão: {String(decision?.reason || 'motivo não informado')}. Use{' '}
+          <strong>Reabrir O.S.</strong>, abaixo, para corrigir o atendimento e registrar o resultado
+          de novo.
+        </p>
+      )}
       {awaitingApproval && (
         <p role="status" className="rounded-lg border border-warning/30 p-3 text-sm">
           Aguardando aprovação da gestão. O resultado já foi registrado; o fechamento depende da
@@ -296,7 +339,7 @@ export function AnalystOrderWork({
             ))}
         </div>
       )}
-      {!!order.processInstanceId && !closed && !awaitingApproval && (
+      {!!order.processInstanceId && !closed && !approvalHold && (
         <div className="space-y-3 rounded-lg border border-border bg-secondary/40 p-4 text-sm">
           <h3 className="font-semibold">Etapa do fluxo de atendimento</h3>
           <QueryState
@@ -314,9 +357,20 @@ export function AnalystOrderWork({
                   <p className="font-medium">{node.name}</p>
                   {(workflowBlocked || roleBlocked) && (
                     <p role="status">
-                      {workflowBlocked
-                        ? 'O fluxo não está liberado para execução. Solicite a revisão da gestão.'
-                        : 'Esta etapa exige outro perfil de acesso definido pela gestão.'}
+                      {flowPaused
+                        ? flowPauseNote
+                        : workflowBlocked
+                          ? 'O fluxo não está liberado para execução. Solicite a revisão da gestão.'
+                          : `Esta etapa só pode ser concluída por: ${node.roles
+                              .map(
+                                (role) =>
+                                  ({
+                                    super_admin: 'administração',
+                                    gerente: 'gerência',
+                                    analista: 'analista',
+                                  })[role] || role,
+                              )
+                              .join(', ')}. Você pode encaminhar a O.S. em Outras ações.`}
                     </p>
                   )}
                   {!!node.requiredFields.length && (
@@ -352,7 +406,9 @@ export function AnalystOrderWork({
                     ? 'Aberta · aguardando início'
                     : awaitingApproval
                       ? 'Aguardando aprovação da gestão'
-                      : 'Em andamento'}
+                      : rejected
+                        ? 'Fechamento recusado · reabra para corrigir'
+                        : 'Em andamento'}
             </p>
             {!closed && !paused && node?.name && (
               <p className="mt-1 text-xs text-muted-foreground">{node.name}</p>
@@ -457,7 +513,7 @@ export function AnalystOrderWork({
               <Button disabled={working || action.pending} onClick={() => void submit('start')}>
                 {working && primaryAction === 'start' ? 'Iniciando…' : labels[primaryAction]}
               </Button>
-            ) : mode !== primaryAction ? (
+            ) : mode !== primaryAction && !(flowPaused && primaryAction === 'resume') ? (
               <Button
                 variant="outline"
                 disabled={working || action.pending}
@@ -484,6 +540,7 @@ export function AnalystOrderWork({
                       : k !== 'resume',
                   )
                   .filter(([k]) => k !== 'unschedule' || !!order.scheduledAt)
+                  .filter(([k]) => !(flowPaused && ['pause', 'resume'].includes(k)))
                   .map(([k, label]) => (
                     <Button
                       key={k}
@@ -502,8 +559,14 @@ export function AnalystOrderWork({
               </div>
             </details>
           </div>
+          {flowPaused && ['resume', 'pause'].includes(mode) && (
+            <p role="status" className="rounded-lg border border-warning/30 p-3 text-sm">
+              {flowPauseNote}
+            </p>
+          )}
           {mode !== 'start' &&
-            !(mode === 'finish' && (finishAssignedElsewhere || awaitingApproval)) && (
+            !(flowPaused && ['resume', 'pause'].includes(mode)) &&
+            !(mode === 'finish' && (finishAssignedElsewhere || approvalHold)) && (
               <h3 className="text-sm font-semibold">{labels[mode]}</h3>
             )}
           {mode === 'schedule' && (
@@ -589,7 +652,7 @@ export function AnalystOrderWork({
           )}
           {mode === 'finish' &&
             !finishAssignedElsewhere &&
-            !awaitingApproval &&
+            !approvalHold &&
             outcomes.length > 1 && (
               <select
                 aria-label="Resultado do atendimento"
@@ -603,7 +666,7 @@ export function AnalystOrderWork({
                 ))}
               </select>
             )}
-          {mode === 'finish' && !finishAssignedElsewhere && !awaitingApproval && node && (
+          {mode === 'finish' && !finishAssignedElsewhere && !approvalHold && node && (
             <p className="rounded-lg bg-secondary/40 p-3 text-sm" role="note">
               {selectedOutcome ? (
                 <>
@@ -619,7 +682,8 @@ export function AnalystOrderWork({
             </p>
           )}
           {mode !== 'start' &&
-            !(mode === 'finish' && (finishAssignedElsewhere || awaitingApproval)) && (
+            !(flowPaused && ['resume', 'pause'].includes(mode)) &&
+            !(mode === 'finish' && (finishAssignedElsewhere || approvalHold)) && (
               <>
                 {hasRequirements &&
                   node!.requiredFields.map((field) => (
@@ -692,8 +756,8 @@ export function AnalystOrderWork({
           Resultado, anotações e passagem entre analistas preservados no histórico.
         </p>
       )}
-      {order.status === 'FECHADA' && (
-        <details className="rounded-lg border border-border p-4">
+      {(order.status === 'FECHADA' || rejected) && (
+        <details className="rounded-lg border border-border p-4" open={rejected || undefined}>
           <summary className="cursor-pointer text-sm font-medium">Reabrir O.S.</summary>
           <div className="mt-4 space-y-3">
             <label className="block text-sm">

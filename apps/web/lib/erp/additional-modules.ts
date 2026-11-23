@@ -397,7 +397,7 @@ export const additionalModules: Record<string, ResourceDefinition> = {
         max: 1440,
         integer: true,
         nullable: true,
-        hint: '24 h = 1 dia útil (segunda a sexta, sem feriados). Em branco: vale a política de SLA.',
+        hint: 'Horas úteis contadas no calendário de SLA (dias e horários de trabalho e feriados configurados pela gestão). Em branco: vale a política de SLA.',
       },
       { name: 'defaultPriority', label: 'Prioridade padrão', options: priorities },
       {

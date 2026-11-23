@@ -77,13 +77,21 @@ export const isReopen = (from: ServiceOrderStatus, to: ServiceOrderStatus) =>
 
 /** Fechamento de O.S. ALTA/CRÍTICA atrasada que exige decisão gerencial. */
 export function needsClosingApproval(
-  order: { requiresApproval: boolean; priority: Priority; deadlineAt: Date },
+  order: {
+    requiresApproval: boolean;
+    priority: Priority;
+    deadlineAt: Date;
+    resolvedAt?: Date | null;
+  },
   now = new Date(),
 ) {
+  // O atraso é medido na entrega (resolução), não no momento do fechamento: O.S. resolvida
+  // no prazo e fechada depois não precisa de aprovação.
+  const deliveredAt = order.resolvedAt ?? now;
   return (
     order.requiresApproval &&
     (order.priority === 'ALTA' || order.priority === 'CRITICA') &&
-    order.deadlineAt.getTime() < now.getTime()
+    order.deadlineAt.getTime() < deliveredAt.getTime()
   );
 }
 

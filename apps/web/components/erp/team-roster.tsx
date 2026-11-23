@@ -774,7 +774,9 @@ export function TeamRosterPage() {
         <ViewLink href={base + '/agenda'}>Abrir agenda</ViewLink>
         {real && (
           <Button
-            variant="ghost"
+            variant={demo ? 'secondary' : 'ghost'}
+            aria-pressed={demo}
+            title="Mostra uma escala fictícia apenas para demonstração (nenhuma alteração será salva)"
             onClick={() => {
               setExample((value) => !value);
               clearFilters();
@@ -821,11 +823,11 @@ export function TeamRosterPage() {
       {demo && (
         <div
           role="status"
-          className="sticky top-2 z-10 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border border-warning/30 bg-warning-surface p-3 text-sm text-warning"
+          className="sticky top-2 z-20 mb-5 flex flex-wrap items-center justify-between gap-3 rounded-lg border-2 border-warning bg-warning-surface p-3.5 text-sm text-warning shadow-sm"
         >
           <span>
-            <strong>Exemplo:</strong> nomes e plantões fictícios, só para mostrar como a escala
-            fica. Nada aqui é a escala real e nada pode ser editado.
+            <strong>Modo exemplo ativo · Nenhuma alteração será salva:</strong> nomes e plantões
+            fictícios apenas para demonstração. Isto não é a escala real da equipe.
           </span>
           <Button size="sm" variant="outline" onClick={() => setExample(false)}>
             Voltar à escala real

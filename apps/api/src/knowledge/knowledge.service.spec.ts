@@ -69,7 +69,11 @@ function makePrisma(): any {
         passwordHash: hashSync('confirm-test', 4),
       }),
     },
-    auditLog: { count: jest.fn().mockResolvedValue(0), create: jest.fn().mockResolvedValue({}) },
+    auditLog: {
+      count: jest.fn().mockResolvedValue(0),
+      findMany: jest.fn().mockResolvedValue([]),
+      create: jest.fn().mockResolvedValue({}),
+    },
     $queryRaw: jest.fn().mockResolvedValue([]),
     knowledgeArticle: {
       findMany: jest.fn().mockResolvedValue([article()]),
@@ -531,7 +535,9 @@ describe('KnowledgeService', () => {
   });
 
   it('recusa revelar acima do limite por hora (C-054)', async () => {
-    prisma.auditLog.count.mockResolvedValue(120);
+    const opened = (n: number) =>
+      Array.from({ length: n }, (_, i) => ({ resourceId: `other-${i}` }));
+    prisma.auditLog.findMany.mockResolvedValue(opened(120));
     await expect(
       service.revealCredential(
         'analista',
@@ -542,8 +548,16 @@ describe('KnowledgeService', () => {
         'confirm-test',
       ),
     ).rejects.toMatchObject({ status: 429 });
+    // Reabrir um item já consultado na hora não gasta limite: só credenciais novas contam.
+    prisma.auditLog.findMany.mockResolvedValue([...opened(119), { resourceId: 'credential-1' }]);
+    await expect(
+      service.revealCredential('analista', 'user-1', 'tenant-1', 'credential-1'),
+    ).resolves.toHaveProperty('secret');
+    expect(prisma.auditLog.findMany).toHaveBeenLastCalledWith(
+      expect.objectContaining({ distinct: ['resourceId'] }),
+    );
     // Gerente tem o dobro do limite do analista.
-    prisma.auditLog.count.mockResolvedValue(239);
+    prisma.auditLog.findMany.mockResolvedValue(opened(239));
     await expect(
       service.revealCredential(
         'gerente',
@@ -561,6 +575,7 @@ describe('KnowledgeService', () => {
         metadata: expect.objectContaining({ op: 'reveal', reason: 'Troca de senha' }),
       }),
     });
+    prisma.auditLog.findMany.mockResolvedValue([]);
   });
 
   it('reveals and audits tenant-owned credential secrets', async () => {

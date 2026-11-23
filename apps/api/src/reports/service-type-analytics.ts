@@ -7,6 +7,7 @@ type AnalyticsOrder = {
   closedAt?: Date | null;
   resolvedAt?: Date | null;
   deadlineAt?: Date | null;
+  pausedAt?: Date | null;
   slaEligible?: boolean;
   analystName?: string | null;
   assigneeUserId?: string | null;
@@ -156,11 +157,13 @@ export function buildServiceTypeAnalytics(
       p.active++;
     }
     if (!hasSla) stats.withoutSla++;
-    if (active && hasSla && remaining < 0) {
+    // O.S. com SLA pausado não conta como atrasada nem "vence em breve" (mesma regra do monitor).
+    const running = active && hasSla && !order.pausedAt;
+    if (running && remaining < 0) {
       stats.overdue++;
       p.overdue++;
     }
-    if (active && hasSla && remaining >= 0 && remaining <= 2 * 3600000) {
+    if (running && remaining >= 0 && remaining <= 2 * 3600000) {
       stats.dueSoon++;
       p.dueSoon++;
     }

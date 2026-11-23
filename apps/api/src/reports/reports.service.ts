@@ -345,6 +345,7 @@ export class ReportsService {
         closedAt: true,
         resolvedAt: true,
         deadlineAt: true,
+        pausedAt: true,
         slaEligible: true,
         analystName: true,
         assigneeUserId: true,

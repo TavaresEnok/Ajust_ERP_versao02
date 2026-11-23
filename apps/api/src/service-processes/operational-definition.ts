@@ -105,6 +105,69 @@ export function validateOperational(value: unknown) {
   return d;
 }
 
+/**
+ * Regras exigidas só ao salvar ou publicar um modelo. Ficam fora de `validateOperational`
+ * porque ele também lê a cópia guardada em execuções antigas, que não pode passar a falhar.
+ * Cada regra barra um desenho que publica, mas trava o atendimento em execução.
+ */
+export function assertPublishable(d: OperationalDefinition) {
+  const byId = new Map(d.nodes.map((n) => [n.id, n]));
+  // Fluxo padrão de etapa única: é o usado em "registrar trabalho já realizado" e em toda
+  // O.S. sem serviço de catálogo.
+  if (
+    d.code === 'AJUST_SIMPLES' &&
+    (d.nodes.length !== 2 ||
+      d.nodes.filter((n) => n.kind === 'task').length !== 1 ||
+      d.nodes.filter((n) => n.kind === 'end').length !== 1)
+  )
+    throw new BadRequestException(
+      'O fluxo padrão AJUST_SIMPLES precisa ter exatamente uma etapa e o fim. Para um atendimento com mais etapas, crie outro fluxo e vincule ao serviço.',
+    );
+  // O fim só conclui sem outro ramo em andamento: todo ramo de um bloco paralelo precisa
+  // chegar a uma junção.
+  const joined = new Set(d.nodes.filter((n) => n.kind === 'join').flatMap((n) => n.waitFor));
+  for (const fork of d.nodes.filter((n) => n.kind === 'fork'))
+    for (const target of Object.values(fork.routes))
+      if (!joined.has(target))
+        throw new BadRequestException(
+          `O ramo "${byId.get(target)!.name}" de "${fork.name}" não chega a uma junção. Sem junção, o fluxo nunca conclui.`,
+        );
+  // Laço que volta a um bloco paralelo ou junção: na segunda passagem o motor não reabre o
+  // bloco já concluído e o atendimento fica sem etapa ativa.
+  for (const gate of d.nodes.filter((n) => n.kind === 'fork' || n.kind === 'join')) {
+    const seen = new Set<string>();
+    const queue = Object.values(gate.routes);
+    while (queue.length) {
+      const id = queue.shift()!;
+      if (id === gate.id)
+        throw new BadRequestException(
+          `O fluxo volta a "${gate.name}" depois de passar por ele. Repetições só podem voltar a etapas antes do bloco paralelo ou depois da junção.`,
+        );
+      if (seen.has(id)) continue;
+      seen.add(id);
+      queue.push(...Object.values(byId.get(id)!.routes));
+    }
+  }
+  // Resultado que encerra a O.S. não pode levar a outra etapa da mesma O.S.: o motor recusa
+  // etapa em O.S. encerrada.
+  for (const task of d.nodes.filter((n) => n.kind === 'task'))
+    for (const outcome of task.closeOn) {
+      const seen = new Set<string>();
+      const queue = [task.routes[outcome]];
+      while (queue.length) {
+        const id = queue.shift()!;
+        if (seen.has(id)) continue;
+        seen.add(id);
+        const node = byId.get(id)!;
+        if (node.kind === 'task' && node.orderKey === task.orderKey)
+          throw new BadRequestException(
+            `O resultado "${outcome}" de "${task.name}" encerra a O.S., mas o fluxo continua em "${node.name}" na mesma O.S. Desmarque o encerramento ou leve essa etapa para outra O.S.`,
+          );
+        queue.push(...Object.values(node.routes));
+      }
+    }
+}
+
 const operators = ['super_admin', 'gerente', 'analista'] as const;
 export function makeOperationalDefinition(sourceType: string): OperationalDefinition {
   const norm = normalizeType(sourceType);

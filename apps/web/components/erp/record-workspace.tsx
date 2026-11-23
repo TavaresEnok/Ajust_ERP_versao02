@@ -6,10 +6,13 @@ import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
+import { useSWRConfig } from 'swr';
 import { useErp, useErpQuery, useErpAction } from '@/lib/erp/gateway';
+import { refreshVisualData } from '@/lib/erp/visual-data';
 import {
   type ErpRecord,
-  nextStatusOptions,
+  FLOW_TRANSITION_NOTE,
+  transitionOptions,
   orderStatuses,
   occurrenceStatuses,
   changeStatuses,
@@ -65,6 +68,7 @@ export function RecordWorkspace({
       : null,
   );
   const action = useErpAction();
+  const { mutate } = useSWRConfig();
   const [uploadError, setUploadError] = useState('');
   const [uploading, setUploading] = useState(false);
   const uploadInFlight = useRef(false);
@@ -164,6 +168,9 @@ export function RecordWorkspace({
     }
   }
   const version = typeof record?.version === 'number' ? record.version : undefined;
+  const withFlow = kind === 'orders' && !!record?.processInstanceId;
+  // O.S. encerrada: o analista reabre antes de editar; a gestão edita, mas não muda o prazo.
+  const finished = kind === 'orders' && ['FECHADA', 'CANCELADA'].includes(status);
   const editOccurrence: FieldSpec[] = [
     { name: 'type', label: 'Tipo', min: 2, required: true },
     ...(scope?.role === 'analista'
@@ -305,71 +312,82 @@ export function RecordWorkspace({
         <TabsContent value="Editar" keepMounted={embedded && canOperate} className={contentClass}>
           <section className={embedded ? 'space-y-5' : 'panel p-6'}>
             <h2 className="section-title mb-5">Editar dados do atendimento</h2>
-            {kind === 'orders' && !manager && (
+            {kind === 'orders' && !manager && !finished && (
               <p className="mb-4 text-sm text-muted-foreground">
                 O prazo é definido pelo serviço. Para alterá-lo, solicite a mudança à gestão.
               </p>
             )}
-            <ContractForm
-              key={`${id}-${String(record?.version || '')}`}
-              label="Salvar alterações"
-              fields={
-                kind === 'orders'
-                  ? [
-                      ...orderFields
-                        .filter((field) => manager || field.name !== 'deadlineAt')
-                        .map((field) =>
-                          [
-                            'requester',
-                            'sector',
-                            'origin',
-                            'ownerName',
-                            'analystName',
-                            'internalNotes',
-                          ].includes(field.name)
-                            ? { ...field, nullable: true }
-                            : field.name === 'deadlineAt'
-                              ? { ...field, label: 'Prazo' }
-                              : field,
-                        ),
-                      ...(manager
-                        ? [
-                            {
-                              name: 'deadlineReason',
-                              label: 'Motivo da mudança de prazo',
-                              hint: 'Obrigatório só se você mudar o prazo. Mudança de prazo é feita pela gestão.',
-                              max: 2000,
-                            },
-                          ]
-                        : []),
-                    ]
-                  : editOccurrence
-              }
-              values={record}
-              connected={connected && canOperate}
-              pending={action.pending}
-              onSubmit={(values) =>
-                submit('', 'PATCH', {
-                  ...values,
-                  ...(kind === 'orders' ? { expectedVersion: version } : {}),
-                })
-              }
-            />
+            {finished && (
+              <p role="note" className="mb-4 text-sm text-muted-foreground">
+                {manager
+                  ? 'Esta O.S. está encerrada. A gestão pode corrigir os dados, mas o prazo não muda depois do encerramento.'
+                  : 'Esta O.S. está encerrada. Para editar, reabra a O.S. na aba Atendimento (Reabrir O.S.) e informe o motivo.'}
+              </p>
+            )}
+            {!(finished && !manager) && (
+              <ContractForm
+                key={`${id}-${String(record?.version || '')}`}
+                label="Salvar alterações"
+                fields={
+                  kind === 'orders'
+                    ? [
+                        ...orderFields
+                          .filter((field) => (manager && !finished) || field.name !== 'deadlineAt')
+                          .map((field) =>
+                            [
+                              'requester',
+                              'sector',
+                              'origin',
+                              'ownerName',
+                              'analystName',
+                              'internalNotes',
+                            ].includes(field.name)
+                              ? { ...field, nullable: true }
+                              : field.name === 'deadlineAt'
+                                ? { ...field, label: 'Prazo' }
+                                : field,
+                          ),
+                        ...(manager && !finished
+                          ? [
+                              {
+                                name: 'deadlineReason',
+                                label: 'Motivo da mudança de prazo',
+                                hint: 'Obrigatório só se você mudar o prazo. Mudança de prazo é feita pela gestão.',
+                                max: 2000,
+                              },
+                            ]
+                          : []),
+                      ]
+                    : editOccurrence
+                }
+                values={record}
+                connected={connected && canOperate}
+                pending={action.pending}
+                onSubmit={(values) =>
+                  submit('', 'PATCH', {
+                    ...values,
+                    ...(kind === 'orders' ? { expectedVersion: version } : {}),
+                  })
+                }
+              />
+            )}
           </section>
         </TabsContent>
         <TabsContent value="Transição">
           <section className="panel p-6">
             <h2 className="section-title mb-3">Transição com justificativa</h2>
             <p className="mb-5 text-xs leading-6 text-muted-foreground">
-              A alteração usa a versão atual do registro. O servidor determina transições permitidas
-              e aprovações necessárias.
+              {withFlow
+                ? FLOW_TRANSITION_NOTE
+                : 'A alteração usa a versão atual do registro. O servidor determina transições permitidas e aprovações necessárias.'}
             </p>
             <ContractForm
+              key={`transition-${String(record?.version || '')}`}
               fields={[
                 {
                   name: 'toStatus',
                   label: 'Próximo status',
-                  options: nextStatusOptions(status),
+                  options: transitionOptions(status, withFlow),
                   required: true,
                 },
                 {
@@ -380,7 +398,11 @@ export function RecordWorkspace({
                   min: 3,
                 },
               ]}
-              connected={connected && canOperate}
+              connected={
+                connected &&
+                canOperate &&
+                Object.keys(transitionOptions(status, withFlow)).length > 0
+              }
               pending={action.pending}
               onSubmit={(values) =>
                 submit('/transition', 'PATCH', { ...values, expectedVersion: version })
@@ -391,20 +413,32 @@ export function RecordWorkspace({
         </TabsContent>
         <TabsContent value="Aprovações">
           <section className="panel p-6">
-            <h2 className="section-title mb-5">Decisão gerencial</h2>
+            <h2 className="section-title mb-3">Decisão gerencial</h2>
+            <p className="mb-5 text-xs leading-6 text-muted-foreground">
+              {status === 'RESOLVIDA'
+                ? 'Aprovar fecha a O.S. (se o fluxo ainda tiver entregas abertas, ela fecha quando a última terminar). Recusar mantém a O.S. resolvida e devolve ao responsável para corrigir; o motivo é obrigatório.'
+                : 'A decisão só pode ser registrada quando a O.S. está resolvida aguardando o fechamento.'}
+            </p>
             <ContractForm
+              key={`approval-${String(record?.version || '')}`}
               fields={[
                 {
                   name: 'decision',
                   label: 'Decisão',
-                  options: { APPROVED: 'Aprovar', REJECTED: 'Rejeitar' },
+                  options: { APPROVED: 'Aprovar e fechar', REJECTED: 'Recusar e devolver' },
                   required: true,
                 },
-                { name: 'reason', label: 'Parecer', type: 'textarea' },
+                { name: 'reason', label: 'Parecer (obrigatório na recusa)', type: 'textarea' },
               ]}
-              connected={connected && manager}
+              connected={connected && manager && status === 'RESOLVIDA'}
               pending={action.pending}
-              onSubmit={(values) => submit('/approvals', 'POST', values)}
+              onSubmit={async (values) => {
+                if (values.decision === 'REJECTED' && String(values.reason || '').trim().length < 3)
+                  throw new Error('Informe o motivo da recusa (pelo menos 3 caracteres).');
+                await submit('/approvals', 'POST', values);
+                // Aprovar fecha a O.S.: listas e contadores também mudam.
+                await refreshVisualData(mutate);
+              }}
               label="Registrar decisão"
             />
             {rows('approvals').map((row, i) => (

@@ -686,7 +686,7 @@ export class KnowledgeService {
     await this.prisma.$transaction(async (tx) => {
       // Serialize counting and recording across API replicas, not just inside this process.
       await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtext(${tenantId}), hashtext(${userId}))::text`;
-      await this.assertRevealWithinLimit(tenantId, userId, role, tx);
+      await this.assertRevealWithinLimit(tenantId, userId, role, credentialId, tx);
       await tx.auditLog.create({
         data: {
           tenantId,
@@ -704,15 +704,19 @@ export class KnowledgeService {
     tenantId: string,
     userId: string,
     role: string,
+    credentialId: string,
     tx: Prisma.TransactionClient,
   ) {
     // 120/h para analista (240 para gestão): sem a janela de senha, abrir a anotação de um item
     // é um clique, e um plantão consulta dezenas de equipamentos por hora.
+    // O limite conta credenciais DIFERENTES na última hora: reabrir, copiar ou preencher de novo
+    // um item já consultado não expõe nada novo (a tela esconde a senha após 30 s ou ao trocar de
+    // janela, o que força nova consulta). Toda consulta continua no histórico.
     const configured = Number(process.env.VAULT_REVEALS_PER_HOUR || 120);
     const perHour =
       (Number.isInteger(configured) && configured > 0 ? configured : 120) *
       (role === 'analista' ? 1 : 2);
-    const used = await tx.auditLog.count({
+    const seen = await tx.auditLog.findMany({
       where: {
         tenantId,
         actorUserId: userId,
@@ -724,10 +728,13 @@ export class KnowledgeService {
           { metadata: { path: ['op'], equals: 'autofill' } },
         ],
       },
+      distinct: ['resourceId'],
+      select: { resourceId: true },
     });
-    if (used >= perHour)
+    if (seen.some((row) => row.resourceId === credentialId)) return;
+    if (seen.length >= perHour)
       throw new HttpException(
-        `Limite de ${perHour} credenciais reveladas por hora atingido. Aguarde um pouco ou peça a um gerente.`,
+        `Limite de ${perHour} credenciais diferentes por hora atingido. As que você já abriu nesta hora continuam liberadas; para outras, aguarde um pouco ou peça a um gerente.`,
         HttpStatus.TOO_MANY_REQUESTS,
       );
   }

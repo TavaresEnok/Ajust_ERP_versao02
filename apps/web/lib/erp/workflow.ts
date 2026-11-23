@@ -50,7 +50,9 @@ export function workflowWarnings(definition: WorkflowDefinition) {
           edge.source === node.id && !['true', 'false'].includes(edge.label?.toLowerCase() || ''),
       )
     )
-      warnings.push(`O motor exige uma saída true/false na condição ${node.id}.`);
+      warnings.push(
+        `Rotule as saídas da condição ${node.id} como "true" ou "false": saída sem esse rótulo nunca é seguida e o servidor recusa salvar.`,
+      );
     if (
       node.type === 'condition' &&
       node.config.operator &&
@@ -60,13 +62,11 @@ export function workflowWarnings(definition: WorkflowDefinition) {
         `O operador de ${node.id} não é implementado; o motor original retorna true por padrão.`,
       );
   }
-  if (
-    definition.nodes.some((node) =>
-      ['cond_no_analyst', 'start_implantacao', 'os_critica'].includes(node.subtype),
-    )
-  )
+  if (definition.nodes.some((node) => node.subtype === 'start_implantacao'))
+    warnings.push('O gatilho "Implantação" dispara só para O.S. do tipo Instalação.');
+  if (definition.nodes.some((node) => node.subtype === 'cond_no_analyst'))
     warnings.push(
-      'Subtipos legados não implementam todos os filtros sugeridos pelo nome no motor do ZIP. Revise a regra original antes de ativar.',
+      'A condição "Sem analista" é verdadeira só quando a O.S. não tem responsável (sem analista atribuído nem nome de analista).',
     );
   return warnings;
 }
@@ -117,6 +117,13 @@ export function validateWorkflow(definition: WorkflowDefinition) {
           )
         )
           throw new Error('Identifique as duas saídas da condição como true e false.');
+        if (
+          outgoing.length === 1 &&
+          !['true', 'false'].includes(outgoing[0].label?.toLowerCase() || '')
+        )
+          throw new Error(
+            'Rotule a saída única da condição como true ou false; sem rótulo ela nunca é seguida.',
+          );
       }
     } else if (outgoing.length > 1)
       throw new Error('Gatilhos e ações aceitam no máximo uma saída.');

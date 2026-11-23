@@ -46,11 +46,14 @@ export function WorkflowVersions({
   id,
   definition,
   current,
+  dirty = false,
   onSaved,
 }: {
   id?: string;
   definition: WorkflowDefinition;
   current: { name: string; description?: string };
+  /** Há edição não salva no editor: reverter vai descartá-la. */
+  dirty?: boolean;
   onSaved: () => Promise<void>;
 }) {
   const versions = Array.isArray(definition.versions)
@@ -169,7 +172,12 @@ export function WorkflowVersions({
                         {id && (
                           <OperationControl
                             title={`Reverter à versão ${version.version}`}
-                            description="O servidor restaura este snapshot e registra a alteração. Rascunhos não enviados serão substituídos após a confirmação."
+                            description={
+                              'O servidor restaura este snapshot e registra a alteração.' +
+                              (dirty
+                                ? ' ATENÇÃO: há alterações não salvas nesta automação; ao confirmar, elas serão descartadas. Para mantê-las, feche esta janela e salve antes.'
+                                : ' Rascunhos não enviados serão substituídos após a confirmação.')
+                            }
                             path={`/workflows/${encodeURIComponent(id)}/rollback`}
                             body={{ version: version.version }}
                             roles={['super_admin', 'gerente']}

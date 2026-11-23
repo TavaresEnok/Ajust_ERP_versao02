@@ -1,4 +1,4 @@
-import { BadRequestException, Inject, Injectable } from '@nestjs/common';
+import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
 import { Priority, ServiceOrderType } from '@prisma/client';
 import { fromZonedTime, toZonedTime } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
@@ -131,15 +131,32 @@ export class SlaEngineService {
         data.endTime ?? dayConfig.endTime,
       );
     }
-    return this.prisma.businessCalendarException.create({
-      data: {
-        tenantId,
-        date: exceptionDate,
-        isWorkDay: data.isWorkDay ?? false,
-        startTime: data.startTime ?? null,
-        endTime: data.endTime ?? null,
-        reason: data.reason ?? null,
-      },
+    try {
+      return await this.prisma.businessCalendarException.create({
+        data: {
+          tenantId,
+          date: exceptionDate,
+          isWorkDay: data.isWorkDay ?? false,
+          startTime: data.startTime ?? null,
+          endTime: data.endTime ?? null,
+          reason: data.reason ?? null,
+        },
+      });
+    } catch (error) {
+      if ((error as { code?: string }).code === 'P2002')
+        throw new ConflictException(
+          `Já existe uma exceção cadastrada em ${date}. Remova a atual antes de cadastrar outra.`,
+        );
+      throw error;
+    }
+  }
+
+  /** Feriados e dias especiais, do mais recente para o mais antigo. */
+  async listCalendarExceptions(tenantId: string) {
+    return this.prisma.businessCalendarException.findMany({
+      where: { tenantId },
+      orderBy: { date: 'desc' },
+      take: 500,
     });
   }
 

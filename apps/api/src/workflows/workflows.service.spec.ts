@@ -252,6 +252,9 @@ describe('WorkflowsService - evaluateCondition', () => {
       position: { x: 0, y: 0 },
     };
     expect((svc as any).evaluateCondition(node, {})).toBe(true);
+    // "Sem analista" é falsa quando a O.S. tem responsável.
+    expect((svc as any).evaluateCondition(node, { analystName: 'Ana' })).toBe(false);
+    expect((svc as any).evaluateCondition(node, { assigneeUserId: 'u1' })).toBe(false);
   });
 });
 

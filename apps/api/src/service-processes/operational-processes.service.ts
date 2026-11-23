@@ -20,6 +20,7 @@ import { storedProcessDefinition, storedProcessRecord } from './stored-process-r
 import {
   OperationalDefinition,
   OperationalDefinitionSchema,
+  assertPublishable,
   validateOperational,
 } from './operational-definition';
 import {
@@ -28,12 +29,19 @@ import {
   needsClosingApproval,
   statusDates,
 } from '../service-orders/service-order-rules';
-import { ServiceOrderLifecycleService } from '../service-orders/service-order-lifecycle.service';
+import {
+  ServiceOrderLifecycleService,
+  workflowOrderPayload,
+} from '../service-orders/service-order-lifecycle.service';
+import { PROCESS_PAUSE_PREFIX, deadlineAfterStop } from '../service-orders/sla-pause';
 import { nextOrderProtocolInTransaction } from '../service-orders/order-protocol';
+import { writeOccurrenceStatus } from '../service-orders/occurrence-sync';
 
 type Tx = Prisma.TransactionClient;
 const json = (v: unknown) => JSON.parse(JSON.stringify(v)) as Prisma.InputJsonValue;
 const managers = ['super_admin', 'gerente'];
+/** Tentativas automáticas de um evento de fechamento (~2 min entre elas). */
+const MAX_EVENT_ATTEMPTS = 10;
 export type OperationalAction = {
   expectedOrderVersion?: number;
   expectedVersion: number;
@@ -56,6 +64,9 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     @Inject(ServiceOrderLifecycleService)
     private readonly lifecycle?: ServiceOrderLifecycleService,
   ) {}
+  private get sla() {
+    return new SlaEngineService(this.prisma);
+  }
   inTransaction(tx: Prisma.TransactionClient) {
     return new OperationalProcessesService(transactionScope(tx), this.automations, this.lifecycle);
   }
@@ -102,6 +113,25 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     const def = input.publish
       ? validateOperational(input.definition)
       : OperationalDefinitionSchema.parse(input.definition);
+    if (input.publish) {
+      assertPublishable(def);
+      // Responsável fixo precisa ser alguém ativo da equipe, com um dos perfis da etapa.
+      for (const node of def.nodes.filter((n) => n.assigneeUserId)) {
+        const member = await this.prisma.userTenant.findUnique({
+          where: { userId_tenantId: { tenantId, userId: node.assigneeUserId! } },
+          include: { user: true, role: true },
+        });
+        if (
+          !member ||
+          member.user.deletedAt ||
+          member.user.status !== 'ACTIVE' ||
+          !node.roles.includes(member.role.code as never)
+        )
+          throw new BadRequestException(
+            `O responsável fixo da etapa "${node.name}" não está ativo na equipe ou não tem um dos perfis da etapa. Escolha outra pessoa ou deixe na fila do setor.`,
+          );
+      }
+    }
     return this.prisma.$transaction(async (tx) => {
       const current = await tx.serviceProcessTemplate.findUnique({
         where: { tenantId_code: { tenantId, code: def.code } },
@@ -266,9 +296,13 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
 
   async recordCompleted(tenantId: string, actorId: string, orderId: string, tx: Tx) {
     const order = await tx.serviceOrder.findFirstOrThrow({ where: { tenantId, id: orderId } });
-    const template = await tx.serviceProcessTemplate.findUniqueOrThrow({
+    const template = await tx.serviceProcessTemplate.findUnique({
       where: { tenantId_code: { tenantId, code: 'AJUST_SIMPLES' } },
     });
+    if (!template)
+      throw new BadRequestException(
+        'O registro já concluído exige o fluxo padrão AJUST_SIMPLES publicado. Peça à gestão para publicá-lo.',
+      );
     const definition = validateOperational(storedProcessDefinition(template.definition));
     if (
       !template.publishedAt ||
@@ -441,19 +475,12 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
       });
       if (!lock.count) throw new ConflictException('Ativação concorrente.');
       const def = validateOperational(storedProcessDefinition(item.definition));
+      // Prazo novo a partir da ativação, pela política de SLA e em horário útil, como toda O.S.
+      const policy = await this.sla.findApplicablePolicy(tenantId, root.priority, root.type);
+      const deadlineAt = await this.sla.calculateTargetDate(new Date(), policy.hours, tenantId);
+      await tx.serviceOrder.update({ where: { id: root.id }, data: { deadlineAt } });
       await this.pump(tx, id, tenantId, def, [def.start]);
-      await tx.serviceOrder.update({
-        where: { id: root.id },
-        data: {
-          deadlineAt: new Date(
-            Date.now() + def.nodes.find((n) => n.id === def.start)!.slaMinutes * 60000,
-          ),
-        },
-      });
-      await tx.occurrence.update({
-        where: { id: item.occurrenceId },
-        data: { status: 'EM_EXECUCAO', closedAt: null },
-      });
+      await writeOccurrenceStatus(tx, tenantId, item.occurrenceId);
       await this.audit(tx, tenantId, actorId, 'workflow_operational_activate_source', id, {
         rootOrderId: root.id,
         stageHistoryReconstructed: false,
@@ -595,24 +622,124 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
           } else if (command.action === 'pause') {
             if (item.status !== 'ACTIVE')
               throw new BadRequestException('Somente processo ativo pode ser pausado.');
+            const now = new Date();
+            // Pausar o fluxo para o relógio do SLA de cada O.S. aberta, como a pausa da O.S.
+            const open = await tx.serviceOrder.findMany({
+              where: {
+                tenantId,
+                processInstanceId: id,
+                pausedAt: null,
+                slaEligible: true,
+                status: { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] },
+              },
+            });
+            for (const order of open) {
+              await tx.serviceOrder.update({
+                where: { id: order.id },
+                data: {
+                  pausedAt: now,
+                  pauseReason: `${PROCESS_PAUSE_PREFIX}${command.reason}`,
+                  originalDeadlineAt: order.originalDeadlineAt ?? order.deadlineAt,
+                  version: { increment: 1 },
+                },
+              });
+              await tx.slaAuditEvent.create({
+                data: {
+                  tenantId,
+                  orderId: order.id,
+                  eventType: 'PAUSED',
+                  deadlineAt: order.deadlineAt,
+                  reason: command.reason,
+                  metadata: {
+                    actorId,
+                    trigger: 'PROCESS_PAUSE',
+                    instanceId: id,
+                    pausedAt: now.toISOString(),
+                    previousDeadline: order.deadlineAt.toISOString(),
+                  },
+                },
+              });
+              await tx.serviceOrderOccurrence.create({
+                data: {
+                  serviceOrderId: order.id,
+                  actorUserId: actorId,
+                  message: `Fluxo pausado; SLA parado: ${command.reason}`,
+                  isCustomerVisible: false,
+                },
+              });
+            }
             await tx.serviceProcessInstance.update({
               where: { id },
               data: {
                 status: 'PAUSED',
-                state: json({ ...state, pausedAt: new Date().toISOString() }),
+                state: json({ ...state, pausedAt: now.toISOString() }),
               },
             });
           } else if (command.action === 'resume') {
             if (item.status !== 'PAUSED')
               throw new BadRequestException('Processo não está pausado.');
-            const delta = Date.now() - new Date(String(state.pausedAt)).getTime();
+            const now = new Date();
+            // Retoma só as pausas que o próprio fluxo aplicou; pausa manual da O.S. continua.
+            const paused = await tx.serviceOrder.findMany({
+              where: {
+                tenantId,
+                processInstanceId: id,
+                pausedAt: { not: null },
+                pauseReason: { startsWith: PROCESS_PAUSE_PREFIX },
+              },
+            });
+            for (const order of paused) {
+              const { minutes, deadlineAt } = await deadlineAfterStop(
+                this.sla,
+                tenantId,
+                order.pausedAt!,
+                order.deadlineAt,
+                now,
+              );
+              await tx.serviceOrder.update({
+                where: { id: order.id },
+                data: {
+                  pausedAt: null,
+                  pauseReason: null,
+                  deadlineAt,
+                  version: { increment: 1 },
+                },
+              });
+              await tx.slaAuditEvent.create({
+                data: {
+                  tenantId,
+                  orderId: order.id,
+                  eventType: 'RESUMED',
+                  deadlineAt,
+                  reason: command.reason,
+                  metadata: {
+                    actorId,
+                    trigger: 'PROCESS_RESUME',
+                    instanceId: id,
+                    pausedAt: order.pausedAt!.toISOString(),
+                    previousDeadline: order.deadlineAt.toISOString(),
+                    pausedBusinessMinutes: Math.round(minutes),
+                  },
+                },
+              });
+              await tx.serviceOrderOccurrence.create({
+                data: {
+                  serviceOrderId: order.id,
+                  actorUserId: actorId,
+                  message: `Fluxo retomado; ${Math.round(minutes)} minutos úteis em pausa. ${command.reason}`,
+                  isCustomerVisible: false,
+                },
+              });
+            }
+            // O prazo da etapa acompanha o prazo da O.S. dela.
             for (const step of await tx.serviceProcessStep.findMany({
-              where: { instanceId: id, status: 'ACTIVE' },
+              where: { instanceId: id, status: 'ACTIVE', orderId: { not: null } },
             })) {
-              if (step.dueAt)
+              const order = await tx.serviceOrder.findUnique({ where: { id: step.orderId! } });
+              if (order)
                 await tx.serviceProcessStep.update({
                   where: { id: step.id },
-                  data: { dueAt: new Date(step.dueAt.getTime() + delta) },
+                  data: { dueAt: order.deadlineAt },
                 });
             }
             delete state.pausedAt;
@@ -637,7 +764,13 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
             for (const order of orders) {
               await tx.serviceOrder.update({
                 where: { id: order.id },
-                data: { status: 'CANCELADA', canceledAt: new Date(), version: { increment: 1 } },
+                data: {
+                  status: 'CANCELADA',
+                  canceledAt: new Date(),
+                  pausedAt: null,
+                  pauseReason: null,
+                  version: { increment: 1 },
+                },
               });
               await tx.serviceOrderStatusEvent.create({
                 data: {
@@ -678,6 +811,30 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
               });
               if (count >= def.maxVisits)
                 throw new BadRequestException('Limite de reaberturas atingido. Abra nova demanda.');
+              // O período encerrado não consome prazo: a O.S. volta com o tempo útil que restava.
+              const stoppedAt =
+                link.order.resolvedAt ?? link.order.closedAt ?? link.order.canceledAt;
+              const reopened =
+                link.order.slaEligible && !link.order.pausedAt && stoppedAt
+                  ? await deadlineAfterStop(this.sla, tenantId, stoppedAt, link.order.deadlineAt)
+                  : null;
+              const deadlineAt = reopened?.deadlineAt ?? link.order.deadlineAt;
+              if (reopened && reopened.minutes > 0)
+                await tx.slaAuditEvent.create({
+                  data: {
+                    tenantId,
+                    orderId: link.orderId,
+                    eventType: 'REOPENED',
+                    deadlineAt,
+                    reason: command.reason,
+                    metadata: {
+                      actorId,
+                      instanceId: id,
+                      previousDeadline: link.order.deadlineAt.toISOString(),
+                      pausedBusinessMinutes: Math.round(reopened.minutes),
+                    },
+                  },
+                });
               await tx.serviceProcessStep.create({
                 data: {
                   tenantId,
@@ -686,12 +843,16 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
                   orderId: link.orderId,
                   attempt: count + 1,
                   enteredAt: new Date(),
-                  dueAt: new Date(Date.now() + n.slaMinutes * 60000),
+                  dueAt: deadlineAt,
                 },
               });
               await tx.serviceOrder.update({
                 where: { id: link.orderId },
                 data: {
+                  deadlineAt,
+                  ...(reopened && reopened.minutes > 0
+                    ? { originalDeadlineAt: link.order.originalDeadlineAt ?? link.order.deadlineAt }
+                    : {}),
                   status: 'EM_ANALISE',
                   closedAt: null,
                   canceledAt: null,
@@ -865,6 +1026,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
                   ...(demonstration ? { demonstration: true } : {}),
                   slaPolicyConfirmed: 'id' in policy,
                   slaHours: policy.hours,
+                  slaSource: 'policy',
                 },
                 type: node.serviceType,
                 priority: root.priority,
@@ -911,8 +1073,10 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
               !['ACTIVE', 'BLOCKED'].includes(member.user.status) ||
               !node.roles.includes(member.role.code as never)
             )
-              throw new BadRequestException(`Responsável inválido no bloco ${node.name}.`);
-            assigned = { assigneeUserId: member.user.id, analystName: member.user.name };
+              // Responsável fixo que saiu da equipe ou mudou de perfil não pode travar
+              // execuções em andamento: a etapa segue com o responsável atual da O.S.
+              assigned = undefined;
+            else assigned = { assigneeUserId: member.user.id, analystName: member.user.name };
           }
           await tx.serviceOrder.update({
             where: { id: orderId },
@@ -1006,11 +1170,38 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     const blocked = needsClosingApproval(order, now) && !(await hasCurrentApproval(tx, order));
     if (blocked && order.status === 'RESOLVIDA') return;
     const target = blocked ? 'RESOLVIDA' : 'FECHADA';
+    // Encerrar com o SLA pausado: a pausa termina agora e o tempo útil parado volta ao prazo,
+    // para a entrega não contar como atrasada por causa da pausa.
+    const resumed = order.pausedAt
+      ? await deadlineAfterStop(this.sla, tenantId, order.pausedAt, order.deadlineAt, now)
+      : null;
     const changed = await tx.serviceOrder.updateMany({
       where: { id: orderId, version: order.version },
-      data: { ...statusDates(order, target, now), status: target, version: { increment: 1 } },
+      data: {
+        ...statusDates(order, target, now),
+        ...(resumed ? { pausedAt: null, pauseReason: null, deadlineAt: resumed.deadlineAt } : {}),
+        status: target,
+        version: { increment: 1 },
+      },
     });
     if (changed.count !== 1) throw new ConflictException('O.S. alterada durante a conclusão.');
+    if (resumed)
+      await tx.slaAuditEvent.create({
+        data: {
+          tenantId,
+          orderId,
+          eventType: 'RESUMED',
+          deadlineAt: resumed.deadlineAt,
+          reason,
+          metadata: {
+            automatic: true,
+            trigger: 'PROCESS_CLOSE',
+            instanceId,
+            previousDeadline: order.deadlineAt.toISOString(),
+            pausedBusinessMinutes: Math.round(resumed.minutes),
+          },
+        },
+      });
     await tx.serviceOrderOccurrence.create({
       data: {
         serviceOrderId: orderId,
@@ -1055,8 +1246,9 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
         eventKey: `${instanceId}:${stepId}:${orderId}:closed`,
         type: 'order_closed',
         status: demo ? 'DEMO_RECORDED' : 'PENDING',
+        // Só o recorte público da O.S.: este payload vai para automações e webhooks.
         payload: json({
-          ...order,
+          ...workflowOrderPayload(order),
           previousStatus: order.status,
           status: 'FECHADA',
           operationalProcess: true,
@@ -1065,28 +1257,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     });
   }
   private async reconcileOccurrence(tx: Tx, tenantId: string, occurrenceId: string) {
-    const pending = await tx.serviceProcessInstance.count({
-      where: {
-        tenantId,
-        occurrenceId,
-        status: { notIn: ['COMPLETED', 'CANCELED', 'HISTORICAL', 'SUPERSEDED'] },
-      },
-    });
-    const orders = await tx.serviceOrder.count({
-      where: {
-        tenantId,
-        occurrenceId,
-        deletedAt: null,
-        status: { notIn: ['FECHADA', 'CANCELADA'] },
-      },
-    });
-    await tx.occurrence.update({
-      where: { id: occurrenceId },
-      data: {
-        status: pending || orders ? 'EM_EXECUCAO' : 'ENCERRADA',
-        closedAt: pending || orders ? null : new Date(),
-      },
-    });
+    await writeOccurrenceStatus(tx, tenantId, occurrenceId);
   }
   private audit(
     tx: Tx,
@@ -1117,7 +1288,9 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
           OR: [
             { status: 'PENDING' },
             { status: 'PROCESSING', claimedAt: { lt: stale } },
-            { status: 'FAILED', claimedAt: { lt: stale } },
+            // Falha repetida para de ser retentada sozinha (ex.: destino de webhook fora do ar
+            // por horas); fica FAILED para a gestão reenviar pela tela do processo.
+            { status: 'FAILED', claimedAt: { lt: stale }, attempts: { lt: MAX_EVENT_ATTEMPTS } },
           ],
         },
         take: 20,

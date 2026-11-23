@@ -72,11 +72,11 @@ describe('Order annotation corrections and historical completion', () => {
     expect(tx.occurrenceAnnotation.updateMany).not.toHaveBeenCalled();
   });
   it.each([
-    [1, 'Esta O.S. está numa etapa de processo.'],
-    [0, 'A O.S. já está nesta etapa.'],
+    [1, 'CANCELADA', 'Esta O.S. está numa etapa de processo.'],
+    [0, 'RESOLVIDA', 'Não é possível passar de Aberta para Resolvida.'],
   ])(
-    'só libera a transição manual de O.S. com processo quando não há etapa ativa (%s ativas)',
-    async (activeSteps, message) => {
+    'com fluxo, encerrar ou cancelar só sem etapa ativa (%s ativas → %s)',
+    async (activeSteps, toStatus, message) => {
       const { service, prisma } = fixture();
       prisma.serviceOrder.findFirst.mockResolvedValue({
         id: 'order',
@@ -87,7 +87,7 @@ describe('Order annotation corrections and historical completion', () => {
       (prisma as any).serviceProcessStep = { count: jest.fn().mockResolvedValue(activeSteps) };
       await expect(
         service.transition('tenant', 'order', 'actor', 'analista', {
-          toStatus: 'ABERTA' as never,
+          toStatus: toStatus as never,
           reason: 'Teste',
         }),
       ).rejects.toThrow(message);
@@ -96,4 +96,21 @@ describe('Order annotation corrections and historical completion', () => {
       });
     },
   );
+  it('com fluxo, mudar entre estados de trabalho não depende da etapa', async () => {
+    const { service, prisma } = fixture();
+    prisma.serviceOrder.findFirst.mockResolvedValue({
+      id: 'order',
+      tenantId: 'tenant',
+      status: 'EM_ANALISE',
+      processInstanceId: 'process',
+    });
+    (prisma as any).serviceProcessStep = { count: jest.fn().mockResolvedValue(1) };
+    await expect(
+      service.transition('tenant', 'order', 'actor', 'analista', {
+        toStatus: 'EM_ANALISE' as never,
+        reason: 'Teste',
+      }),
+    ).rejects.toThrow('A O.S. já está nesta etapa.');
+    expect((prisma as any).serviceProcessStep.count).not.toHaveBeenCalled();
+  });
 });

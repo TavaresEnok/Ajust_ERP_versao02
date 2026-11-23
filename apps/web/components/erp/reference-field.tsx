@@ -46,6 +46,7 @@ export function ReferenceField({
   const [open, setOpen] = useState(false);
   const [active, setActive] = useState(0);
   const box = useRef<HTMLDivElement>(null);
+  const hidden = useRef<HTMLInputElement>(null);
   const listId = useId();
   useEffect(() => {
     const close = (e: PointerEvent) => {
@@ -159,13 +160,20 @@ export function ReferenceField({
       setOpen(false);
       setSearch('');
       document.getElementById(id)?.focus();
+      // O campo é controlado: avisa o formulário de que houve alteração (confirmação de descarte).
+      if (option.value !== selected)
+        queueMicrotask(() => hidden.current?.dispatchEvent(new Event('input', { bubbles: true })));
     };
     return (
       <div
         ref={box}
         className="relative"
         onKeyDown={(e) => {
-          if (e.key === 'Escape') {
+          if (e.key === 'Escape' && open) {
+            // Fecha só a lista; a janela que contém o formulário continua aberta.
+            e.preventDefault();
+            e.stopPropagation();
+            e.nativeEvent.stopImmediatePropagation();
             setOpen(false);
             document.getElementById(id)?.focus();
           }
@@ -187,11 +195,19 @@ export function ReferenceField({
           value={selected}
           required={field.required}
           onChange={() => {}}
+          ref={hidden}
           tabIndex={-1}
           aria-label={`${field.label} selecionado`}
           className="sr-only"
-          onInvalid={() => {
-            setOpen(true);
+          onInvalid={(e) => {
+            // Com vários obrigatórios vazios, abre só a lista do primeiro campo inválido.
+            const first = Array.from(e.currentTarget.form?.elements || []).find(
+              (element) =>
+                'willValidate' in element &&
+                (element as HTMLInputElement).willValidate &&
+                !(element as HTMLInputElement).validity.valid,
+            );
+            if (!first || first === e.currentTarget) setOpen(true);
           }}
         />
         <Button

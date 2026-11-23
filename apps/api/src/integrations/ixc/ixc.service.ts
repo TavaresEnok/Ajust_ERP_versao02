@@ -18,7 +18,8 @@ import {
 import { EventsGateway } from '../../events.gateway';
 import { decryptSecret, encryptSecret } from '../../common/secrets.crypto';
 import { SlaEngineService } from '../../sla/sla-engine.service';
-import { nextOrderProtocol } from '../../service-orders/order-protocol';
+import { deadlineAfterStop } from '../../service-orders/sla-pause';
+import { nextOrderProtocolInTransaction } from '../../service-orders/order-protocol';
 import { ServiceOrdersService } from '../../service-orders/service-orders.service';
 import { ServiceOrderLifecycleService } from '../../service-orders/service-order-lifecycle.service';
 import {
@@ -301,6 +302,17 @@ export class IxcService {
         }
         if (target === existing.status) target = null;
       }
+      // Encerrar pelo IXC com o SLA pausado: a pausa termina agora e o tempo útil parado volta
+      // ao prazo, para a entrega não contar como atrasada por causa da pausa.
+      const resumed =
+        target && !isActiveStatus(target) && existing.pausedAt
+          ? await deadlineAfterStop(
+              this.slaEngine,
+              input.tenantId,
+              existing.pausedAt,
+              existing.deadlineAt,
+            )
+          : null;
       await this.prisma.$transaction(async (tx) => {
         const changed = await tx.serviceOrder.updateMany({
           where: { id: existing.id, version: existing.version },
@@ -309,6 +321,9 @@ export class IxcService {
               ? { sourceMetadata: { ...previous, ixcUpdatedAt: incoming } as Prisma.InputJsonValue }
               : {}),
             ...(target ? { ...statusDates(existing, target), status: target } : {}),
+            ...(resumed
+              ? { pausedAt: null, pauseReason: null, deadlineAt: resumed.deadlineAt }
+              : {}),
             title: input.title || existing.title,
             description: input.description || existing.description,
             version: { increment: 1 },
@@ -316,11 +331,28 @@ export class IxcService {
         });
         if (changed.count !== 1)
           throw new ConflictException('O.S. alterada durante a sincronização.');
+        if (resumed)
+          await tx.slaAuditEvent.create({
+            data: {
+              tenantId: input.tenantId,
+              orderId: existing.id,
+              eventType: 'RESUMED',
+              deadlineAt: resumed.deadlineAt,
+              reason: `IXC ${input.eventType}`,
+              metadata: {
+                automatic: true,
+                trigger: 'IXC_STATUS',
+                previousDeadline: existing.deadlineAt.toISOString(),
+                pausedBusinessMinutes: Math.round(resumed.minutes),
+              },
+            },
+          });
         await tx.serviceOrderOccurrence.create({
           data: {
             serviceOrderId: existing.id,
             sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
             message: `Webhook IXC recebido (${input.eventType})${input.status ? ` status=${input.status}` : ''}.${note}`,
+            isCustomerVisible: false,
           },
         });
         if (target) {
@@ -409,7 +441,6 @@ export class IxcService {
       return { orderId: first?.id, operation: 'created' as const };
     }
 
-    const protocol = await this.buildProtocol(input.tenantId);
     const type = input.type || ServiceOrderType.AUDITORIA;
     const priority = input.priority || Priority.NORMAL;
     const policy = await this.slaEngine.findApplicablePolicy(input.tenantId, priority, type);
@@ -419,26 +450,30 @@ export class IxcService {
       input.tenantId,
     );
 
-    const created = await this.prisma.serviceOrder.create({
-      data: {
-        tenantId: input.tenantId,
-        protocol,
-        externalProtocol: input.externalProtocol || null,
-        sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
-        type,
-        priority,
-        status: mappedStatus || 'ABERTA',
-        title: input.title || `IXC ${input.eventType}`,
-        description: input.description || 'Criada via webhook IXC.',
-        deadlineAt,
-        occurrences: {
-          create: {
-            sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
-            message: `OS criada via webhook IXC (${input.eventType}).`,
+    // Numeração com a mesma trava do motor de fluxos (C-067), para não colidir com O.S. derivadas.
+    const created = await this.prisma.$transaction(async (tx) =>
+      tx.serviceOrder.create({
+        data: {
+          tenantId: input.tenantId,
+          protocol: await nextOrderProtocolInTransaction(tx, input.tenantId),
+          externalProtocol: input.externalProtocol || null,
+          sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
+          type,
+          priority,
+          status: mappedStatus || 'ABERTA',
+          title: input.title || `IXC ${input.eventType}`,
+          description: input.description || 'Criada via webhook IXC.',
+          deadlineAt,
+          occurrences: {
+            create: {
+              sourceSystem: input.eventType === 'POLLING' ? 'POLLING' : 'WEBHOOK',
+              message: `OS criada via webhook IXC (${input.eventType}).`,
+              isCustomerVisible: false,
+            },
           },
         },
-      },
-    });
+      }),
+    );
 
     this.eventsGateway.emitTenantEvent(input.tenantId, 'service_order.synced', {
       tenantId: input.tenantId,
@@ -527,11 +562,6 @@ export class IxcService {
     if (incomingBuf.length !== expectedBuf.length || !timingSafeEqual(incomingBuf, expectedBuf)) {
       throw new ForbiddenException('Invalid webhook signature.');
     }
-  }
-
-  private async buildProtocol(tenantId: string) {
-    // Mesmo gerador da API principal (C-067); a contagem antiga colidia com a sequência.
-    return nextOrderProtocol(this.prisma, tenantId);
   }
 
   private toPublicIntegration(integration: ProviderIntegration): PublicProviderIntegration {

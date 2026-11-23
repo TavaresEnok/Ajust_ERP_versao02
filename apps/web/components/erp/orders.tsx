@@ -25,7 +25,7 @@ import { Button } from '@/components/ui/button';
 import { Textarea } from '@/components/ui/textarea';
 import { Field, FieldLabel } from '@/components/ui/field';
 import type { Order } from '@/lib/demo-data';
-import { exportCsv, useOrders } from '@/lib/demo-store';
+import { useOrders } from '@/lib/demo-store';
 import { cn } from '@/lib/utils';
 import {
   PageHeading,
@@ -40,8 +40,10 @@ import { OrderForm } from './order-form';
 import { useVisualSource, useRouteBase } from '@/lib/erp/visual-data';
 import { useErp, useErpQuery } from '@/lib/erp/gateway';
 import {
-  nextStatusOptions,
+  errorMessage,
+  FLOW_TRANSITION_NOTE,
   orderStatuses,
+  transitionOptions,
   orderTypes,
   priorities,
   queryPath,
@@ -53,6 +55,7 @@ import { QueryState } from './contract-form';
 import { QuickDispatchDialog } from './quick-dispatch-dialog';
 import { downloadOrderPdf } from '@/lib/erp/order-pdf';
 import { AnalystOrderWork } from './analyst-order-work';
+import { saveDownload } from './export-workspace';
 import { deadlineSituation } from '@/lib/erp/analyst-workspace';
 
 const deadlineFilters = {
@@ -216,7 +219,8 @@ export function OrdersPage({
   analyst?: boolean;
 }) {
   const orderBase = customer ? '/cliente' : analyst ? '/analista' : '/gerencia';
-  const { scope } = useErp();
+  const { scope, transport } = useErp();
+  const [exporting, setExporting] = useState(false);
   const canQuickDispatch =
     !customer && !analyst && (!scope || ['super_admin', 'gerente'].includes(scope.role));
   const [quickDispatchOpen, setQuickDispatchOpen] = useState(false);
@@ -369,13 +373,22 @@ export function OrdersPage({
       : undefined;
   const pages = total !== undefined ? Math.max(1, Math.ceil(total / 8)) : page;
   const current = page;
-  function download() {
-    exportCsv(
-      'ajust-ordens',
-      ['Protocolo', 'Título', 'Provedor', 'Status', 'Prioridade', 'Responsável'],
-      filtered.map((o) => [o.id, o.title, o.provider, o.status, o.priority, o.analyst]),
-    );
-    toast.success('Relatório CSV exportado');
+  // Exporta o conjunto filtrado inteiro (todas as páginas), com os mesmos filtros da tela.
+  async function download() {
+    if (invalidRange) return;
+    setExporting(true);
+    try {
+      await saveDownload(
+        transport?.downloadWithMetadata || transport?.download,
+        queryPath('/service-orders/export/csv', filterValues),
+        'ajust-ordens.csv',
+      );
+      toast.success('Exportação das ordens filtradas concluída.');
+    } catch (error) {
+      toast.error(errorMessage(error));
+    } finally {
+      setExporting(false);
+    }
   }
   return (
     <>
@@ -408,9 +421,13 @@ export function OrdersPage({
           </Button>
         )}
         {!analyst && (
-          <Button variant="outline" onClick={download}>
+          <Button
+            variant="outline"
+            disabled={exporting || invalidRange}
+            onClick={() => void download()}
+          >
             <ArrowDownToLine data-icon="inline-start" />
-            Exportar
+            {exporting ? 'Exportando…' : 'Exportar'}
           </Button>
         )}
         <OrderForm />
@@ -484,56 +501,69 @@ export function OrdersPage({
       {summary.error && <QueryState error={summary.error} onRetry={() => void summary.mutate()} />}
       <section className="panel">
         {!customer && (
-          <div
-            className="flex flex-wrap items-center gap-2 border-b border-border px-5 py-3"
-            aria-label="Situação das ordens"
-          >
-            {Object.entries({
-              active: 'Pendentes',
-              completed: 'Concluídas',
-              all: 'Todas as ordens',
-            }).map(([key, label]) => (
-              <Button
-                key={key}
-                size="sm"
-                variant={situation === key ? 'secondary' : 'ghost'}
-                aria-pressed={situation === key}
-                onClick={() => replaceFilters({ situation: key, deadline: null, status: null })}
-              >
-                {label}
-              </Button>
-            ))}
-          </div>
-        )}
-        {!customer && (
-          <div
-            className="flex items-center gap-2 overflow-x-auto border-b border-border px-5 py-3 sm:flex-wrap [&>*]:shrink-0"
-            aria-label="Filtrar ordens por prazo"
-          >
-            <span className="mr-1 text-xs text-muted-foreground">Prazo</span>
-            {Object.entries({ '': 'Todas', ...deadlineFilters }).map(([key, label]) => (
-              <Button
-                key={key}
-                size="sm"
-                variant={deadline === key ? 'secondary' : 'ghost'}
-                aria-pressed={deadline === key}
-                onClick={() => {
-                  setDeadline(key);
-                  setStatus('Todos');
-                  setPage(1);
-                }}
-              >
-                {label}
-              </Button>
-            ))}
+          <div className="flex flex-col border-b border-border lg:flex-row lg:items-center lg:justify-between">
+            <div
+              className="flex items-center gap-2 overflow-x-auto border-b border-border px-5 py-3 sm:flex-wrap lg:border-b-0 [&>*]:shrink-0"
+              aria-label="Situação das ordens"
+            >
+              {Object.entries({
+                active: 'Pendentes',
+                completed: 'Concluídas',
+                all: 'Todas as ordens',
+              }).map(([key, label]) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={situation === key ? 'secondary' : 'ghost'}
+                  aria-pressed={situation === key}
+                  onClick={() => replaceFilters({ situation: key, deadline: null, status: null })}
+                >
+                  {label}
+                </Button>
+              ))}
+              {canQuickDispatch && (
+                <Button
+                  size="sm"
+                  variant={status === orderStatuses.RESOLVIDA ? 'secondary' : 'ghost'}
+                  aria-pressed={status === orderStatuses.RESOLVIDA}
+                  title="O.S. resolvidas que aguardam o fechamento ou a aprovação da gestão"
+                  onClick={() =>
+                    replaceFilters({ status: 'RESOLVIDA', situation: 'all', deadline: null })
+                  }
+                >
+                  Aguardando aprovação
+                </Button>
+              )}
+            </div>
+            <div
+              className="flex items-center gap-2 overflow-x-auto px-5 py-3 sm:flex-wrap [&>*]:shrink-0"
+              aria-label="Filtrar ordens por prazo"
+            >
+              <span className="mr-1 text-xs text-muted-foreground">Prazo</span>
+              {Object.entries({ '': 'Todas', ...deadlineFilters }).map(([key, label]) => (
+                <Button
+                  key={key}
+                  size="sm"
+                  variant={deadline === key ? 'secondary' : 'ghost'}
+                  aria-pressed={deadline === key}
+                  onClick={() => {
+                    setDeadline(key);
+                    setStatus('Todos');
+                    setPage(1);
+                  }}
+                >
+                  {label}
+                </Button>
+              ))}
+            </div>
           </div>
         )}
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border px-5 py-4">
-          <div className="flex flex-wrap items-center gap-3">
-            <div className="flex items-center gap-2 rounded-md border border-border px-3 py-2">
-              <Search className="size-3.5 text-muted-foreground" />
+          <div className="flex w-full flex-wrap items-center gap-3 sm:w-auto">
+            <div className="flex w-full items-center gap-2 rounded-md border border-border px-3 py-2 sm:w-auto">
+              <Search className="size-3.5 shrink-0 text-muted-foreground" />
               <input
-                className="w-44 bg-transparent text-[11px] outline-none"
+                className="w-full bg-transparent text-xs outline-none sm:w-52"
                 placeholder="Buscar ordem ou provedor..."
                 aria-label="Buscar ordens"
                 value={search}
@@ -902,10 +932,14 @@ export function OrderDetail({
               <Priority value={String(order.priority)} />
             </div>
             {scope?.role !== 'analista' &&
-              (!raw?.processInstanceId ? (
+              Object.keys(transitionOptions(raw?.status, !!raw?.processInstanceId)).length > 0 && (
                 <OperationControl
                   title="Alterar status"
-                  description="Informe o próximo status e a justificativa. O ERP valida a transição e a versão atual."
+                  description={
+                    raw?.processInstanceId
+                      ? FLOW_TRANSITION_NOTE
+                      : 'Informe o próximo status e a justificativa. O ERP valida a transição e a versão atual.'
+                  }
                   path={`/service-orders/${encodeURIComponent(id)}/transition`}
                   method="PATCH"
                   body={{ expectedVersion: raw?.version }}
@@ -913,7 +947,7 @@ export function OrderDetail({
                     {
                       name: 'toStatus',
                       label: 'Próximo status',
-                      options: nextStatusOptions(raw?.status),
+                      options: transitionOptions(raw?.status, !!raw?.processInstanceId),
                       required: true,
                     },
                     {
@@ -929,14 +963,15 @@ export function OrderDetail({
                     await source.mutate();
                   }}
                 />
-              ) : (
-                <Link
-                  className="text-link"
-                  href={`${base}/processos/${String(raw.processInstanceId)}`}
-                >
-                  Acompanhar e concluir pelo processo
-                </Link>
-              ))}
+              )}
+            {scope?.role !== 'analista' && !!raw?.processInstanceId && (
+              <Link
+                className="text-link"
+                href={`${base}/processos/${String(raw.processInstanceId)}`}
+              >
+                Acompanhar e concluir pelo processo
+              </Link>
+            )}
             <div>
               <p className="mini-label mb-2">Provedor</p>
               {scope?.role === 'cliente' ? (

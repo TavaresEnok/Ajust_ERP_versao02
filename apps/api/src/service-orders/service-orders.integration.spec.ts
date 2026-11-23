@@ -63,6 +63,9 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
     } as any;
     mockPrisma.$transaction = jest.fn((fn: (tx: unknown) => unknown) => fn(mockPrisma));
     mockPrisma.$queryRaw = jest.fn().mockResolvedValue([{ max: null }]);
+    mockPrisma.$executeRaw = jest.fn().mockResolvedValue(1);
+    mockPrisma.serviceProcessInstance = { count: jest.fn().mockResolvedValue(0) };
+    mockPrisma.occurrence.updateMany = jest.fn();
 
     mockSlaEngine = {
       findApplicablePolicy: jest.fn().mockResolvedValue({ hours: 24, priority: Priority.NORMAL }),
@@ -445,6 +448,10 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
 
     it('deve criar uma OS com protocolo gerado', async () => {
       const year = new Date().getFullYear();
+      // A ocorrência passa a refletir a O.S. recém-aberta (ninguém começou: ABERTA).
+      mockPrisma.serviceOrder.findMany.mockResolvedValue([
+        { status: ServiceOrderStatus.ABERTA, pausedAt: null },
+      ]);
       mockPrisma.$queryRaw.mockResolvedValue([{ max: 100005 }]);
       const now = new Date();
       const deadline = new Date(now.getTime() + 86400000);
@@ -614,7 +621,9 @@ describe('ServiceOrdersService — Integration (mocked Prisma)', () => {
         ...order,
         status: ServiceOrderStatus.EM_ANALISE,
       });
-      mockPrisma.serviceOrder.count.mockResolvedValue(1);
+      mockPrisma.serviceOrder.findMany.mockResolvedValue([
+        { status: ServiceOrderStatus.EM_ANALISE, pausedAt: null },
+      ]);
       mockPrisma.serviceProcessInstance = { count: jest.fn().mockResolvedValue(0) };
       mockPrisma.occurrence.updateMany = jest.fn();
       await service.transition('tenant-1', 'order-1', 'user-1', 'gerente', {

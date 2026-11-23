@@ -14,7 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
-import { orderStatuses } from '@/lib/erp/contracts';
+import { ErpError, orderStatuses } from '@/lib/erp/contracts';
 import {
   flowStatuses,
   type FlowTemplate,
@@ -31,7 +31,13 @@ const Graph = dynamic(
 );
 const endpoint = '/service-processes/operational';
 const errorText = (e: unknown) => (e instanceof Error ? e.message : 'Falha na operação');
-const date = (v?: string) => (v ? new Date(v).toLocaleString('pt-BR') : '—');
+const date = (v?: string) =>
+  v ? new Date(v).toLocaleString('pt-BR', { timeZone: 'America/Fortaleza' }) : '—';
+const ROLE_LABELS: Record<string, string> = {
+  super_admin: 'administração',
+  gerente: 'gerência',
+  analista: 'analista',
+};
 type Person = { id: string; name: string; role: string; accessBlocked: boolean };
 
 export { WorkflowsHub } from './workflow-designer';
@@ -46,8 +52,19 @@ export function ServiceProcessesHub({ id, base = '/gerencia' }: { id?: string; b
   const [search, setSearch] = useState('');
   const [mode, setMode] = useState(manager ? 'all' : 'mine');
   const [customer, setCustomer] = useState('');
-  const chosen = query.data?.find((p) => p.id === selected);
-  if (!manager && id && query.data && !chosen)
+  const listed = query.data?.find((p) => p.id === selected);
+  // A lista traz só as execuções mais recentes: fora dela, a execução é buscada pelo id.
+  const direct = useErpQuery<FlowInstance>(
+    id && query.data && !listed ? `${endpoint}/${id}` : null,
+  );
+  const chosen = listed || direct.data;
+  const missing =
+    !!id &&
+    !!query.data &&
+    !chosen &&
+    direct.error instanceof ErpError &&
+    direct.error.status === 404;
+  if (!manager && missing)
     return (
       <section className="panel p-5">
         <h1 className="section-title">Acompanhamento indisponível</h1>
@@ -59,7 +76,7 @@ export function ServiceProcessesHub({ id, base = '/gerencia' }: { id?: string; b
         </Link>
       </section>
     );
-  if (legacy || (id && query.data && !chosen))
+  if (legacy || missing)
     return (
       <>
         <Button
@@ -154,6 +171,13 @@ export function ServiceProcessesHub({ id, base = '/gerencia' }: { id?: string; b
         error={query.error}
         onRetry={() => void query.mutate()}
       />
+      {id && !chosen && !missing && (
+        <QueryState
+          loading={direct.isLoading}
+          error={direct.error}
+          onRetry={() => void direct.mutate()}
+        />
+      )}
       {!id && (
         <section className="panel mb-6 overflow-x-auto">
           <table className="w-full min-w-[850px] text-left text-xs">
@@ -258,7 +282,8 @@ export function OperationalExecution({
     return () => clearInterval(timer);
   }, [status, refresh, id]);
   async function perform(values: Record<string, unknown>) {
-    if (!instance) return;
+    if (!instance) return false;
+    let ok = false;
     try {
       await action.execute({
         path: `${endpoint}/${id}/actions`,
@@ -266,12 +291,18 @@ export function OperationalExecution({
         body: { expectedVersion: instance.version, ...values },
       });
       toast.success(orderId && !manager ? 'Trabalho registrado' : 'Fluxo atualizado');
+      ok = true;
     } catch (e) {
-      toast.error(errorText(e));
+      toast.error(
+        e instanceof ErpError && e.status === 409
+          ? 'Outra pessoa alterou este processo. A tela foi atualizada e o que você digitou foi mantido: confira a etapa e envie de novo.'
+          : errorText(e),
+      );
     } finally {
       await query.mutate();
       onChanged?.();
     }
+    return ok;
   }
   async function demo() {
     if (!instance) return;
@@ -333,7 +364,7 @@ export function OperationalExecution({
           const node = instance.definition.nodes.find((n) => n.id === step.nodeId)!;
           return (
             <form
-              key={`${step.id}:${instance.version}`}
+              key={step.id}
               className="space-y-4"
               onSubmit={(e) => {
                 e.preventDefault();
@@ -356,6 +387,7 @@ export function OperationalExecution({
                   <textarea
                     className="mt-2 min-h-20 w-full rounded-lg border border-border bg-card p-3"
                     name={`field_${i}`}
+                    maxLength={20000}
                     required
                   />
                 </label>
@@ -367,6 +399,7 @@ export function OperationalExecution({
                   className="mt-2 min-h-24 w-full rounded-lg border border-border bg-card p-3"
                   required
                   minLength={3}
+                  maxLength={2000}
                 />
               </label>
               {Object.keys(node.routes).length === 1 ? (
@@ -654,9 +687,16 @@ export function OperationalExecution({
                       : `Prazo da etapa ${date(step.dueAt)}`}
                   </span>
                 </header>
+                {!node.roles.includes(scope?.role || '') && (
+                  <p role="note" className="rounded-lg bg-secondary/40 p-3 text-sm">
+                    Esta etapa só pode ser concluída por:{' '}
+                    {node.roles.map((role) => ROLE_LABELS[role] || role).join(', ')}. Seu perfil não
+                    conclui esta etapa, mas você pode encaminhá-la a outra pessoa abaixo.
+                  </p>
+                )}
                 {node.roles.includes(scope?.role || '') && (
                   <form
-                    key={`${step.id}:${instance.version}`}
+                    key={step.id}
                     className="flex flex-col gap-4"
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -685,6 +725,7 @@ export function OperationalExecution({
                         <textarea
                           className="native-select min-h-20 w-full"
                           name={`field_${i}`}
+                          maxLength={20000}
                           required
                         />
                       </label>
@@ -697,6 +738,7 @@ export function OperationalExecution({
                         placeholder="Resumo para o histórico da O.S."
                         required
                         minLength={3}
+                        maxLength={2000}
                       />
                     </label>
                     {outcomes.length === 1 ? (
@@ -746,13 +788,14 @@ export function OperationalExecution({
                     className="mt-3 flex flex-wrap gap-3"
                     onSubmit={(e) => {
                       e.preventDefault();
-                      const form = new FormData(e.currentTarget);
+                      const element = e.currentTarget;
+                      const form = new FormData(element);
                       void perform({
                         action: 'assign',
                         stepId: step.id,
                         assigneeUserId: form.get('assignee'),
                         reason: form.get('reason'),
-                      });
+                      }).then((ok) => ok && element.reset());
                     }}
                   >
                     <select
@@ -775,6 +818,7 @@ export function OperationalExecution({
                       name="reason"
                       placeholder="Motivo do encaminhamento"
                       minLength={3}
+                      maxLength={2000}
                       required
                     />
                     <Button
@@ -794,7 +838,9 @@ export function OperationalExecution({
           status={instance.status}
           manager={manager}
           pending={action.pending}
-          onRun={(processAction, reason) => perform({ action: processAction, reason })}
+          onRun={async (processAction, reason) => {
+            await perform({ action: processAction, reason });
+          }}
         />
       )}
       <details>
@@ -862,6 +908,7 @@ export function OperationalExecution({
                 className="native-select"
                 placeholder="Motivo da retomada das automações"
                 minLength={3}
+                maxLength={2000}
                 required
               />
               <Button type="submit" variant="outline" disabled={action.pending}>
@@ -987,6 +1034,7 @@ function ProcessActions({
                 onChange={(e) => setReason(e.target.value)}
                 required
                 minLength={3}
+                maxLength={2000}
               />
             </label>
             <DialogFooter>
@@ -1024,17 +1072,20 @@ export function OperationalOrderPanel({
   const [open, setOpen] = useState(false);
   const action = useErpAction();
   const allowed = ['super_admin', 'gerente', 'analista'].includes(scope?.role || '');
-  const list = useErpQuery<FlowInstance[]>(allowed ? endpoint : null);
+  // Busca pelo id: a lista geral traz só as execuções mais recentes.
+  const direct = useErpQuery<FlowInstance>(
+    allowed && processId ? `${endpoint}/${processId}` : null,
+  );
   const templates = useErpQuery<FlowTemplate[]>(
     allowed && !processId ? `${endpoint}/templates` : null,
   );
-  const run = list.data?.find((p) => p.id === processId);
+  const run = direct.data;
   if (!allowed) return null;
   if (scope?.role === 'analista')
     return run ? (
       <OperationalExecution id={run.id} orderId={orderId} base={base} onChanged={onChanged} />
     ) : (
-      <QueryState loading={list.isLoading} error={list.error} />
+      <QueryState loading={direct.isLoading} error={direct.error} />
     );
   if (run)
     return (

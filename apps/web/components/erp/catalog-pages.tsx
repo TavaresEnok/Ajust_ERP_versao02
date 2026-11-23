@@ -147,7 +147,7 @@ export function CatalogPage({
                   <dt className="mini-label">Prazo da O.S.</dt>
                   <dd className="mt-2">
                     {typeof raw?.slaHours === 'number'
-                      ? `${raw.slaHours} horas úteis${raw.slaHours % 24 === 0 ? ` (${raw.slaHours / 24} ${raw.slaHours === 24 ? 'dia útil' : 'dias úteis'})` : ''}`
+                      ? `${raw.slaHours} horas úteis, contadas no calendário de SLA`
                       : 'Política de SLA'}
                   </dd>
                 </div>

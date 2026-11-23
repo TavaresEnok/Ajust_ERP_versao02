@@ -55,7 +55,7 @@ export type CreateOccurrenceInput = {
   firstOrder: {
     recordCompleted?: boolean;
     workflowTemplateCode?: string;
-  serviceCatalogItemId?: string;
+    serviceCatalogItemId?: string;
     ownerUserId?: string;
     assigneeUserId?: string;
     type: ServiceOrderType;
@@ -149,6 +149,8 @@ export type ListInput = {
   search?: string;
   from?: string;
   to?: string;
+  /** Retorna todas as O.S. ativas mais qualquer O.S. criada, resolvida ou fechada desde esta data. */
+  activitySince?: string;
   limit?: number;
   offset?: number;
   orderBy?: 'createdAt' | 'updatedAt' | 'deadlineAt' | 'protocol' | 'priority' | 'status';

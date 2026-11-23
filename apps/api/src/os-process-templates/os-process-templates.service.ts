@@ -201,8 +201,8 @@ export class OsProcessTemplateService {
         try {
           const deadlineAt = new Date(Date.now() + (spec.deadlineHours ?? 24) * 60 * 60 * 1000);
 
-          const child = await withFreshProtocol(this.prisma, tenantId, (protocol) =>
-            this.prisma.serviceOrder.create({
+          const child = await withFreshProtocol(this.prisma, tenantId, (protocol, tx) =>
+            tx.serviceOrder.create({
               data: {
                 tenantId,
                 protocol,
