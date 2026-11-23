@@ -12,6 +12,7 @@ import {
   Query,
   Res,
   Req,
+  StreamableFile,
   UseInterceptors,
   UseGuards,
   UnauthorizedException,
@@ -178,6 +179,37 @@ const ListSchema = z.object({
 const ExportHistorySchema = z.object({
   limit: z.coerce.number().int().min(1).max(100).optional(),
   offset: z.coerce.number().int().min(0).optional(),
+});
+
+const OperationalSummarySchema = z.object({
+  scope: z.enum(['mine', 'operation']).optional(),
+  days: z.coerce.number().int().min(1).max(3650).optional(),
+  excludeDemo: z.coerce.boolean().optional(),
+});
+
+const OperationalQueueSchema = z.object({
+  scope: z.enum(['mine', 'operation']).optional(),
+  focus: z
+    .enum([
+      'active',
+      'overdue',
+      'soon',
+      'today',
+      'within',
+      'without',
+      'paused',
+      'unassigned',
+      'scheduled',
+      'urgent',
+      'closed',
+      'all',
+    ])
+    .optional(),
+  search: z.string().trim().max(200).optional(),
+  days: z.coerce.number().int().min(1).max(3650).optional(),
+  limit: z.coerce.number().int().min(1).max(100).optional(),
+  offset: z.coerce.number().int().min(0).optional(),
+  excludeDemo: z.coerce.boolean().optional(),
 });
 
 @ApiTags('Ordens de Serviço')
@@ -416,6 +448,62 @@ export class ServiceOrdersController {
     );
   }
 
+  @Get('operational-summary')
+  async operationalSummary(
+    @Req() req: RequestWithAuth,
+    @Query('scope') scope?: string,
+    @Query('days') days?: string,
+    @Query('excludeDemo') excludeDemo?: string,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    const parsed = OperationalSummarySchema.parse({
+      scope,
+      days: days && days !== 'all' ? days : undefined,
+      excludeDemo,
+    });
+    return this.serviceOrdersService.operationalSummary(req.auth.tenantId, {
+      scope: parsed.scope || 'operation',
+      userId: req.auth.userId,
+      days: parsed.days ?? null,
+      excludeDemo: parsed.excludeDemo ?? true,
+      role: req.auth.role,
+    });
+  }
+
+  @Get('operational-queue')
+  async operationalQueue(
+    @Req() req: RequestWithAuth,
+    @Query('scope') scope?: string,
+    @Query('focus') focus?: string,
+    @Query('search') search?: string,
+    @Query('days') days?: string,
+    @Query('limit') limit?: string,
+    @Query('offset') offset?: string,
+    @Query('excludeDemo') excludeDemo?: string,
+  ) {
+    if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
+    const parsed = OperationalQueueSchema.parse({
+      scope,
+      focus,
+      search,
+      days: days && days !== 'all' ? days : undefined,
+      limit,
+      offset,
+      excludeDemo,
+    });
+    return this.serviceOrdersService.operationalQueue(req.auth.tenantId, {
+      scope: parsed.scope || 'operation',
+      userId: req.auth.userId,
+      focus: parsed.focus || 'active',
+      search: parsed.search,
+      days: parsed.days ?? null,
+      limit: parsed.limit ?? 20,
+      offset: parsed.offset ?? 0,
+      excludeDemo: parsed.excludeDemo ?? true,
+      role: req.auth.role,
+    });
+  }
+
   @Get('export/csv')
   @UseGuards(TenantRateLimitGuard)
   @TenantRateLimit(10, 60) // 10 exports por minuto por tenant
@@ -470,7 +558,7 @@ export class ServiceOrdersController {
     res.setHeader('x-export-rows', String(csv.rowCount));
     res.setHeader('x-export-truncated', csv.truncated ? 'true' : 'false');
 
-    return csv.content;
+    return new StreamableFile(createReadStream(csv.filePath));
   }
 
   @Get('export/history')
@@ -508,7 +596,7 @@ export class ServiceOrdersController {
     res.setHeader('content-type', 'text/csv; charset=utf-8');
     res.setHeader('content-disposition', `attachment; filename="${result.fileName}"`);
 
-    return result.content;
+    return new StreamableFile(createReadStream(result.filePath));
   }
 
   @Get(':id')

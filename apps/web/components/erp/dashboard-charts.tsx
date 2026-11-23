@@ -1,7 +1,7 @@
 'use client';
 import { Area, AreaChart, CartesianGrid, XAxis, YAxis, Pie, PieChart, Cell } from 'recharts';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
-import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
+import { useOperationalOrders, useOperationalSummary } from '@/lib/erp/use-operational-orders';
 import { buildAnalystOverview, ANALYST_TIMEZONE, localDay } from '@/lib/erp/analyst-workspace';
 import { orderStatuses, type ErpRecord } from '@/lib/erp/contracts';
 import { isDemonstration } from '@/lib/erp/management';
@@ -13,15 +13,24 @@ function periodStartIso(days: number) {
   ).toISOString();
 }
 
-export function useStatusData(rows?: ErpRecord[]) {
-  const query = useOperationalOrders('operation', { situation: 'active', enabled: !rows });
+export function useStatusData(
+  rows?: ErpRecord[],
+  statusCounts?: { status: string; count: number }[],
+) {
+  const summary = useOperationalSummary('operation', { enabled: !rows && !statusCounts });
+  const countsMap = statusCounts
+    ? new Map(statusCounts.map((item) => [item.status, item.count]))
+    : !rows && summary.data
+      ? new Map(summary.data.byStatus.map((item) => [item.status, item.count]))
+      : null;
+
   return Object.entries(orderStatuses)
     .map(([status, name], index) => ({
       name,
       status,
-      value: (rows || query.data || []).filter(
-        (row) => !isDemonstration(row) && row.status === status,
-      ).length,
+      value: countsMap
+        ? countsMap.get(status) || 0
+        : (rows || []).filter((row) => !isDemonstration(row) && row.status === status).length,
       color: `var(--chart-${(index % 5) + 1})`,
     }))
     .filter((row) => row.value > 0);
@@ -111,12 +120,14 @@ export function VolumeChart({
 }
 export function StatusChart({
   rows,
+  statusCounts,
   caption = 'ordens consultadas',
 }: {
   rows?: ErpRecord[];
+  statusCounts?: { status: string; count: number }[];
   caption?: string;
 }) {
-  const statusData = useStatusData(rows);
+  const statusData = useStatusData(rows, statusCounts);
   const total = statusData.reduce((sum, row) => sum + row.value, 0);
   return (
     <div className="relative mx-auto w-[190px]">

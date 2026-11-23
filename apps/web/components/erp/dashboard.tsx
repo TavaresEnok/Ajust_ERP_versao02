@@ -5,16 +5,10 @@ import { CheckCircle2, Clock3, Plus, Timer } from 'lucide-react';
 import { Button } from '@/components/ui/button';
 import { useErpQuery } from '@/lib/erp/gateway';
 import { listRecords, useRouteBase } from '@/lib/erp/visual-data';
-import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
-import { isDemonstration, type ManagementOverview } from '@/lib/erp/management';
-import {
-  ANALYST_TIMEZONE,
-  deadlineSituation,
-  isActiveOrder,
-  localDay,
-  orderDeadline,
-} from '@/lib/erp/analyst-workspace';
-import { orderStatuses, priorities, type ErpRecord } from '@/lib/erp/contracts';
+import { useOperationalQueue, useOperationalSummary } from '@/lib/erp/use-operational-orders';
+import { type ManagementOverview } from '@/lib/erp/management';
+import { ANALYST_TIMEZONE, deadlineSituation, localDay } from '@/lib/erp/analyst-workspace';
+import { orderStatuses, priorities } from '@/lib/erp/contracts';
 import { cn } from '@/lib/utils';
 import { QueryState } from './contract-form';
 import { PageHeading, PanelHeading, Metric, Priority, StatusBadge, ViewLink } from './primitives';
@@ -78,7 +72,12 @@ export function Dashboard() {
   const [page, setPage] = useState(0);
   const [orderOpen, setOrderOpen] = useState(false);
   const report = useErpQuery<ManagementOverview>(`/reports/management-overview?daysBack=${days}`);
-  const orders = useOperationalOrders('operation', { situation: 'active' });
+  const summary = useOperationalSummary('operation');
+  const queue = useOperationalQueue('operation', {
+    focus,
+    limit: 8,
+    offset: page * 8,
+  });
   const overview = !report.error ? report.data : undefined;
   const now = overview ? new Date(overview.generatedAt) : null;
   const agenda = useErpQuery<unknown>(
@@ -86,49 +85,23 @@ export function Dashboard() {
       ? `/calendar/events/all?from=${encodeURIComponent(overview.generatedAt)}&to=${encodeURIComponent(new Date(new Date(overview.generatedAt).getTime() + 7 * 86_400_000).toISOString())}`
       : null,
   );
-  const rows = (orders.data || []).filter((row) => !isDemonstration(row));
-  const active = rows.filter(isActiveOrder);
-  const statuses = useStatusData(active);
-  const demoIds = new Set((orders.data || []).filter(isDemonstration).map((row) => row.id));
+  const statuses = useStatusData(undefined, summary.data?.byStatus);
   const upcoming = listRecords(agenda.data)
     .filter((row) => {
       const end = new Date(String(row.endAt || row.startAt)).getTime();
-      return now && end >= now.getTime() && !demoIds.has(String(row.serviceOrderId));
+      return now && end >= now.getTime();
     })
     .sort((a, b) => new Date(String(a.startAt)).getTime() - new Date(String(b.startAt)).getTime());
-  const selected = active
-    .filter((row) => {
-      if (!now) return false;
-      if (focus === 'overdue') return deadlineSituation(row, now) === 'Atrasada';
-      if (focus === 'soon') return deadlineSituation(row, now) === 'Vence em até 2h';
-      if (focus === 'unassigned') return !row.assigneeUserId;
-      if (focus === 'paused') return !!row.pausedAt;
-      if (focus === 'scheduled') return !!row.scheduledAt && !row.scheduleStartedAt;
-      return true;
-    })
-    .sort((a, b) => {
-      const rank = (row: ErpRecord) =>
-        row.pausedAt
-          ? 3
-          : deadlineSituation(row, now!) === 'Atrasada'
-            ? 0
-            : row.priority === 'CRITICA'
-              ? 1
-              : 2;
-      return (
-        rank(a) - rank(b) ||
-        (orderDeadline(a) ?? Infinity) - (orderDeadline(b) ?? Infinity) ||
-        String(a.id).localeCompare(String(b.id))
-      );
-    });
-  const pages = Math.max(1, Math.ceil(selected.length / 8));
+  const selectedTotal = queue.data?.total ?? 0;
+  const selectedRows = queue.data?.items || [];
+  const pages = Math.max(1, Math.ceil(selectedTotal / 8));
   const currentPage = Math.min(page, pages - 1);
   const results = overview?.results;
-  const usableList = Boolean(orders.data && !orders.error && overview);
+  const usableList = Boolean(queue.data && !queue.error && overview);
   const reportMutate = report.mutate;
   const agendaMutate = agenda.mutate;
   async function refresh() {
-    await Promise.allSettled([reportMutate(), orders.mutate(), agendaMutate()]);
+    await Promise.allSettled([reportMutate(), summary.mutate(), queue.mutate(), agendaMutate()]);
   }
   useEffect(() => {
     const interval = setInterval(() => {
@@ -210,9 +183,9 @@ export function Dashboard() {
           <ViewLink href={`${base}/ordens?situation=active`}>Consultar ordens</ViewLink>
         </PanelHeading>
         <QueryState
-          loading={orders.isLoading}
-          error={orders.error}
-          onRetry={() => void orders.mutate()}
+          loading={queue.isLoading}
+          error={queue.error}
+          onRetry={() => void queue.mutate()}
         />
         <div className="table-wrap">
           <table className="data-table">
@@ -229,7 +202,7 @@ export function Dashboard() {
             </thead>
             <tbody>
               {usableList &&
-                selected.slice(currentPage * 8, currentPage * 8 + 8).map((row) => (
+                selectedRows.map((row) => (
                   <tr key={row.id}>
                     <td>
                       <Link className="text-link" href={`${base}/ordens/${row.id}`}>
@@ -281,13 +254,13 @@ export function Dashboard() {
             </tbody>
           </table>
         </div>
-        {usableList && !selected.length && (
+        {usableList && !selectedTotal && (
           <p className="p-5 text-sm text-muted-foreground">Nenhum atendimento neste grupo.</p>
         )}
         {usableList && (
           <div className="flex flex-wrap items-center justify-between gap-3 p-4 text-xs">
             <span>
-              {selected.length} atendimentos · página {currentPage + 1} de {pages}
+              {selectedTotal} atendimentos · página {currentPage + 1} de {pages}
             </span>
             <div className="flex gap-2">
               <Button
@@ -500,9 +473,9 @@ export function Dashboard() {
             title="Pendências por etapa"
             description="Todas as ordens ainda ativas; o período dos resultados não reduz esta fila."
           />
-          {usableList && (
+          {summary.data && !summary.error && (
             <>
-              <StatusChart rows={active} caption="pendências atuais" />
+              <StatusChart statusCounts={summary.data.byStatus} caption="pendências atuais" />
               <div className="grid grid-cols-2 gap-3 p-5">
                 {statuses.map((item) => (
                   <Link

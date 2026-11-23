@@ -1,6 +1,8 @@
 import { BadRequestException, ForbiddenException, NotFoundException } from '@nestjs/common';
 import { AuditAction, Prisma } from '@prisma/client';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { createWriteStream } from 'node:fs';
+import { once } from 'node:events';
+import { mkdir, readFile } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { validatePathWithinBase } from '../common/path-security';
 import { PrismaService } from '../prisma/prisma.service';
@@ -12,7 +14,6 @@ import type {
   ListInput,
 } from './service-orders.types';
 
-export const EXPORT_MAX_ROWS = 10000;
 export const EXPORT_BATCH_SIZE = 1000;
 
 const ALLOWED_EXPORT_ROLES = ['super_admin', 'gerente', 'analista'];
@@ -61,6 +62,12 @@ type LogAuditFn = (
   metadata: Record<string, unknown>,
 ) => Promise<void>;
 
+async function writeChunk(stream: ReturnType<typeof createWriteStream>, chunk: string) {
+  if (!stream.write(chunk)) {
+    await once(stream, 'drain');
+  }
+}
+
 export async function exportServiceOrdersCsv(params: {
   prisma: PrismaService;
   tenantId: string;
@@ -70,6 +77,7 @@ export async function exportServiceOrdersCsv(params: {
   where: Prisma.ServiceOrderWhereInput;
   orderBy: Prisma.ServiceOrderOrderByWithRelationInput[];
   logAudit: LogAuditFn;
+  /** Sem limite por padrão (streaming em disco via cursor). Informe apenas se desejar limitar. */
   maxRows?: number;
   batchSize?: number;
 }): Promise<CsvExportResult> {
@@ -82,60 +90,12 @@ export async function exportServiceOrdersCsv(params: {
     where,
     orderBy,
     logAudit,
-    maxRows = EXPORT_MAX_ROWS,
+    maxRows,
     batchSize = EXPORT_BATCH_SIZE,
   } = params;
 
   if (!ALLOWED_EXPORT_ROLES.includes(role)) {
     throw new ForbiddenException('Role is not allowed to export service orders.');
-  }
-
-  const csvLines = [CSV_HEADER.join(',')];
-  let exportedCount = 0;
-  let truncated = false;
-  let cursorId: string | undefined;
-
-  while (exportedCount < maxRows) {
-    const remaining = maxRows - exportedCount;
-    const take = Math.min(batchSize, remaining) + (remaining <= batchSize ? 1 : 0);
-    const batch = await prisma.serviceOrder.findMany({
-      where,
-      orderBy,
-      select: EXPORT_SELECT,
-      take,
-      ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
-    });
-
-    if (batch.length === 0) break;
-
-    const sliceLimit = Math.min(batch.length, remaining);
-    if (batch.length > remaining) truncated = true;
-
-    for (let i = 0; i < sliceLimit; i++) {
-      const row = batch[i];
-      const line = [
-        row.protocol,
-        row.externalProtocol,
-        row.title,
-        row.description,
-        row.type,
-        row.priority,
-        row.status,
-        row.createdAt.toISOString(),
-        row.updatedAt.toISOString(),
-        row.deadlineAt.toISOString(),
-        row.resolvedAt?.toISOString() || '',
-        row.closedAt?.toISOString() || '',
-        row.owner?.name || '',
-        row.assignee?.name || '',
-      ];
-      csvLines.push(line.map((value) => csvCell(value)).join(','));
-    }
-
-    exportedCount += sliceLimit;
-    cursorId = batch[sliceLimit - 1]?.id;
-
-    if (truncated || batch.length < take) break;
   }
 
   const filters = compactRecord(input);
@@ -149,15 +109,78 @@ export async function exportServiceOrdersCsv(params: {
     },
   });
 
-  const content = csvLines.join('\n');
   const fileName = `service-orders-${new Date().toISOString().slice(0, 10)}-${reportExport.id.slice(0, 8)}.csv`;
   const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
   const exportDir = join(uploadRoot, 'reports', tenantId);
   let filePath = '';
+  let exportedCount = 0;
+  let truncated = false;
+
   try {
     await mkdir(exportDir, { recursive: true });
     filePath = join(exportDir, fileName);
-    await writeFile(filePath, content, 'utf-8');
+    const stream = createWriteStream(filePath, { encoding: 'utf8' });
+
+    try {
+      await writeChunk(stream, CSV_HEADER.join(','));
+      let cursorId: string | undefined;
+
+      while (maxRows === undefined || exportedCount < maxRows) {
+        const remaining = maxRows === undefined ? batchSize : maxRows - exportedCount;
+        const probeExtra = maxRows !== undefined && remaining <= batchSize ? 1 : 0;
+        const take = Math.min(batchSize, remaining) + probeExtra;
+
+        const batch = await prisma.serviceOrder.findMany({
+          where,
+          orderBy,
+          select: EXPORT_SELECT,
+          take,
+          ...(cursorId ? { cursor: { id: cursorId }, skip: 1 } : {}),
+        });
+
+        if (batch.length === 0) break;
+
+        const sliceLimit = maxRows === undefined ? batch.length : Math.min(batch.length, remaining);
+        if (maxRows !== undefined && batch.length > remaining) truncated = true;
+
+        const lines: string[] = [];
+        for (let i = 0; i < sliceLimit; i++) {
+          const row = batch[i];
+          const line = [
+            row.protocol,
+            row.externalProtocol,
+            row.title,
+            row.description,
+            row.type,
+            row.priority,
+            row.status,
+            row.createdAt.toISOString(),
+            row.updatedAt.toISOString(),
+            row.deadlineAt.toISOString(),
+            row.resolvedAt?.toISOString() || '',
+            row.closedAt?.toISOString() || '',
+            row.owner?.name || '',
+            row.assignee?.name || '',
+          ];
+          lines.push(line.map((value) => csvCell(value)).join(','));
+        }
+
+        if (lines.length > 0) {
+          await writeChunk(stream, '\n' + lines.join('\n'));
+        }
+
+        exportedCount += sliceLimit;
+        cursorId = batch[sliceLimit - 1]?.id;
+
+        if (truncated || batch.length < take) break;
+      }
+
+      stream.end();
+      await once(stream, 'finish');
+    } catch (streamError) {
+      stream.destroy();
+      throw streamError;
+    }
 
     await prisma.reportExport.update({
       where: { id: reportExport.id },
@@ -186,7 +209,7 @@ export async function exportServiceOrdersCsv(params: {
 
   return {
     fileName,
-    content,
+    filePath,
     rowCount: exportedCount,
     truncated,
   };
@@ -269,8 +292,6 @@ export async function downloadServiceOrderExportCsv(params: {
 
   const uploadRoot = process.env.UPLOAD_ROOT || join(process.cwd(), 'uploads');
   const safePath = validatePathWithinBase(uploadRoot, report.fileUrl);
-
-  const content = await readFile(safePath, 'utf-8');
   const fileName = basename(safePath);
 
   await logAudit(tenantId, authUserId, 'EXPORT', 'report_export', report.id, {
@@ -278,5 +299,7 @@ export async function downloadServiceOrderExportCsv(params: {
     operation: 'download',
   });
 
-  return { fileName, content };
+  // Mantém `content` disponível para chamadores internos, mas o controller faz streaming por `filePath`.
+  const content = await readFile(safePath, 'utf-8');
+  return { fileName, filePath: safePath, content };
 }

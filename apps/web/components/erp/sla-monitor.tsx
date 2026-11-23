@@ -4,28 +4,24 @@ import { useEffect, useState } from 'react';
 import Link from 'next/link';
 import { AlertTriangle, ClipboardList, Clock3, PauseCircle, RefreshCw, Search } from 'lucide-react';
 import { Button } from '@/components/ui/button';
-import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
+import { useOperationalQueue, useOperationalSummary } from '@/lib/erp/use-operational-orders';
 import { visualRecord } from '@/lib/erp/visual-data';
-import { deadlineSituation, isActiveOrder, orderDeadline } from '@/lib/erp/analyst-workspace';
+import { deadlineSituation, orderDeadline } from '@/lib/erp/analyst-workspace';
 import { PageHeading, PanelHeading, Metric, StatusBadge, Priority } from './primitives';
 import { QueryState } from './contract-form';
 
-const filters = [
-  'Todas',
-  'Atrasada',
-  'Vence em até 2h',
-  'Dentro do prazo',
-  'Pausada',
-  'Sem prazo de SLA',
-];
-const normalized = (value: string) =>
-  value
-    .normalize('NFD')
-    .replace(/[\u0300-\u036f]/g, '')
-    .toLowerCase();
+const FILTER_TO_FOCUS: Record<string, string> = {
+  Todas: 'active',
+  Atrasada: 'overdue',
+  'Vence em até 2h': 'soon',
+  'Dentro do prazo': 'within',
+  Pausada: 'paused',
+  'Sem prazo de SLA': 'without',
+};
+
+const filters = Object.keys(FILTER_TO_FOCUS);
 
 export function SlaPage() {
-  const source = useOperationalOrders('operation', { situation: 'active' });
   const [filter, setFilter] = useState('Todas');
   const [search, setSearch] = useState('');
   const [page, setPage] = useState(0);
@@ -34,32 +30,34 @@ export function SlaPage() {
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
-  const active = (source.data || [])
-    .filter(isActiveOrder)
-    .map((raw) => ({
-      raw,
-      row: visualRecord('orders', raw),
-      situation: deadlineSituation(raw, now),
-    }))
-    .sort(
-      (a, b) =>
-        Number(Boolean(a.raw.pausedAt)) - Number(Boolean(b.raw.pausedAt)) ||
-        (orderDeadline(a.raw) ?? Infinity) - (orderDeadline(b.raw) ?? Infinity) ||
-        a.raw.id.localeCompare(b.raw.id),
-    );
-  const needle = normalized(search.trim());
-  const matching = active.filter(
-    ({ row, situation }) =>
-      (filter === 'Todas' || filter === situation) &&
-      normalized([row.protocol, row.title, row.provider, row.analyst].join(' ')).includes(needle),
-  );
-  const pages = Math.max(1, Math.ceil(matching.length / 20));
+
+  const summary = useOperationalSummary('operation');
+  const queue = useOperationalQueue('operation', {
+    focus: FILTER_TO_FOCUS[filter] || 'active',
+    search,
+    limit: 20,
+    offset: page * 20,
+  });
+
+  const totals = summary.data?.totals;
+  const totalMatching = queue.data?.total ?? 0;
+  const pages = Math.max(1, Math.ceil(totalMatching / 20));
   const current = Math.min(page, pages - 1);
-  const visible = matching.slice(current * 20, current * 20 + 20);
-  const ready = source.data !== undefined && !source.error;
+  const visible = (queue.data?.items || []).map((raw) => ({
+    raw,
+    row: visualRecord('orders', raw),
+    situation: deadlineSituation(raw, now),
+  }));
+  const summaryReady = summary.data !== undefined && !summary.error;
+  const queueReady = queue.data !== undefined && !queue.error;
+
   function selectFilter(value: string) {
     setFilter(value);
     setPage(0);
+  }
+
+  async function refresh() {
+    await Promise.allSettled([summary.mutate(), queue.mutate()]);
   }
 
   return (
@@ -70,8 +68,8 @@ export function SlaPage() {
       >
         <Button
           variant="outline"
-          disabled={source.isValidating}
-          onClick={() => void source.mutate()}
+          disabled={summary.isValidating || queue.isValidating}
+          onClick={() => void refresh()}
         >
           <RefreshCw className="size-3.5" /> Atualizar
         </Button>
@@ -84,28 +82,28 @@ export function SlaPage() {
           {
             label: 'O.S. ativas',
             selection: 'Todas',
-            count: active.length,
+            count: totals?.totalActive ?? 0,
             foot: 'toda a equipe Ajust',
             icon: ClipboardList,
           },
           {
             label: 'Atrasadas',
             selection: 'Atrasada',
-            count: active.filter((item) => item.situation === 'Atrasada').length,
+            count: totals?.overdue ?? 0,
             foot: 'prazo excedido, sem pausa',
             icon: AlertTriangle,
           },
           {
             label: 'Vencem em até 2h',
             selection: 'Vence em até 2h',
-            count: active.filter((item) => item.situation === 'Vence em até 2h').length,
+            count: totals?.dueSoon ?? 0,
             foot: 'próximas do prazo',
             icon: Clock3,
           },
           {
             label: 'Pausadas',
             selection: 'Pausada',
-            count: active.filter((item) => item.situation === 'Pausada').length,
+            count: totals?.paused ?? 0,
             foot: 'consulte o motivo da espera',
             icon: PauseCircle,
           },
@@ -120,7 +118,7 @@ export function SlaPage() {
           >
             <Metric
               label={metric.label}
-              value={ready ? String(metric.count) : '—'}
+              value={summaryReady ? String(metric.count) : '—'}
               change="Ver ordens"
               foot={metric.foot}
               icon={metric.icon}
@@ -171,11 +169,11 @@ export function SlaPage() {
           )}
         </div>
         <QueryState
-          loading={source.isLoading}
-          error={source.error}
-          onRetry={() => void source.mutate()}
+          loading={queue.isLoading}
+          error={queue.error || summary.error}
+          onRetry={() => void refresh()}
         />
-        {ready && (
+        {queueReady && (
           <>
             <div className="table-wrap">
               <table className="data-table">
@@ -240,14 +238,14 @@ export function SlaPage() {
                 </tbody>
               </table>
             </div>
-            {!matching.length && (
+            {!totalMatching && (
               <p role="status" className="px-5 py-10 text-center text-sm text-muted-foreground">
                 Nenhuma O.S. encontrada para os filtros selecionados.
               </p>
             )}
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4 text-xs text-muted-foreground">
               <span>
-                {matching.length} O.S. · página {current + 1} de {pages}
+                {totalMatching} O.S. · página {current + 1} de {pages}
               </span>
               <div className="flex gap-2">
                 <Button

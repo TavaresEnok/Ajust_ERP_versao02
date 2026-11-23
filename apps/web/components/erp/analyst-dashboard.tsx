@@ -13,7 +13,7 @@ import {
   Bar,
   BarChart,
 } from 'recharts';
-import { useOperationalOrders } from '@/lib/erp/use-operational-orders';
+import { useOperationalQueue, useOperationalSummary } from '@/lib/erp/use-operational-orders';
 import { orderStatuses } from '@/lib/erp/contracts';
 import {
   AlertTriangle,
@@ -25,22 +25,21 @@ import {
   Timer,
   BookOpen,
   KeyRound,
-  ArrowRight,
 } from 'lucide-react';
 import { ChartContainer, ChartTooltip, ChartTooltipContent } from '@/components/ui/chart';
 import { Button } from '@/components/ui/button';
-import { useErp, useErpQuery } from '@/lib/erp/gateway';
+import { useErpQuery } from '@/lib/erp/gateway';
 import type { ErpRecord } from '@/lib/erp/contracts';
 import type { Order } from '@/lib/demo-data';
 import { listRecords, useRouteBase, visualRecord } from '@/lib/erp/visual-data';
 import {
   ANALYST_TIMEZONE,
-  buildAnalystOverview,
-  isOwnOrder,
+  deadlineSituation,
   localDay,
+  orderDeadline,
   type OrderFocus,
 } from '@/lib/erp/analyst-workspace';
-import { Metric, PageHeading, PanelHeading, ViewLink } from './primitives';
+import { PageHeading, PanelHeading, ViewLink } from './primitives';
 import { QueryState } from './contract-form';
 import { OrdersTable } from './orders';
 import { OrderForm } from './order-form';
@@ -48,8 +47,8 @@ import { OrderForm } from './order-form';
 export function AnalystDashboard() {
   return <AnalystHistory />;
 }
+
 function AnalystHistory() {
-  const { scope } = useErp();
   const base = useRouteBase();
   const [view, setView] = useState<'mine' | 'operation'>('mine');
   const [period, setPeriod] = useState('30');
@@ -65,37 +64,29 @@ function AnalystHistory() {
     const timer = setInterval(() => setNow(new Date()), 60_000);
     return () => clearInterval(timer);
   }, []);
-  const activitySince =
-    period === 'all'
-      ? undefined
-      : new Date(
-          new Date(`${localDay(now)}T00:00:00-03:00`).getTime() - (Number(period) - 1) * 86_400_000,
-        ).toISOString();
-  const orders = useOperationalOrders(view, { activitySince });
+
+  const summary = useOperationalSummary(view, { days: period });
+  const queue = useOperationalQueue(view, {
+    focus,
+    days: period,
+    limit: 8,
+    offset: orderPage * 8,
+  });
   const me = useErpQuery<{ user?: { name?: string }; name?: string }>('/auth/me');
   const calendar = useErpQuery<ErpRecord[]>('/calendar/events');
-  const rows = listRecords(orders.data).filter(
-    (r) => view === 'operation' || isOwnOrder(r, scope?.userId || ''),
-  );
-  const overview = buildAnalystOverview(rows, period === 'all' ? null : Number(period), now);
+
+  const totals = summary.data?.totals;
   const mine = view === 'mine';
   const name = (me.data?.user?.name || me.data?.name || '').split(' ')[0];
-  const ready = orders.data !== undefined && !orders.error;
-  const value = (n: number) => (orders.error ? 'Indisponível' : ready ? String(n) : '…');
-  const selections = {
-    active: overview.active,
-    overdue: overview.overdue,
-    today: overview.dueToday,
-    soon: overview.dueSoon,
-    closed: overview.closed,
-    all: overview.ordered,
-  };
-  const selectedIds = new Set(selections[focus].map((r) => r.id));
-  const selectedOrders = overview.ordered.filter((r) => selectedIds.has(r.id));
-  const currentPage = Math.min(orderPage, Math.max(0, Math.ceil(selectedOrders.length / 8) - 1));
-  const visibleOrders = selectedOrders
-    .slice(currentPage * 8, currentPage * 8 + 8)
-    .map((r) => visualRecord('orders', r)) as unknown as Order[];
+  const ready = summary.data !== undefined && !summary.error;
+  const queueReady = queue.data !== undefined && !queue.error;
+  const value = (n: number) => (summary.error ? 'Indisponível' : ready ? String(n) : '…');
+
+  const selectedTotal = queue.data?.total ?? 0;
+  const currentPage = Math.min(orderPage, Math.max(0, Math.ceil(selectedTotal / 8) - 1));
+  const queueItems = queue.data?.items || [];
+  const visibleOrders = queueItems.map((r) => visualRecord('orders', r)) as unknown as Order[];
+
   const nextEvents = listRecords(calendar.data)
     .filter((e) => {
       const start = new Date(String(e.startAt)).getTime();
@@ -104,12 +95,16 @@ function AnalystHistory() {
     })
     .sort((a, b) => String(a.startAt).localeCompare(String(b.startAt)))
     .slice(0, 5);
+
   const prefix = mine ? 'Minhas' : 'Da Ajust ·';
+  const statusCountsMap = new Map(
+    (summary.data?.byStatus || []).map((item) => [item.status, item.count]),
+  );
   const statusSeries = Object.entries(orderStatuses)
     .map(([status, label], i) => ({
       status,
       label,
-      count: overview.active.filter((row) => row.status === status).length,
+      count: statusCountsMap.get(status) || 0,
       color:
         (
           {
@@ -121,45 +116,45 @@ function AnalystHistory() {
         )[status] || `var(--chart-${(i % 5) + 1})`,
     }))
     .filter((row) => row.count > 0);
-  const providerCounts = new Map<string, number>();
-  for (const row of overview.active) {
-    const provider = String(
-      row.provider ||
-        (row.occurrence as ErpRecord | undefined)?.provider ||
-        'Sem provedor informado',
-    );
-    providerCounts.set(provider, (providerCounts.get(provider) || 0) + 1);
-  }
-  const providerSeries = [...providerCounts]
-    .map(([provider, count]) => ({ provider, count }))
-    .sort((a, b) => b.count - a.count)
-    .slice(0, 6);
-  const overdueIds = new Set(overview.overdue.map((row) => row.id)),
-    todayIds = new Set(overview.dueToday.map((row) => row.id));
+
+  const providerSeries = summary.data?.byProvider || [];
+  const series = summary.data?.series || [];
+  const today = localDay(now);
+
   const attention = Object.fromEntries(
-    selectedOrders.map((row) => [
-      row.id,
-      row.pausedAt
-        ? { label: 'Pausada · aguardando retorno', tone: 'muted' }
-        : row.scheduledAt && !row.scheduleStartedAt
-          ? {
-              label: `Agendada · ${new Date(String(row.scheduledAt)).toLocaleString('pt-BR', { timeZone: ANALYST_TIMEZONE, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`,
-              tone: 'warning',
-            }
-          : overdueIds.has(row.id)
-            ? { label: 'Prazo de SLA excedido', tone: 'danger' }
-            : todayIds.has(row.id)
-              ? { label: 'Prazo vence hoje', tone: 'warning' }
-              : {
-                  label: ['FECHADA', 'RESOLVIDA'].includes(String(row.status))
-                    ? 'Atendimento concluído'
-                    : row.deadlineAt
-                      ? 'Dentro do prazo'
-                      : 'Sem prazo informado',
-                  tone: 'muted',
-                },
-    ]),
+    queueItems.map((row) => {
+      const deadline = orderDeadline(row);
+      const isOverdue = deadlineSituation(row, now) === 'Atrasada';
+      const isToday = !row.pausedAt && deadline !== null && localDay(new Date(deadline)) === today;
+      return [
+        row.id,
+        row.pausedAt
+          ? { label: 'Pausada · aguardando retorno', tone: 'muted' }
+          : row.scheduledAt && !row.scheduleStartedAt
+            ? {
+                label: `Agendada · ${new Date(String(row.scheduledAt)).toLocaleString('pt-BR', { timeZone: ANALYST_TIMEZONE, day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })}`,
+                tone: 'warning',
+              }
+            : isOverdue
+              ? { label: 'Prazo de SLA excedido', tone: 'danger' }
+              : isToday
+                ? { label: 'Prazo vence hoje', tone: 'warning' }
+                : {
+                    label: ['FECHADA', 'RESOLVIDA'].includes(String(row.status))
+                      ? 'Atendimento concluído'
+                      : row.deadlineAt
+                        ? 'Dentro do prazo'
+                        : 'Sem prazo informado',
+                    tone: 'muted',
+                  },
+      ];
+    }),
   );
+
+  async function refreshAll() {
+    await Promise.allSettled([summary.mutate(), queue.mutate(), calendar.mutate()]);
+  }
+
   return (
     <>
       <PageHeading
@@ -170,13 +165,7 @@ function AnalystHistory() {
           <Plus data-icon="inline-start" />
           Novo atendimento
         </Button>
-        <Button
-          variant="outline"
-          onClick={() => {
-            void orders.mutate();
-            void calendar.mutate();
-          }}
-        >
+        <Button variant="outline" onClick={() => void refreshAll()}>
           Atualizar painel
         </Button>
       </PageHeading>
@@ -209,7 +198,10 @@ function AnalystHistory() {
             className="native-select"
             aria-label="Período do painel do analista"
             value={period}
-            onChange={(e) => setPeriod(e.target.value)}
+            onChange={(e) => {
+              setPeriod(e.target.value);
+              setOrderPage(0);
+            }}
           >
             <option value="7">Últimos 7 dias</option>
             <option value="30">Últimos 30 dias</option>
@@ -223,15 +215,15 @@ function AnalystHistory() {
         conclusões dos gráficos. Horário de Fortaleza.
       </p>
       <QueryState
-        loading={orders.isLoading}
-        error={orders.error}
-        onRetry={() => void orders.mutate()}
+        loading={summary.isLoading}
+        error={summary.error || queue.error}
+        onRetry={() => void refreshAll()}
       />
       <div className="metrics-grid mb-6 grid grid-cols-4 gap-4" data-testid="analyst-metrics">
         {[
           {
             label: `${prefix} ativas`,
-            count: overview.active.length,
+            count: totals?.totalActive ?? 0,
             icon: ClipboardList,
             foot: 'pendências de todo o histórico',
             focus: 'active',
@@ -241,7 +233,7 @@ function AnalystHistory() {
           },
           {
             label: `${prefix} atrasadas`,
-            count: overview.overdue.length,
+            count: totals?.overdue ?? 0,
             icon: AlertTriangle,
             foot: 'ativas com prazo de SLA excedido',
             focus: 'overdue',
@@ -251,7 +243,7 @@ function AnalystHistory() {
           },
           {
             label: mine ? 'Minhas que vencem hoje' : 'Da Ajust · vencem hoje',
-            count: overview.dueToday.length,
+            count: totals?.dueToday ?? 0,
             icon: Timer,
             foot: 'prazos de hoje, inclusive já vencidos',
             focus: 'today',
@@ -261,7 +253,7 @@ function AnalystHistory() {
           },
           {
             label: mine ? 'Minhas concluídas no período' : 'Da Ajust · concluídas no período',
-            count: overview.closed.length,
+            count: totals?.closed ?? 0,
             icon: CheckCircle2,
             foot: 'pela data de resolução ou encerramento',
             focus: 'closed',
@@ -310,7 +302,7 @@ function AnalystHistory() {
               </span>
             </div>
           </PanelHeading>
-          {ready && overview.series.some((r) => r.opened || r.closed) ? (
+          {ready && series.some((r) => r.opened || r.closed) ? (
             <ChartContainer
               config={{
                 opened: { label: 'Abertas', color: 'var(--chart-1)' },
@@ -319,7 +311,7 @@ function AnalystHistory() {
               className="h-[235px] w-full aspect-auto px-3"
             >
               <AreaChart
-                data={overview.series.map((r) => ({
+                data={series.map((r) => ({
                   ...r,
                   timestamp: new Date(`${r.day}T12:00:00-03:00`).getTime(),
                 }))}
@@ -381,8 +373,8 @@ function AnalystHistory() {
             </p>
           )}
           <p className="px-5 py-4 text-xs text-muted-foreground">
-            Abertas no período: {value(overview.opened)} · Concluídas:{' '}
-            {value(overview.closed.length)}
+            Abertas no período: {value(totals?.opened ?? 0)} · Concluídas:{' '}
+            {value(totals?.closed ?? 0)}
           </p>
         </section>
         <section className="panel">
@@ -396,16 +388,16 @@ function AnalystHistory() {
               onClick={() => setFocus('soon')}
             >
               <span>Vencem nas próximas 2 horas</span>
-              <strong>{value(overview.dueSoon.length)}</strong>
+              <strong>{value(totals?.dueSoon ?? 0)}</strong>
             </button>
             <p className="leading-6 text-muted-foreground">
               {ready
-                ? `${overview.withoutSla} O.S. ativas sem prazo válido ou não elegíveis para SLA. Elas não são classificadas como atrasadas.`
+                ? `${totals?.withoutSla ?? 0} O.S. ativas sem prazo válido ou não elegíveis para SLA. Elas não são classificadas como atrasadas.`
                 : 'Aguardando consulta dos prazos.'}
             </p>
-            {ready && overview.missingCompletionDate > 0 && (
+            {ready && (totals?.missingCompletionDate ?? 0) > 0 && (
               <p className="leading-6 text-muted-foreground">
-                {overview.missingCompletionDate} O.S. concluídas sem data de conclusão não entram no
+                {totals?.missingCompletionDate} O.S. concluídas sem data de conclusão não entram no
                 indicador por período.
               </p>
             )}
@@ -469,7 +461,7 @@ function AnalystHistory() {
                   </ChartContainer>
                   <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
                     <span className="text-2xl font-semibold tabular-nums">
-                      {overview.active.length}
+                      {totals?.totalActive ?? 0}
                     </span>
                     <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
                       Ativas
@@ -571,13 +563,13 @@ function AnalystHistory() {
             </Button>
           ))}
         </div>
-        {ready && (
+        {queueReady && (
           <>
             <OrdersTable compact orders={visibleOrders} attention={attention} />
             <div className="flex flex-wrap items-center justify-between gap-3 border-t border-border px-5 py-4 text-xs text-muted-foreground">
               <p>
-                {visibleOrders.length} de {selectedOrders.length} O.S. · página {currentPage + 1} de{' '}
-                {Math.max(1, Math.ceil(selectedOrders.length / 8))}
+                {visibleOrders.length} de {selectedTotal} O.S. · página {currentPage + 1} de{' '}
+                {Math.max(1, Math.ceil(selectedTotal / 8))}
               </p>
               <div className="flex gap-2">
                 <Button
@@ -591,7 +583,7 @@ function AnalystHistory() {
                 <Button
                   variant="outline"
                   size="sm"
-                  disabled={(currentPage + 1) * 8 >= selectedOrders.length}
+                  disabled={(currentPage + 1) * 8 >= selectedTotal}
                   onClick={() => setOrderPage(currentPage + 1)}
                 >
                   Próxima

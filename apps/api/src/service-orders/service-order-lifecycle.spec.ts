@@ -610,7 +610,10 @@ describe('aprovação gerencial do fechamento', () => {
     const order = { id: 'o1', tenantId: 't', status: 'RESOLVIDA', processInstanceId };
     const prisma: any = {
       serviceOrder: { findFirst: jest.fn().mockResolvedValue(order) },
-      serviceOrderApproval: { create: jest.fn().mockResolvedValue({ id: 'a1' }) },
+      serviceOrderApproval: {
+        findFirst: jest.fn().mockResolvedValue(null),
+        create: jest.fn().mockResolvedValue({ id: 'a1' }),
+      },
       serviceProcessStep: { count: jest.fn().mockResolvedValue(openSteps) },
       auditLog: { create: jest.fn() },
     };
@@ -620,7 +623,7 @@ describe('aprovação gerencial do fechamento', () => {
       {} as any,
     );
     const transition = jest.spyOn(service, 'transition').mockResolvedValue({} as never);
-    return { service, transition };
+    return { service, transition, prisma };
   }
 
   it('aprovar fecha a O.S. na hora', async () => {
@@ -642,5 +645,20 @@ describe('aprovação gerencial do fechamento', () => {
     const { service, transition } = setup(null);
     await service.approve('t', 'o1', 'g1', 'gerente', 'REJECTED' as never, 'Faltou evidência');
     expect(transition).not.toHaveBeenCalled();
+  });
+
+  it('retoma fechamento sem duplicar aprovação quando aprovação anterior já foi gravada', async () => {
+    const { service, transition, prisma } = setup(null);
+    prisma.serviceOrderApproval.findFirst.mockResolvedValueOnce({
+      id: 'a-prev',
+      status: 'APPROVED',
+    });
+    const approval = await service.approve('t', 'o1', 'g1', 'gerente', 'APPROVED' as never, 'Ok');
+    expect(approval).toEqual({ id: 'a-prev', status: 'APPROVED' });
+    expect(prisma.serviceOrderApproval.create).not.toHaveBeenCalled();
+    expect(transition).toHaveBeenCalledWith('t', 'o1', 'g1', 'gerente', {
+      toStatus: 'FECHADA',
+      reason: 'Ok',
+    });
   });
 });

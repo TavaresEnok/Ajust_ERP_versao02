@@ -139,6 +139,8 @@ const ROUTES: Record<string, Method[]> = {
 
   '/service-orders': ['GET', 'POST'],
   '/service-orders/operational-alerts': ['GET'],
+  '/service-orders/operational-summary': ['GET'],
+  '/service-orders/operational-queue': ['GET'],
   '/service-orders/:id/operations': ['POST'],
   '/service-orders/occurrences/:id/close': ['POST'],
   '/service-orders/:id': ['GET', 'PATCH'],

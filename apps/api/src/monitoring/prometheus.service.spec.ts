@@ -42,4 +42,17 @@ describe('PrometheusService', () => {
   it('renders empty metrics safely', () => {
     expect(new PrometheusService().getMetrics()).toContain('tenant_isolation_violations_total 0');
   });
+
+  it('mantém amostras e cardinalidade de rotas limitadas em memória', () => {
+    const service = new PrometheusService();
+    for (let i = 0; i < 600; i++) {
+      service.recordHttpRequest('GET', `/rota-${i}`, 200, 15);
+    }
+    const metrics = service.getMetrics();
+    expect(metrics).toContain('route="_other"');
+    expect(metrics).toContain('http_request_duration_ms_bucket{method="GET",route="/rota-0"');
+    expect(metrics).toContain(
+      'http_request_duration_ms_count{method="GET",route="/rota-0",status="200"} 1',
+    );
+  });
 });

@@ -31,6 +31,12 @@ import {
   exportServiceOrdersCsv,
   listServiceOrderExportHistory,
 } from './service-order-exports';
+import {
+  getOperationalQueue,
+  getOperationalSummary,
+  type OperationalQueueInput,
+  type OperationalSummaryInput,
+} from './service-order-operational';
 import { deadlineWhere } from './service-order-deadlines';
 import {
   ApprovalStatus,
@@ -461,6 +467,14 @@ export class ServiceOrdersService {
       byType,
       topAssignees,
     };
+  }
+
+  async operationalSummary(tenantId: string, input: OperationalSummaryInput = {}) {
+    return getOperationalSummary(this.prisma, tenantId, input);
+  }
+
+  async operationalQueue(tenantId: string, input: OperationalQueueInput = {}) {
+    return getOperationalQueue(this.prisma, tenantId, input);
   }
 
   async exportCsv(
@@ -1861,31 +1875,56 @@ export class ServiceOrdersService {
       );
     }
 
-    const approval = await this.prisma.serviceOrderApproval.create({
-      data: {
+    // Idempotência na retomada: se uma aprovação anterior já foi gravada para o ciclo atual
+    // mas o fechamento falhou no meio, reutiliza o registro e retoma apenas o fechamento.
+    const existingApproval =
+      decision === 'APPROVED' && typeof this.prisma.serviceOrderApproval.findFirst === 'function'
+        ? await this.prisma.serviceOrderApproval.findFirst({
+            where: {
+              serviceOrderId,
+              status: 'APPROVED',
+              createdAt: { gte: order.resolvedAt ?? order.createdAt },
+            },
+            orderBy: { createdAt: 'desc' },
+          })
+        : null;
+
+    const approval =
+      existingApproval ||
+      (await this.prisma.serviceOrderApproval.create({
+        data: {
+          serviceOrderId,
+          requestedById: authUserId,
+          reviewedById: authUserId,
+          status: decision,
+          reason,
+          reviewedAt: new Date(),
+        },
+      }));
+
+    if (!existingApproval) {
+      await this.logAudit(
+        tenantId,
+        authUserId,
+        'OS_UPDATE',
+        'service_order_approval',
+        approval.id,
+        {
+          serviceOrderId,
+          decision,
+          reason,
+        },
+      );
+
+      this.eventsGateway.emitTenantEvent(tenantId, 'service_order.approval', {
+        tenantId,
         serviceOrderId,
-        requestedById: authUserId,
-        reviewedById: authUserId,
-        status: decision,
-        reason,
-        reviewedAt: new Date(),
-      },
-    });
-
-    await this.logAudit(tenantId, authUserId, 'OS_UPDATE', 'service_order_approval', approval.id, {
-      serviceOrderId,
-      decision,
-      reason,
-    });
-
-    this.eventsGateway.emitTenantEvent(tenantId, 'service_order.approval', {
-      tenantId,
-      serviceOrderId,
-      decision,
-      reason: reason || null,
-      byUserId: authUserId,
-      at: new Date().toISOString(),
-    });
+        decision,
+        reason: reason || null,
+        byUserId: authUserId,
+        at: new Date().toISOString(),
+      });
+    }
 
     // Aprovar é autorizar o fechamento: a O.S. fecha na hora, com os efeitos normais. Com
     // entregas paralelas ainda abertas no fluxo, ela fecha sozinha quando a última terminar.

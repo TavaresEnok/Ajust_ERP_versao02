@@ -4,20 +4,60 @@ interface Counter {
   [key: string]: number;
 }
 
-interface Histogram {
-  [key: string]: number[];
+interface BoundedSeries {
+  count: number;
+  sum: number;
+  buckets: number[];
+  samples: number[];
+  cursor: number;
 }
 
 interface Gauge {
   value: number;
 }
 
+const DURATION_BUCKETS_MS = [5, 10, 25, 50, 100, 250, 500, 1000, 2500, 5000, 10000];
+const MAX_SAMPLES_PER_SERIES = 256;
+const MAX_HTTP_SERIES = 500;
+const MAX_DB_SERIES = 200;
+
+function createSeries(): BoundedSeries {
+  return {
+    count: 0,
+    sum: 0,
+    buckets: new Array(DURATION_BUCKETS_MS.length + 1).fill(0),
+    samples: [],
+    cursor: 0,
+  };
+}
+
+function observe(series: BoundedSeries, value: number): void {
+  series.count += 1;
+  series.sum += value;
+
+  let bucketIndex = DURATION_BUCKETS_MS.length;
+  for (let i = 0; i < DURATION_BUCKETS_MS.length; i++) {
+    if (value <= DURATION_BUCKETS_MS[i]) {
+      bucketIndex = i;
+      break;
+    }
+  }
+  series.buckets[bucketIndex] += 1;
+
+  if (series.samples.length < MAX_SAMPLES_PER_SERIES) {
+    series.samples.push(value);
+  } else {
+    series.samples[series.cursor] = value;
+    series.cursor = (series.cursor + 1) % MAX_SAMPLES_PER_SERIES;
+  }
+}
+
 @Injectable()
 export class PrometheusService {
   private httpRequestCounter: Counter = {};
-  private httpRequestDuration: Histogram = {};
+  private httpRequestDuration = new Map<string, BoundedSeries>();
   private activeConnections: Gauge = { value: 0 };
-  private databaseQueryDuration: Histogram = {};
+  private databaseQueryDuration = new Map<string, BoundedSeries>();
   private authenticationAttempts: Counter = {};
   private tenantIsolationViolations: number = 0;
   private rateLimitExceeded: Counter = {};
@@ -27,14 +67,32 @@ export class PrometheusService {
   private activeSessions: Gauge = { value: 0 };
   private workflowExecutionsCounter: Counter = {};
 
+  private boundedKey(
+    store: Map<string, BoundedSeries>,
+    candidate: string,
+    fallback: string,
+    maxKeys: number,
+  ): string {
+    if (store.has(candidate) || store.size < maxKeys) return candidate;
+    return fallback;
+  }
+
   recordHttpRequest(method: string, route: string, status: number, duration: number): void {
-    const key = `${method}:${route}:${status}`;
+    const rawKey = `${method}:${route}:${status}`;
+    const key = this.boundedKey(
+      this.httpRequestDuration,
+      rawKey,
+      `${method}:_other:${status}`,
+      MAX_HTTP_SERIES,
+    );
     this.httpRequestCounter[key] = (this.httpRequestCounter[key] || 0) + 1;
 
-    if (!this.httpRequestDuration[key]) {
-      this.httpRequestDuration[key] = [];
+    let series = this.httpRequestDuration.get(key);
+    if (!series) {
+      series = createSeries();
+      this.httpRequestDuration.set(key, series);
     }
-    this.httpRequestDuration[key].push(duration);
+    observe(series, duration);
   }
 
   incrementActiveConnections(): void {
@@ -46,11 +104,19 @@ export class PrometheusService {
   }
 
   recordDatabaseQuery(operation: string, model: string, duration: number): void {
-    const key = `${operation}:${model}`;
-    if (!this.databaseQueryDuration[key]) {
-      this.databaseQueryDuration[key] = [];
+    const rawKey = `${operation}:${model}`;
+    const key = this.boundedKey(
+      this.databaseQueryDuration,
+      rawKey,
+      `${operation}:_other`,
+      MAX_DB_SERIES,
+    );
+    let series = this.databaseQueryDuration.get(key);
+    if (!series) {
+      series = createSeries();
+      this.databaseQueryDuration.set(key, series);
     }
-    this.databaseQueryDuration[key].push(duration);
+    observe(series, duration);
   }
 
   recordAuthenticationAttempt(success: boolean): void {
@@ -63,7 +129,11 @@ export class PrometheusService {
   }
 
   recordRateLimitExceeded(endpoint: string): void {
-    this.rateLimitExceeded[endpoint] = (this.rateLimitExceeded[endpoint] || 0) + 1;
+    const key =
+      endpoint in this.rateLimitExceeded || Object.keys(this.rateLimitExceeded).length < 200
+        ? endpoint
+        : '_other';
+    this.rateLimitExceeded[key] = (this.rateLimitExceeded[key] || 0) + 1;
   }
 
   incrementOrdersCreated(priority: string, type: string): void {
@@ -92,31 +162,47 @@ export class PrometheusService {
     this.workflowExecutionsCounter[key] = (this.workflowExecutionsCounter[key] || 0) + 1;
   }
 
-  private calculateMean(values: number[]): number {
-    if (values.length === 0) return 0;
-    const sum = values.reduce((a, b) => a + b, 0);
-    return sum / values.length;
+  private calculateMean(series: BoundedSeries | undefined): number {
+    if (!series || series.count === 0) return 0;
+    return series.sum / series.count;
   }
 
-  private calculatePercentile(values: number[], percentile: number): number {
-    if (values.length === 0) return 0;
-    const sorted = [...values].sort((a, b) => a - b);
+  private calculatePercentile(series: BoundedSeries | undefined, percentile: number): number {
+    if (!series || series.samples.length === 0) return 0;
+    const sorted = [...series.samples].sort((a, b) => a - b);
     const index = Math.ceil((percentile / 100) * sorted.length) - 1;
-    return sorted[index] || 0;
+    return sorted[Math.max(0, index)] || 0;
   }
 
   getMetrics(): string {
     let metrics = '# HELP metrics Ajust ERP Metrics\n';
     metrics += '# TYPE metrics gauge\n\n';
 
-    // HTTP Requests
+    // HTTP Requests (bounded ring + fixed histogram buckets)
     metrics += '# HTTP Requests\n';
     for (const [key, count] of Object.entries(this.httpRequestCounter)) {
-      const [method, route, status] = key.split(':');
-      const durations = this.httpRequestDuration[key] || [];
-      const avgDuration = this.calculateMean(durations);
+      const firstColon = key.indexOf(':');
+      const lastColon = key.lastIndexOf(':');
+      const method = key.slice(0, firstColon);
+      const route = key.slice(firstColon + 1, lastColon);
+      const status = key.slice(lastColon + 1);
+      const series = this.httpRequestDuration.get(key);
+      const avgDuration = this.calculateMean(series);
+      const p95Duration = this.calculatePercentile(series, 95);
       metrics += `http_requests_total{method="${method}",route="${route}",status="${status}"} ${count}\n`;
       metrics += `http_request_duration_ms{method="${method}",route="${route}",status="${status}",quantile="mean"} ${avgDuration.toFixed(2)}\n`;
+      metrics += `http_request_duration_ms{method="${method}",route="${route}",status="${status}",quantile="p95"} ${p95Duration.toFixed(2)}\n`;
+      if (series) {
+        let cumulative = 0;
+        for (let i = 0; i < DURATION_BUCKETS_MS.length; i++) {
+          cumulative += series.buckets[i];
+          metrics += `http_request_duration_ms_bucket{method="${method}",route="${route}",status="${status}",le="${DURATION_BUCKETS_MS[i]}"} ${cumulative}\n`;
+        }
+        cumulative += series.buckets[DURATION_BUCKETS_MS.length];
+        metrics += `http_request_duration_ms_bucket{method="${method}",route="${route}",status="${status}",le="+Inf"} ${cumulative}\n`;
+        metrics += `http_request_duration_ms_sum{method="${method}",route="${route}",status="${status}"} ${series.sum.toFixed(2)}\n`;
+        metrics += `http_request_duration_ms_count{method="${method}",route="${route}",status="${status}"} ${series.count}\n`;
+      }
     }
 
     // Active Connections
@@ -125,10 +211,10 @@ export class PrometheusService {
 
     // Database Queries
     metrics += `\n# Database Queries\n`;
-    for (const [key, durations] of Object.entries(this.databaseQueryDuration)) {
+    for (const [key, series] of this.databaseQueryDuration.entries()) {
       const [operation, model] = key.split(':');
-      const avgDuration = this.calculateMean(durations);
-      const p95Duration = this.calculatePercentile(durations, 95);
+      const avgDuration = this.calculateMean(series);
+      const p95Duration = this.calculatePercentile(series, 95);
       metrics += `database_query_duration_ms{operation="${operation}",model="${model}",quantile="mean"} ${avgDuration.toFixed(2)}\n`;
       metrics += `database_query_duration_ms{operation="${operation}",model="${model}",quantile="p95"} ${p95Duration.toFixed(2)}\n`;
     }

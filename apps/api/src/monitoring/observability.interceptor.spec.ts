@@ -71,6 +71,54 @@ describe('ObservabilityInterceptor', () => {
     );
   });
 
+  it('normaliza UUIDs e usa o template de rota para evitar explosão de cardinalidade', async () => {
+    const metrics = { recordHttpRequest: jest.fn() };
+    const logger = { logHttpRequest: jest.fn(), error: jest.fn() };
+    const interceptor = new ObservabilityInterceptor(metrics as any, logger as any);
+
+    await lastValueFrom(
+      interceptor.intercept(
+        context(
+          {
+            method: 'GET',
+            baseUrl: '/service-orders',
+            route: { path: '/:id' },
+            path: '/service-orders/123e4567-e89b-12d3-a456-426614174000',
+          },
+          { statusCode: 200 },
+        ),
+        { handle: () => of({ ok: true }) },
+      ),
+    );
+    await lastValueFrom(
+      interceptor.intercept(
+        context(
+          {
+            method: 'GET',
+            path: '/service-orders/123e4567-e89b-12d3-a456-426614174000/attachments/42',
+          },
+          { statusCode: 200 },
+        ),
+        { handle: () => of({ ok: true }) },
+      ),
+    );
+
+    expect(metrics.recordHttpRequest).toHaveBeenNthCalledWith(
+      1,
+      'GET',
+      '/service-orders/:id',
+      200,
+      expect.any(Number),
+    );
+    expect(metrics.recordHttpRequest).toHaveBeenNthCalledWith(
+      2,
+      'GET',
+      '/service-orders/:id/attachments/:id',
+      200,
+      expect.any(Number),
+    );
+  });
+
   it('works without optional observability services', async () => {
     const interceptor = new ObservabilityInterceptor();
     await expect(

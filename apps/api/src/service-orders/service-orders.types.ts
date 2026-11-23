@@ -159,7 +159,7 @@ export type ListInput = {
 
 export type CsvExportResult = {
   fileName: string;
-  content: string;
+  filePath: string;
   rowCount: number;
   truncated: boolean;
 };
@@ -177,5 +177,6 @@ export type ExportHistoryItem = {
 };
 export type ExportDownloadResult = {
   fileName: string;
+  filePath: string;
   content: string;
 };
