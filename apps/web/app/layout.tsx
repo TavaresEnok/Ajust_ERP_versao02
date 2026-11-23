@@ -44,11 +44,13 @@ export default async function RootLayout({
 }: Readonly<{
   children: React.ReactNode;
 }>) {
-  const scope = parseScope((await headers()).get(SCOPE_HEADER));
+  const headerList = await headers();
+  const scope = parseScope(headerList.get(SCOPE_HEADER));
+  const nonce = headerList.get('x-nonce') ?? undefined;
   return (
     <html lang="pt-BR" className={GeistSans.variable} suppressHydrationWarning>
       <head>
-        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+        <script nonce={nonce} dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="font-sans antialiased">
         <ThemeProvider>

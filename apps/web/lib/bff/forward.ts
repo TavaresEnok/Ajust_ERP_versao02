@@ -36,6 +36,9 @@ const FORWARD_RESPONSE_HEADERS = [
   'last-modified',
   'x-export-rows',
   'x-export-truncated',
+  'x-ratelimit-limit',
+  'x-ratelimit-remaining',
+  'retry-after',
   'x-trace-id',
   'x-request-id',
 ];
@@ -43,7 +46,14 @@ const FORWARD_RESPONSE_HEADERS = [
 export function json(status: number, message: string) {
   return NextResponse.json(
     { message, statusCode: status },
-    { status, headers: { 'cache-control': 'no-store' } },
+    {
+      status,
+      headers: {
+        'cache-control': 'no-store',
+        'x-content-type-options': 'nosniff',
+        'cross-origin-resource-policy': 'same-origin',
+      },
+    },
   );
 }
 

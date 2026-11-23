@@ -15,15 +15,9 @@ const securityHeaders = [
   },
   // Isola a janela de abas abertas por outros sites (window.opener).
   { key: 'Cross-Origin-Opener-Policy', value: 'same-origin' },
+  { key: 'Cross-Origin-Resource-Policy', value: 'same-origin' },
   { key: 'X-DNS-Prefetch-Control', value: 'off' },
-  // HSTS fica só no Caddy (borda), para não haver dois valores divergentes.
-  {
-    key: 'Content-Security-Policy',
-    value:
-      "default-src 'self'; script-src 'self' 'unsafe-inline'" +
-      (isDev ? " 'unsafe-eval'" : '') +
-      "; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; media-src 'self' blob:; font-src 'self' data:; connect-src 'self' ws: wss:; frame-src 'self'; frame-ancestors 'none'; object-src 'none'; base-uri 'self'; form-action 'self';",
-  },
+  // HSTS fica só no Caddy (borda), e a CSP com nonce dinâmico é emitida em apps/web/proxy.ts.
 ];
 
 const nextConfig = {

@@ -1,8 +1,9 @@
 import { AuditInterceptor } from './audit/audit.interceptor';
 import { ShiftReportsModule } from './shift-reports/shift-reports.module';
 import { NetworkTopologiesModule } from './network-topologies/network-topologies.module';
-import { Module } from '@nestjs/common';
+import { MiddlewareConsumer, Module, NestModule } from '@nestjs/common';
 import { APP_INTERCEPTOR } from '@nestjs/core';
+import { GlobalRateLimitMiddleware } from './common/global-rate-limit.middleware';
 import { AppController } from './app.controller';
 import { AuthModule } from './auth/auth.module';
 import { CalendarModule } from './calendar/calendar.module';
@@ -82,4 +83,8 @@ import { CustomerPortalModule } from './customers/customer-portal.module';
     },
   ],
 })
-export class AppModule {}
+export class AppModule implements NestModule {
+  configure(consumer: MiddlewareConsumer) {
+    consumer.apply(GlobalRateLimitMiddleware).forRoutes('*');
+  }
+}

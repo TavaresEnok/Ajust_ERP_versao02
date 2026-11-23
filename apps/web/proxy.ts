@@ -37,12 +37,39 @@ function withRefreshedCookies(
   return response;
 }
 
+function buildCspHeader(nonce: string, request: NextRequest) {
+  const isDev = process.env.NODE_ENV !== 'production';
+  const isHttps =
+    request.headers.get('x-forwarded-proto') === 'https' || request.nextUrl.protocol === 'https:';
+  return [
+    "default-src 'self'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ''}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "media-src 'self' blob:",
+    "font-src 'self' data:",
+    "connect-src 'self' ws: wss:",
+    "frame-src 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "base-uri 'self'",
+    "form-action 'self'",
+    ...(!isDev && isHttps ? ['upgrade-insecure-requests'] : []),
+  ].join('; ');
+}
+
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
   const requestHeaders = new Headers(request.headers);
   // O escopo só pode vir deste proxy; nunca do cliente.
   requestHeaders.delete(SCOPE_HEADER);
   requestHeaders.delete('x-middleware-subrequest');
+  requestHeaders.delete('x-nonce');
+
+  const nonce = Buffer.from(crypto.randomUUID()).toString('base64');
+  const cspHeader = buildCspHeader(nonce, request);
+  requestHeaders.set('x-nonce', nonce);
+  requestHeaders.set('Content-Security-Policy', cspHeader);
 
   const isPublic = PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/csat/');
   const hasSessionCookie =
@@ -83,6 +110,7 @@ export async function proxy(request: NextRequest) {
       );
     }
     const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set('Content-Security-Policy', cspHeader);
     if (hasSessionCookie && !session) clearAuthCookies(response.cookies);
     return response;
   }
@@ -124,10 +152,9 @@ export async function proxy(request: NextRequest) {
     }),
   );
 
-  return withRefreshedCookies(
-    NextResponse.next({ request: { headers: requestHeaders } }),
-    session.refreshed,
-  );
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  response.headers.set('Content-Security-Policy', cspHeader);
+  return withRefreshedCookies(response, session.refreshed);
 }
 
 export const config = {
