@@ -9,10 +9,13 @@ test.describe('Páginas públicas', () => {
     await expect(page.getByRole('button', { name: /entrar no erp/i })).toBeVisible();
   });
 
-  test('login não oferece navegação anônima', async ({ page }) => {
+  test('login não oferece navegação anônima nem credenciais fixas', async ({ page }) => {
     await page.goto('/login');
     await expect(page.getByText(/explorar o sistema sem autenticação/i)).toHaveCount(0);
-    await expect(page.getByRole('region', { name: 'Acessos para demonstração' })).toBeVisible();
+    await expect(page.getByRole('region', { name: 'Acessos para demonstração' })).toHaveCount(0);
+    const bodyText = (await page.locator('body').textContent()) || '';
+    expect(bodyText).not.toMatch(/@ajust\.invalid/i);
+    expect(bodyText).not.toMatch(/Aj!/);
   });
 
   test('recuperação de senha carrega', async ({ page }) => {

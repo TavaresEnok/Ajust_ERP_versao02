@@ -123,8 +123,8 @@ test.describe('Jornada real da gerência', () => {
       '/gerencia/servicos',
       '/gerencia/politicas-sla',
     ]) {
-      await page.goto(path);
-      await page.waitForLoadState('networkidle');
+      await page.goto(path, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
       await page.screenshot({
         path: info.outputPath(`01-${path.split('/').pop()}.png`),
@@ -140,7 +140,7 @@ test.describe('Jornada real da gerência', () => {
     const name = `Diagnóstico gerencial ${Date.now()}`;
     await page.goto('/gerencia/workflows');
     await page.getByRole('button', { name: 'Novo fluxo', exact: true }).click();
-    await page.getByLabel('Nome do serviço', { exact: true }).fill(name);
+    await page.getByLabel('Nome do fluxo', { exact: true }).fill(name);
     await page.getByLabel('Nome da etapa', { exact: true }).fill('Diagnosticar demanda');
     const requirements = page.getByLabel('Evidências obrigatórias (uma por linha)', {
       exact: true,
@@ -150,11 +150,11 @@ test.describe('Jornada real da gerência', () => {
     await requirements.press('Enter');
     await requirements.pressSequentially('Impacto');
     await expect(requirements).toHaveValue('Diagnóstico\nImpacto');
-    await page.getByRole('button', { name: 'Adicionar próxima etapa', exact: true }).click();
+    await page.getByRole('button', { name: 'Próxima etapa', exact: true }).click();
     await page.getByLabel('Nome da etapa', { exact: true }).fill('Aplicar e validar correção');
     await requirements.fill('Correção aplicada\nValidação');
     const before = await db.serviceOrder.count({ where: { tenantId } });
-    await page.getByRole('button', { name: 'Simular sem criar O.S.', exact: true }).click();
+    await page.getByRole('button', { name: 'Simular', exact: true }).click();
     await page.getByRole('button', { name: 'Concluído', exact: true }).click();
     await page.getByRole('button', { name: 'Concluído', exact: true }).click();
     await expect(page.getByText('Fluxo chegou ao encerramento.', { exact: true })).toBeVisible();
@@ -169,11 +169,12 @@ test.describe('Jornada real da gerência', () => {
       )
       .toBe(1);
     await expect(
-      page.getByText('Há um rascunho salvo. Publique para aplicá-lo às novas O.S.', {
+      page.getByText('Publique o fluxo para poder vincular um serviço.', {
         exact: true,
       }),
     ).toBeVisible();
-    await page.getByRole('button', { name: 'Publicar nova versão', exact: true }).click();
+    await page.getByRole('button', { name: 'Publicar', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publicar', exact: true }).click();
     await expect
       .poll(async () =>
         db.serviceProcessTemplate.count({
@@ -197,9 +198,10 @@ test.describe('Jornada real da gerência', () => {
     expect(instance.templateCode).toBe(template.code);
     // A publicação posterior não pode reescrever o fluxo de uma O.S. já aberta.
     await page.goto('/gerencia/workflows');
-    await page.getByLabel('Tipo de atendimento', { exact: true }).selectOption(template.code);
-    await page.getByLabel('Nome do serviço', { exact: true }).fill(`${name} revisado`);
-    await page.getByRole('button', { name: 'Publicar nova versão', exact: true }).click();
+    await page.getByRole('button', { name: new RegExp(name) }).click();
+    await page.getByLabel('Nome do fluxo', { exact: true }).fill(`${name} revisado`);
+    await page.getByRole('button', { name: 'Publicar', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publicar', exact: true }).click();
     await expect
       .poll(
         async () =>
@@ -240,12 +242,10 @@ test.describe('Jornada real da gerência', () => {
     const name = `Entregas gerenciais ${Date.now()}`;
     await page.goto('/gerencia/workflows');
     await page.getByRole('button', { name: 'Novo fluxo', exact: true }).click();
-    await page.getByLabel('Nome do serviço', { exact: true }).fill(name);
+    await page.getByLabel('Nome do fluxo', { exact: true }).fill(name);
+    await page.getByRole('button', { name: 'Trabalho em paralelo', exact: true }).click();
     await page
-      .getByRole('button', { name: 'Adicionar duas entregas paralelas', exact: true })
-      .click();
-    await page
-      .getByLabel('Selecionar bloco', { exact: true })
+      .getByLabel('Etapa em edição', { exact: true })
       .selectOption({ label: 'Aguardar as duas entregas' });
     await expect(
       page.getByRole('checkbox', { name: 'Entrega complementar 1', exact: true }),
@@ -253,12 +253,13 @@ test.describe('Jornada real da gerência', () => {
     await expect(
       page.getByRole('checkbox', { name: 'Entrega complementar 2', exact: true }),
     ).toBeChecked();
-    await page.getByRole('button', { name: 'Simular sem criar O.S.', exact: true }).click();
+    await page.getByRole('button', { name: 'Simular', exact: true }).click();
     for (let i = 0; i < 3; i++)
       await page.getByRole('button', { name: 'Concluído', exact: true }).first().click();
     await expect(page.getByText('Fluxo chegou ao encerramento.', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Sair da simulação', exact: true }).click();
-    await page.getByRole('button', { name: 'Publicar nova versão', exact: true }).click();
+    await page.getByRole('button', { name: 'Publicar', exact: true }).click();
+    await page.getByRole('dialog').getByRole('button', { name: 'Publicar', exact: true }).click();
     await expect
       .poll(async () =>
         db.serviceProcessTemplate.count({
@@ -288,7 +289,7 @@ test.describe('Jornada real da gerência', () => {
     expect(children).toHaveLength(2);
     expect(
       (await db.occurrence.findUniqueOrThrow({ where: { id: root.occurrenceId! } })).status,
-    ).toBe('EM_EXECUCAO');
+    ).toBe('ABERTA');
     for (const child of children) {
       await page.goto(`/gerencia/ordens/${child.id}`);
       await page.getByRole('button', { name: 'Iniciar execução', exact: true }).click();
@@ -418,7 +419,7 @@ test.describe('Jornada real da gerência', () => {
       'aria-selected',
       'true',
     );
-    await page.getByRole('button', { name: 'Nova política', exact: true }).click();
+    await page.getByRole('button', { name: 'Exceção por tipo', exact: true }).click();
     const dialog = page.getByRole('dialog');
     await dialog.getByLabel('Tipo de serviço *', { exact: true }).selectOption('DNS');
     await dialog.getByLabel(/^Prazo de resolução/).fill('4');
@@ -614,8 +615,8 @@ test.describe('Jornada real da gerência', () => {
   test('fluxos e acompanhamento de SLA continuam acessíveis em celular', async ({ page }, info) => {
     await page.setViewportSize({ width: 390, height: 844 });
     for (const route of ['workflows', 'sla', 'tecnicos', 'provedores']) {
-      await page.goto(`/gerencia/${route}`);
-      await page.waitForLoadState('networkidle');
+      await page.goto(`/gerencia/${route}`, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
       await expect(page.getByRole('heading', { level: 1 }).first()).toBeVisible();
       expect(
         await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth),

@@ -494,12 +494,13 @@ async function main() {
 
     expectStatus(approve.status, [200, 201]);
 
-    const closeWithApproval = await request(app.getHttpServer())
-      .patch(`/service-orders/${orderId}/transition`)
-      .set('Authorization', `Bearer ${accessToken}`)
-      .send({ toStatus: 'FECHADA', reason: 'encerramento apos aprovacao', expectedVersion: 3 });
+    // Aprovação gerencial sem etapas pendentes fecha a O.S. automaticamente.
+    const afterApproval = await request(app.getHttpServer())
+      .get(`/service-orders/${orderId}`)
+      .set('Authorization', `Bearer ${accessToken}`);
 
-    assert.equal(closeWithApproval.status, 200, 'closing with approval should pass');
+    assert.equal(afterApproval.status, 200, 'fetching approved order should pass');
+    assert.equal(afterApproval.body.status, 'FECHADA', 'approval should auto-close resolved order');
 
     console.log('[e2e] workflow: transitions/approval ✓');
 

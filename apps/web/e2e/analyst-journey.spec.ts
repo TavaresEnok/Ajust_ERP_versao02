@@ -431,7 +431,7 @@ test.describe('Jornada real do analista', () => {
     });
     expect(
       (await db.occurrence.findUniqueOrThrow({ where: { id: root.occurrenceId! } })).status,
-    ).toBe('EM_EXECUCAO');
+    ).toBe('ABERTA');
     await page.goto(`/analista/ocorrencias/${root.occurrenceId}/ordens`);
     await expect(page.getByRole('status').filter({ hasText: '2 O.S. pendente(s)' })).toBeVisible();
     await page.screenshot({ path: info.outputPath('05-entregas-pendentes.png'), fullPage: true });
@@ -448,7 +448,7 @@ test.describe('Jornada real do analista', () => {
       if (index === 0)
         expect(
           (await db.occurrence.findUniqueOrThrow({ where: { id: root.occurrenceId! } })).status,
-        ).toBe('EM_EXECUCAO');
+        ).toBe('ABERTA');
     }
     await expect
       .poll(
@@ -634,7 +634,7 @@ test.describe('Jornada real do analista', () => {
     await expect(page.getByRole('button', { name: 'Encerrar O.S.', exact: true })).toHaveCount(0);
     expect(
       (await db.occurrence.findUniqueOrThrow({ where: { id: order.occurrenceId! } })).status,
-    ).toBe('EM_EXECUCAO');
+    ).toBe('PENDENTE');
     await page.screenshot({ path: info.outputPath('07-aprovacao-pendente.png'), fullPage: true });
   });
 });

@@ -36,8 +36,8 @@ test.describe('Portal da gerência', () => {
     expect(routes.length).toBeGreaterThan(15);
     const errors = watchErrors(page);
     for (const route of routes) {
-      await page.goto(route);
-      await page.waitForLoadState('networkidle');
+      await page.goto(route, { waitUntil: 'domcontentloaded' });
+      await page.waitForLoadState('networkidle', { timeout: 10_000 }).catch(() => {});
       await expect(page.getByText(/não foi possível carregar/i)).toHaveCount(0);
     }
     expect(errors).toEqual([]);

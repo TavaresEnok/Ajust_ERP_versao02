@@ -44,7 +44,8 @@ services:
       # Só na máquina: o acesso público é pelo Caddy (https://erp.ajustconsulting.com.br).
       - "127.0.0.1:${WEB_PORT:-8070}:3000"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
       # O Next standalone escuta em $HOSTNAME; com o id do contêiner, o healthcheck em 127.0.0.1 falha.
@@ -78,7 +79,8 @@ services:
       # Mesma porta usada pelo Caddy para o /socket.io.
       - "127.0.0.1:${API_PORT:-8092}:3001"
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
       - WORKER_API_TOKEN=${WORKER_API_TOKEN:?Defina WORKER_API_TOKEN}
@@ -135,7 +137,8 @@ services:
   worker:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/worker:${IMAGE_TAG:-latest}
     env_file:
-      - .env
+      - path: .env
+        required: false
     environment:
       - NODE_ENV=production
       - API_INTERNAL_URL=http://api:3001

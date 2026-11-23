@@ -5,13 +5,14 @@ ENV PATH="$PNPM_HOME:$PATH"
 RUN corepack enable
 
 FROM base AS builder
-# Necessário para alguns binários nativos no alpine
-RUN apk update && apk add --no-cache libc6-compat
+# Necessário para alguns binários nativos no alpine e para empacotar a extensão do cofre no build limpo
+RUN apk update && apk add --no-cache libc6-compat zip bash
 WORKDIR /app
 # Copia o código fonte
 COPY . .
-# Instala as dependências e constrói tudo (API, Worker, Web)
+# Instala as dependências, empacota a extensão do cofre e constrói tudo (API, Worker, Web)
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store pnpm install --frozen-lockfile
+RUN bash scripts/empacotar-extensao.sh
 RUN pnpm exec prisma generate --schema prisma/schema.prisma
 RUN pnpm build
 # Após o build da web, copia os arquivos estáticos para standalone
