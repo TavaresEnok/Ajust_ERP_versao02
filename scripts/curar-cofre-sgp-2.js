@@ -12,29 +12,49 @@
  * anotação nunca é alterada; a saída nunca mostra segredo (só formato mascarado).
  */
 const { PrismaClient } = require('/app/apps/api/node_modules/@prisma/client');
-const { decryptVaultSecret, encryptVaultSecret, vaultSourceNoteText } = require('/app/apps/api/dist/common/vault.crypto.js');
-const { unpackVaultContent, packVaultContent, VaultAccessSchema } = require('/app/apps/api/dist/common/vault-content.js');
+const {
+  decryptVaultSecret,
+  encryptVaultSecret,
+  vaultSourceNoteText,
+} = require('/app/apps/api/dist/common/vault.crypto.js');
+const {
+  unpackVaultContent,
+  packVaultContent,
+  VaultAccessSchema,
+} = require('/app/apps/api/dist/common/vault-content.js');
 const { categoryFor } = require('/app/apps/api/dist/customers/sgp-vault-import.js');
 const { decodeHTML } = require('/app/node_modules/.pnpm/entities@6.0.1/node_modules/entities');
 
 const APPLY = process.env.APPLY === '1';
 const VERSION = 'auto-2026-11-12-b';
 const prisma = new PrismaClient();
-const mask = (s) => String(s ?? '').replace(/[A-Za-zÀ-ÿ]/g, 'a').replace(/\d/g, '9');
+const mask = (s) =>
+  String(s ?? '')
+    .replace(/[A-Za-zÀ-ÿ]/g, 'a')
+    .replace(/\d/g, '9');
 const clean = (s) =>
-  decodeHTML(String(s || '').replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>|<\/tr>|<\/td>/gi, '\n').replace(/<[^>]+>/g, ''))
+  decodeHTML(
+    String(s || '')
+      .replace(/<br\s*\/?>|<\/p>|<\/div>|<\/li>|<\/tr>|<\/td>/gi, '\n')
+      .replace(/<[^>]+>/g, ''),
+  )
     .replace(/ /g, ' ')
     .replace(/[​-‍﻿]/g, '')
     .replace(/[ \t]+/g, ' ')
     // "Usuário: admin / Senha: x" ou "Usuário: root Senha: root" na mesma linha: duas linhas.
     .split('\n')
     .map((l) =>
-      /^\s*(login|usu[aá]rio|usuario|user)\b/i.test(l) && /\S\s*(?:[\/;|]\s*)?\b(senha|password)\s*:/i.test(l)
+      /^\s*(login|usu[aá]rio|usuario|user)\b/i.test(l) &&
+      /\S\s*(?:[\/;|]\s*)?\b(senha|password)\s*:/i.test(l)
         ? l.replace(/\s*(?:[\/;|]\s*)?\b(senha|password)(\s*:)/i, '\n$1$2')
         : l,
     )
     .join('\n');
-const strip = (s) => s.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+const strip = (s) =>
+  s
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase();
 
 const METHOD_WORDS = [
   [/\b(web|http|https|painel|site|navegador)\b/, 'WEB'],
@@ -46,16 +66,23 @@ const METHOD_WORDS = [
   [/\b(banco|db|mysql|postgres|database)\b/, 'BANCO'],
 ];
 const methodOf = (text) => METHOD_WORDS.find(([re]) => re.test(strip(text)))?.[1] || null;
-const QUALIFIER_IS_CONTEXT = /\b(web|ssh|winbox|telnet|vpn|rdp|banco|db|wifi|wi-fi|sistema|painel|acesso|do|da|de|aplicacao|app|api|ftp|sftp|mysql|postgres|e-?mail|cliente|admin(istrador)?|master|leitura|novo|nova|antigo|antiga|\d+)\b/;
+const QUALIFIER_IS_CONTEXT =
+  /\b(web|ssh|winbox|telnet|vpn|rdp|banco|db|wifi|wi-fi|sistema|painel|acesso|do|da|de|aplicacao|app|api|ftp|sftp|mysql|postgres|e-?mail|cliente|admin(istrador)?|master|leitura|novo|nova|antigo|antiga|\d+)\b/;
 
-const U_RE = /^(login|logins|usu[aá]rios?|usuario|users?|username|e-?mail|ssid)\b([^:=;]*?)\s*(?:[:=;]\s*(.*))?$/i;
+const U_RE =
+  /^(login|logins|usu[aá]rios?|usuario|users?|username|e-?mail|ssid)\b([^:=;]*?)\s*(?:[:=;]\s*(.*))?$/i;
 const S_RE = /^(senhas?|password|pass(?:wd)?|pwd)\b([^:=;]*?)\s*(?:[:=;]\s*(.*))?$/i;
 const P_RE = /^portas?\b([^:=;\d]*?)\s*(?:[:=;]\s*)?(\d{1,5})?\s*$/i;
 const ADDR_IN = /https?:\/\/[^\s"'<>|]+|(?:\d{1,3}\.){3}\d{1,3}(?::\d{1,5})?/i;
 const SEP = /^[-=_#*~.]{5,}/;
-const ADDR_LABEL = /^(ip|ips|host|url|link|endere[cç]o|acesso(?:\s+[a-zà-ú]+){0,3}|ip(?:\s+[a-zà-ú]+){1,3})\s*[:=]?\s*$/i;
+const ADDR_LABEL =
+  /^(ip|ips|host|url|link|endere[cç]o|acesso(?:\s+[a-zà-ú]+){0,3}|ip(?:\s+[a-zà-ú]+){1,3})\s*[:=]?\s*$/i;
 const isLabel = (l) => U_RE.test(l) || S_RE.test(l) || P_RE.test(l) || ADDR_LABEL.test(l);
-const splitList = (v) => v.split(/\s+(?:\/\/?|\|)\s+/).map((x) => x.trim()).filter(Boolean);
+const splitList = (v) =>
+  v
+    .split(/\s+(?:\/\/?|\|)\s+/)
+    .map((x) => x.trim())
+    .filter(Boolean);
 
 function endpointOf(raw) {
   const m = String(raw || '').match(ADDR_IN);
@@ -77,7 +104,10 @@ function endpointOf(raw) {
 
 /** Lê a anotação e devolve os pares usuário/senha com o contexto de cada um. */
 function parse(note) {
-  const lines = note.split('\n').map((l) => l.trim()).filter(Boolean);
+  const lines = note
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean);
   const pairs = [];
   const issues = [];
   let section = { title: '', method: null, addr: null, port: null, orphans: [] };
@@ -98,7 +128,8 @@ function parse(note) {
   let pendingUsers = null; // { values, method, context }
   let lastUsers = null;
   const valueAt = (i, inline) => {
-    if (inline !== undefined && inline !== null && inline.trim() !== '') return { v: inline.trim(), used: i };
+    if (inline !== undefined && inline !== null && inline.trim() !== '')
+      return { v: inline.trim(), used: i };
     const next = lines[i + 1];
     if (next && !isLabel(next) && !SEP.test(next)) return { v: next, used: i + 1 };
     return { v: '', used: i };
@@ -108,7 +139,16 @@ function parse(note) {
       push({ users: pendingUsers.values, secrets: [], ...ctx(pendingUsers) });
       pendingUsers = null;
     }
-    section = { title: title.replace(/[:=#*]+$/g, '').replace(/^[#=*\s-]+|[#=*\s-]+$/g, '').slice(0, 50), method: methodOf(title), addr: null, port: null, orphans: [] };
+    section = {
+      title: title
+        .replace(/[:=#*]+$/g, '')
+        .replace(/^[#=*\s-]+|[#=*\s-]+$/g, '')
+        .slice(0, 50),
+      method: methodOf(title),
+      addr: null,
+      port: null,
+      orphans: [],
+    };
     lastUsers = null;
   };
   // Porta e tipo do bloco valem no fim (a porta costuma vir depois do usuário e senha).
@@ -149,7 +189,15 @@ function parse(note) {
       // qualificador próprio ("Senha do banco:" é outra credencial).
       const nextS = (lines[used + 1] || '').match(S_RE);
       const nextIsSecret = !!nextS && !(nextS[2] || '').trim();
-      if (qual && !QUALIFIER_IS_CONTEXT.test(q) && /^\S+$/.test(qual) && v && v !== qual && !nextIsSecret && !/^ssid$/i.test(m[1])) {
+      if (
+        qual &&
+        !QUALIFIER_IS_CONTEXT.test(q) &&
+        /^\S+$/.test(qual) &&
+        v &&
+        v !== qual &&
+        !nextIsSecret &&
+        !/^ssid$/i.test(m[1])
+      ) {
         // "User root: X" / "Usuário root:" + valor: o nome está no rótulo e o valor é a senha.
         push({ users: [qual], secrets: [v], ...ctx({}) });
         i = used;
@@ -163,7 +211,11 @@ function parse(note) {
       const paren = v.match(/^(.*?)\s*\(\s*([^)]*)\)\s*$/);
       const value = paren ? paren[1] : v;
       if (pendingUsers) push({ users: pendingUsers.values, secrets: [], ...ctx(pendingUsers) });
-      pendingUsers = { values: splitList(value), method: methodOf(qual) || (paren ? methodOf(paren[2]) : null), context: /^ssid$/i.test(m[1]) ? 'Wi-Fi' : qual };
+      pendingUsers = {
+        values: splitList(value),
+        method: methodOf(qual) || (paren ? methodOf(paren[2]) : null),
+        context: /^ssid$/i.test(m[1]) ? 'Wi-Fi' : qual,
+      };
       i = used;
       continue;
     }
@@ -196,7 +248,9 @@ function parse(note) {
       continue;
     }
     // endereço: rótulo "IP:/URL:/Acesso Web:" com valor, linha só com endereço, ou "SSH: user@ip"
-    const sshAt = line.match(/^(?:ssh|acesso ssh)\s*[:=]?\s*(?:ssh\s+)?([\w.\-]+)@((?:\d{1,3}\.){3}\d{1,3})/i);
+    const sshAt = line.match(
+      /^(?:ssh|acesso ssh)\s*[:=]?\s*(?:ssh\s+)?([\w.\-]+)@((?:\d{1,3}\.){3}\d{1,3})/i,
+    );
     if (sshAt) {
       newSection('SSH');
       section.addr = endpointOf(sshAt[2]);
@@ -205,7 +259,9 @@ function parse(note) {
       continue;
     }
     const ep = endpointOf(line);
-    const labelOnly = /^(ip|ips|host|url|link|endere[cç]o|acesso[^:]*|ip [^:]*)\s*:?\s*$/i.test(line);
+    const labelOnly = /^(ip|ips|host|url|link|endere[cç]o|acesso[^:]*|ip [^:]*)\s*:?\s*$/i.test(
+      line,
+    );
     if (labelOnly) {
       const { v, used } = valueAt(i, null);
       const e2 = endpointOf(v);
@@ -222,11 +278,18 @@ function parse(note) {
       continue;
     }
     if (ep) {
-      const titled = /^acesso\b/i.test(line) || /^[^:]{2,40}:\s*(?:ssh\s+)?(https?:\/\/|\d)/i.test(line);
+      const titled =
+        /^acesso\b/i.test(line) || /^[^:]{2,40}:\s*(?:ssh\s+)?(https?:\/\/|\d)/i.test(line);
       if (titled && !/^(ip|ips|host|url|link)\b/i.test(line)) newSection(line.split(':')[0]);
       // Linha que é só o endereço, ou "IP: x" / "IP = x": endereço do bloco. Endereço no meio
       // de uma frase ("fica no servidor 1.2.3.4") só vale se o bloco não tiver outro.
-      const strong = ADDR_IN.test(line) && (line.replace(ADDR_IN, '').replace(/^[\s\w.-]{0,30}[:=]/, '').trim().length <= 3 || titled);
+      const strong =
+        ADDR_IN.test(line) &&
+        (line
+          .replace(ADDR_IN, '')
+          .replace(/^[\s\w.-]{0,30}[:=]/, '')
+          .trim().length <= 3 ||
+          titled);
       setAddr(ep, strong);
       section.method = section.method || methodOf(line) || (ep.web ? 'WEB' : null);
       continue;
@@ -245,7 +308,12 @@ function parse(note) {
       }
     }
     // título de bloco: linha curta sem ':' e com letras (ex.: "ACESSO WEB", "LINUX", "GRAFANA")
-    if (line.length <= 60 && !/[:=]/.test(line) && /[A-Za-zÀ-ÿ]{3}/.test(line) && (/^[^a-z]*$/.test(line) || /^(acesso|banco|vm|maquina|máquina)\b/i.test(line))) {
+    if (
+      line.length <= 60 &&
+      !/[:=]/.test(line) &&
+      /[A-Za-zÀ-ÿ]{3}/.test(line) &&
+      (/^[^a-z]*$/.test(line) || /^(acesso|banco|vm|maquina|máquina)\b/i.test(line))
+    ) {
       newSection(line);
       continue;
     }
@@ -261,7 +329,9 @@ function parse(note) {
     else if (users.length === 1) combos = secrets.map((s) => [users[0], s]);
     else if (secrets.length === 1) combos = users.map((u) => [u, secrets[0]]);
     else {
-      issues.push(`listas de tamanhos diferentes (${users.length} usuários, ${secrets.length} senhas)`);
+      issues.push(
+        `listas de tamanhos diferentes (${users.length} usuários, ${secrets.length} senhas)`,
+      );
       continue;
     }
     combos.forEach(([u, s], k) => {
@@ -278,16 +348,23 @@ function parse(note) {
           /* mantém */
         }
       }
-      const label = [p.section, p.context && !strip(p.section).includes(strip(p.context)) ? p.context : '', u || 'sem usuário']
+      const label = [
+        p.section,
+        p.context && !strip(p.section).includes(strip(p.context)) ? p.context : '',
+        u || 'sem usuário',
+      ]
         .filter(Boolean)
         .join(' · ')
         .replace(/\s+/g, ' ')
         .slice(0, 120);
       entries.push({
-        label: combos.length > 1 && users.length === 1 && secrets.length > 1 ? `${label} (senha ${k + 1})`.slice(0, 120) : label,
+        label:
+          combos.length > 1 && users.length === 1 && secrets.length > 1
+            ? `${label} (senha ${k + 1})`.slice(0, 120)
+            : label,
         method,
         host: addr?.host || '',
-        port: addr?.web || wifi ? null : p.sec.port ?? addr?.port ?? null,
+        port: addr?.web || wifi ? null : (p.sec.port ?? addr?.port ?? null),
         context: '',
         username: u,
         secret: s,
@@ -310,7 +387,9 @@ function parse(note) {
   for (const r of rows) {
     const raw = r.sourceNoteEnc ? vaultSourceNoteText(r.sourceNoteEnc) || '' : '';
     const note = clean(raw);
-    const content = unpackVaultContent(r.protectedContentEnc ? decryptVaultSecret(r.protectedContentEnc) : null);
+    const content = unpackVaultContent(
+      r.protectedContentEnc ? decryptVaultSecret(r.protectedContentEnc) : null,
+    );
     if (content.accessEntries.length) {
       inc('já estruturado');
       continue;
@@ -335,8 +414,14 @@ function parse(note) {
     const withSecret = entries.filter((e) => e.secret);
     const secretsSet = new Set(entries.map((e) => e.secret).filter(Boolean));
     // Trava: usuário igual a uma senha do item é leitura errada (o usuário aparece sem máscara).
-    const leak = entries.some((e) => e.username && secretsSet.has(e.username) && !/^(root|admin|user|suporte|ubnt)$/i.test(e.username));
-    const bad = leak || entries.some((e) => !inNote(e.username) || !inNote(e.secret)) || entries.length > 30;
+    const leak = entries.some(
+      (e) =>
+        e.username &&
+        secretsSet.has(e.username) &&
+        !/^(root|admin|user|suporte|ubnt)$/i.test(e.username),
+    );
+    const bad =
+      leak || entries.some((e) => !inNote(e.username) || !inNote(e.secret)) || entries.length > 30;
     let valid = true;
     try {
       entries.forEach((e) => VaultAccessSchema.parse(e));
@@ -345,17 +430,39 @@ function parse(note) {
     }
     const tag = `${r.id.slice(0, 8)} [${r.equipmentType}] ${r.equipmentName.slice(0, 48)}`;
     const labeledSecret = /^\s*(senhas?|password|pass(?:wd)?|pwd)\b\s*[:=;]?\s*\S/im.test(note);
-    if (!withSecret.length && !labeledSecret && r.equipmentType === 'A CONFERIR' && !issues.length) {
+    if (
+      !withSecret.length &&
+      !labeledSecret &&
+      r.equipmentType === 'A CONFERIR' &&
+      !issues.length
+    ) {
       const byTitle = categoryFor(r.equipmentName);
       const type = byTitle !== 'OUTROS' ? byTitle : /^https?:/i.test(r.host) ? 'SISTEMA' : 'OUTROS';
       inc('sem senha na anotação · só reclassificado');
       report.push(`○ ${tag} → ${type} (a anotação não tem senha)`);
       const meta = r.sourceMetadata && typeof r.sourceMetadata === 'object' ? r.sourceMetadata : {};
-      updates.push({ id: r.id, tenantId: r.tenantId, updatedAt: r.updatedAt, count: 0, data: { equipmentType: type, sourceMetadata: { ...meta, curationVersion: VERSION, ambiguous: false, reviewRequired: false } } });
+      updates.push({
+        id: r.id,
+        tenantId: r.tenantId,
+        updatedAt: r.updatedAt,
+        count: 0,
+        data: {
+          equipmentType: type,
+          sourceMetadata: {
+            ...meta,
+            curationVersion: VERSION,
+            ambiguous: false,
+            reviewRequired: false,
+          },
+        },
+      });
       continue;
     }
     if (!withSecret.length || issues.length || bad || !valid) {
-      const why = !withSecret.length ? 'nenhuma senha rotulada' : issues[0] || (leak ? 'usuário igual a uma senha' : bad ? 'valor fora da nota' : 'formato inválido');
+      const why = !withSecret.length
+        ? 'nenhuma senha rotulada'
+        : issues[0] ||
+          (leak ? 'usuário igual a uma senha' : bad ? 'valor fora da nota' : 'formato inválido');
       inc('não resolvido · ' + why);
       report.push(`✗ ${tag} — ${why}`);
       continue;
@@ -365,7 +472,13 @@ function parse(note) {
     const methods = withSecret.map((e) => e.method);
     const most = (m) => methods.filter((x) => x === m).length;
     const known = ['WEB', 'SSH', 'RDP', 'WINBOX', 'TELNET'].some((m) => most(m));
-    const byUse = !known ? 'OUTROS' : most('WINBOX') ? 'ROUTER' : most('WEB') >= most('SSH') + most('RDP') ? 'SISTEMA' : 'SERVIDOR';
+    const byUse = !known
+      ? 'OUTROS'
+      : most('WINBOX')
+        ? 'ROUTER'
+        : most('WEB') >= most('SSH') + most('RDP')
+          ? 'SISTEMA'
+          : 'SERVIDOR';
     const byBody = categoryFor(note);
     const type =
       r.equipmentType !== 'A CONFERIR'
@@ -380,7 +493,13 @@ function parse(note) {
     inc(`resolvido · ${entries.length} acesso(s)`);
     report.push(
       `✓ ${tag} → ${type} | ` +
-        entries.map((e) => `[${mask(e.label).slice(0, 28)}] ${e.method}${e.port ? ':' + e.port : ''} ${e.host ? mask(e.host).slice(0, 22) : '—'} u=${mask(e.username).slice(0, 14) || '—'} s=${e.secret ? mask(e.secret).length + 'c' : '—'}`).join(' ; ').slice(0, 400),
+        entries
+          .map(
+            (e) =>
+              `[${mask(e.label).slice(0, 28)}] ${e.method}${e.port ? ':' + e.port : ''} ${e.host ? mask(e.host).slice(0, 22) : '—'} u=${mask(e.username).slice(0, 14) || '—'} s=${e.secret ? mask(e.secret).length + 'c' : '—'}`,
+          )
+          .join(' ; ')
+          .slice(0, 400),
     );
     const meta = r.sourceMetadata && typeof r.sourceMetadata === 'object' ? r.sourceMetadata : {};
     updates.push({
@@ -389,12 +508,27 @@ function parse(note) {
       updatedAt: r.updatedAt,
       data: {
         equipmentType: type,
-        accessMethod: first.method === 'BANCO' ? 'OUTROS' : ['WEB', 'SSH', 'WINBOX', 'TELNET', 'RDP'].includes(first.method) ? first.method : r.accessMethod === 'SEM_ACESSO' ? 'OUTROS' : r.accessMethod,
+        accessMethod:
+          first.method === 'BANCO'
+            ? 'OUTROS'
+            : ['WEB', 'SSH', 'WINBOX', 'TELNET', 'RDP'].includes(first.method)
+              ? first.method
+              : r.accessMethod === 'SEM_ACESSO'
+                ? 'OUTROS'
+                : r.accessMethod,
         host: r.host || first.host || '',
         username: first.username,
         secretEnc: encryptVaultSecret(first.secret),
-        ...(keepEntries ? { protectedContentEnc: encryptVaultSecret(packVaultContent(content.text, entries)) } : {}),
-        sourceMetadata: { ...meta, curationVersion: VERSION, ambiguous: false, reviewRequired: false, missingFields: [...(!(r.host || first.host) ? ['endereço'] : [])] },
+        ...(keepEntries
+          ? { protectedContentEnc: encryptVaultSecret(packVaultContent(content.text, entries)) }
+          : {}),
+        sourceMetadata: {
+          ...meta,
+          curationVersion: VERSION,
+          ambiguous: false,
+          reviewRequired: false,
+          missingFields: [...(!(r.host || first.host) ? ['endereço'] : [])],
+        },
       },
       count: entries.length,
     });
@@ -407,10 +541,28 @@ function parse(note) {
     await prisma.$transaction(
       async (tx) => {
         for (const u of updates) {
-          const res = await tx.knowledgeCredential.updateMany({ where: { id: u.id, updatedAt: u.updatedAt }, data: u.data });
+          const res = await tx.knowledgeCredential.updateMany({
+            where: { id: u.id, updatedAt: u.updatedAt },
+            data: u.data,
+          });
           if (res.count !== 1) continue;
           done++;
-          await tx.auditLog.create({ data: { tenantId: u.tenantId, actorUserId: null, action: 'OS_UPDATE', resourceType: 'knowledge_credential', resourceId: u.id, metadata: { op: 'update', operation: 'auto_curation', version: VERSION, changeLabel: 'Acessos organizados a partir da anotação do SGP', accessCount: u.count } } });
+          await tx.auditLog.create({
+            data: {
+              tenantId: u.tenantId,
+              actorUserId: null,
+              action: 'OS_UPDATE',
+              resourceType: 'knowledge_credential',
+              resourceId: u.id,
+              metadata: {
+                op: 'update',
+                operation: 'auto_curation',
+                version: VERSION,
+                changeLabel: 'Acessos organizados a partir da anotação do SGP',
+                accessCount: u.count,
+              },
+            },
+          });
         }
       },
       { timeout: 120000 },
