@@ -66,7 +66,7 @@ export function AuthPage({ mode }: { mode: string }) {
       <section className="auth-story">
         <Brand />
         <div>
-          <span className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/20 px-3 py-2 text-[10px] text-white/70">
+          <span className="mb-7 inline-flex items-center gap-2 rounded-full border border-white/20 px-3 py-2 text-xs text-white/70">
             <span className="size-1.5 rounded-full bg-chart-2" />
             GESTÃO QUE CONECTA
           </span>
@@ -87,13 +87,13 @@ export function AuthPage({ mode }: { mode: string }) {
             </span>
             <div>
               <p className="text-xs">Sua operação, em boas mãos.</p>
-              <p className="mt-2 text-[10px] text-white/50">
+              <p className="mt-2 text-xs text-white/50">
                 Clareza, segurança e produtividade em cada detalhe.
               </p>
             </div>
           </div>
         </div>
-        <p className="text-[10px] text-white/40">© 2026 Ajust Tecnologia · Feito para conectar.</p>
+        <p className="text-xs text-white/40">© 2026 Ajust Tecnologia · Feito para conectar.</p>
       </section>
       <section className="auth-form">
         <div>
@@ -139,7 +139,7 @@ export function AuthPage({ mode }: { mode: string }) {
             </div>
           ) : (
             <>
-              <span className="mb-5 inline-flex items-center gap-1.5 rounded bg-secondary px-2 py-1 text-[9px] text-primary">
+              <span className="mb-5 inline-flex items-center gap-1.5 rounded bg-secondary px-2 py-1 text-xs text-primary">
                 <LockKeyhole className="size-3" />
                 {action.connected ? 'ACESSO AO ERP' : 'PRÉVIA DE INTERFACE'}
               </span>
@@ -350,7 +350,7 @@ export function AuthPage({ mode }: { mode: string }) {
                           {isReset || isBootstrapVerify ? 'Nova senha' : 'Senha'}
                         </FieldLabel>
                         {isLogin && (
-                          <Link href="/forgot-password" className="text-[10px] text-primary">
+                          <Link href="/forgot-password" className="text-xs text-primary">
                             Esqueceu a senha?
                           </Link>
                         )}
@@ -452,7 +452,7 @@ export function AuthPage({ mode }: { mode: string }) {
                   <ArrowRight data-icon="inline-end" />
                 </Button>
               </form>
-              <p className="mt-5 text-[10px] leading-5 text-muted-foreground">
+              <p className="mt-5 text-xs leading-5 text-muted-foreground">
                 {action.connected
                   ? 'Acesse com as credenciais fornecidas pela sua empresa.'
                   : 'O acesso está temporariamente indisponível.'}
@@ -619,7 +619,7 @@ export function SatisfactionPage({ token }: { token: string }) {
                 {action.connected ? 'Enviar avaliação' : 'Validar avaliação sem enviar'}
               </Button>
             </form>
-            <p className="mt-4 text-[10px] text-muted-foreground">
+            <p className="mt-4 text-xs text-muted-foreground">
               {action.connected
                 ? 'Resposta única vinculada ao token desta pesquisa.'
                 : 'Prévia visual. Nenhuma resposta é enviada ao servidor.'}

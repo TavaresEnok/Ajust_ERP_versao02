@@ -224,7 +224,7 @@ function RealtimeEventsSession() {
             <AlertDescription>{lastError}</AlertDescription>
           </Alert>
         )}
-        <div className="border-b border-border bg-muted/30 px-5 py-3 text-[10px] text-muted-foreground">
+        <div className="border-b border-border bg-muted/30 px-5 py-3 text-xs text-muted-foreground">
           {scope
             ? `Tenant da sessão: ${scope.tenantId}`
             : 'Tenant indisponível sem sessão autenticada'}{' '}
@@ -237,14 +237,14 @@ function RealtimeEventsSession() {
                 key={event.id}
                 className="grid gap-3 p-5 md:grid-cols-[170px_190px_minmax(0,1fr)]"
               >
-                <time className="text-[10px] text-muted-foreground" dateTime={event.at}>
+                <time className="text-xs text-muted-foreground" dateTime={event.at}>
                   {new Date(event.at).toLocaleString('pt-BR')}
                 </time>
                 <p className="flex items-center gap-2 text-xs font-medium">
                   <Radio className="size-3.5 text-primary" />
                   {event.name}
                 </p>
-                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-[10px] leading-relaxed text-muted-foreground">
+                <pre className="max-h-64 overflow-auto rounded-md bg-muted p-3 text-xs leading-relaxed text-muted-foreground">
                   {JSON.stringify(event.payload, null, 2)}
                 </pre>
               </li>

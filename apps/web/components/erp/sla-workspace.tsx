@@ -1,7 +1,7 @@
 'use client';
 import { useState } from 'react';
 import Link from 'next/link';
-import { Plus } from 'lucide-react';
+import { Pencil, Plus, Trash2 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Button } from '@/components/ui/button';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs';
@@ -194,20 +194,24 @@ export function SlaWorkspace({ initialTab = 'Monitoramento' }: { initialTab?: st
                         <td>
                           <Button
                             variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setEditing(policy);
                               setDialog('policy');
                             }}
                           >
+                            <Pencil data-icon="inline-start" />
                             Editar
                           </Button>
                           <Button
                             variant="ghost"
+                            size="sm"
                             onClick={() => {
                               setRemoveLabel('');
                               setRemovePath(`/sla-policies/${policy.id}`);
                             }}
                           >
+                            <Trash2 data-icon="inline-start" />
                             Remover
                           </Button>
                         </td>

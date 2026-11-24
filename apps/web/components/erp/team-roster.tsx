@@ -261,10 +261,10 @@ function MemberPicker({
               }
               className="size-4 accent-primary"
             />
-            <Avatar name={member.name} className="size-6 text-[10px]" />
+            <Avatar name={member.name} className="size-6 text-xs" />
             <span className="min-w-0 flex-1 break-words text-xs font-medium">{member.name}</span>
             {assignmentCounts && (
-              <span className="shrink-0 rounded-md bg-secondary px-2 py-1 text-[10px] text-muted-foreground">
+              <span className="shrink-0 rounded-md bg-secondary px-2 py-1 text-xs text-muted-foreground">
                 {assignmentCounts.get(member.id) || 0}{' '}
                 {assignmentCounts.get(member.id) === 1 ? 'plantão' : 'plantões'}
               </span>
@@ -514,7 +514,7 @@ function DayEditor({
               onChange={(event) => setNotes(event.target.value)}
               placeholder="Orientações para a equipe…"
             />
-            <span className="text-right text-[10px] tabular-nums text-muted-foreground">
+            <span className="text-right text-xs tabular-nums text-muted-foreground">
               {notes.length} / 1.000 caracteres
             </span>
           </label>
@@ -917,7 +917,7 @@ export function TeamRosterPage() {
                     }}
                   />
                 </div>
-                <p className="mt-2 text-[10px] text-muted-foreground">
+                <p className="mt-2 text-xs text-muted-foreground">
                   Sábados, domingos e feriados · {roster.timezone}
                 </p>
               </div>
@@ -1009,7 +1009,7 @@ export function TeamRosterPage() {
                 )}
               </div>
             )}
-            <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-secondary/10 px-5 py-3 text-[10px] text-muted-foreground">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-t bg-secondary/10 px-5 py-3 text-xs text-muted-foreground">
               <span aria-live="polite">
                 {visibleDays.length} de {days.length} datas especiais
               </span>

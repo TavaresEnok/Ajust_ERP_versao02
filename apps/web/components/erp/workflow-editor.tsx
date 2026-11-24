@@ -283,7 +283,7 @@ function WorkflowDraft({
               </Button>
             </PanelHeading>
             <WorkflowGraph definition={definition} onChange={updateDefinition} onEdit={editNode} />
-            <p className="px-5 pb-4 text-[10px] text-muted-foreground">
+            <p className="px-5 pb-4 text-xs text-muted-foreground">
               Arraste nós para posicionar, una os conectores ou use o formulário Conectar. Duplo
               clique abre a configuração. Todas as mudanças são rascunhos.
             </p>
@@ -294,7 +294,7 @@ function WorkflowDraft({
                     <div className="flex items-center gap-3">
                       <Workflow className="size-4 text-primary" />
                       <div className="min-w-0 flex-1">
-                        <p className="text-[9px] text-muted-foreground">
+                        <p className="text-xs text-muted-foreground">
                           {node.type === 'trigger'
                             ? 'GATILHO'
                             : node.type === 'condition'
@@ -335,10 +335,10 @@ function WorkflowDraft({
                         <Trash2 />
                       </Button>
                     </div>
-                    <details className="mt-3 text-[10px] text-muted-foreground">
+                    <details className="mt-3 text-xs text-muted-foreground">
                       <summary className="cursor-pointer">Detalhes do desenho</summary>
                       <p className="mt-2 break-all font-mono">{node.id}</p>
-                      <p className="mt-2 text-[10px] text-muted-foreground">
+                      <p className="mt-2 text-xs text-muted-foreground">
                         Posição: {node.position.x}, {node.position.y}
                       </p>
                     </details>
@@ -365,7 +365,7 @@ function WorkflowDraft({
               {definition.edges.map((edge) => (
                 <div
                   key={edge.id}
-                  className="flex items-center justify-between gap-3 rounded-lg bg-muted p-3 text-[10px]"
+                  className="flex items-center justify-between gap-3 rounded-lg bg-muted p-3 text-xs"
                 >
                   <span className="break-all">
                     {nodeLabels[

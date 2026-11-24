@@ -69,7 +69,7 @@ export function OrderTrailPage() {
                   <h3 className="text-xs font-semibold">
                     {String(event.message || event.toStatus || 'Atualização')}
                   </h3>
-                  <p className="mt-3 text-[10px] leading-6 text-muted-foreground">
+                  <p className="mt-3 text-xs leading-6 text-muted-foreground">
                     {date(event.createdAt)}
                   </p>
                 </div>

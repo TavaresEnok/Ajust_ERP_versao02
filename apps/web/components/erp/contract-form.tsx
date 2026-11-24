@@ -111,7 +111,7 @@ export function ContractFields({
       else sections.push({ title: field.section, fields: [field] });
     }
     return (
-      <div className="flex flex-col gap-5 [&_[data-slot=field-label]]:font-normal [&_[data-slot=field-label]]:text-muted-foreground">
+      <div className="flex flex-col gap-5">
         {sections.map((section, index) => (
           <section
             key={section.title || index}
@@ -308,11 +308,11 @@ export function ContractForm({
         </Alert>
       )}
       <div className="flex flex-wrap items-center justify-end gap-3 border-t border-border pt-4">
-        <p className="mr-auto text-[10px] text-muted-foreground">
-          {connected
-            ? 'A alteração só será confirmada após a resposta do servidor.'
-            : 'Prévia do formulário. Nenhum dado será salvo.'}
-        </p>
+        {!connected && (
+          <p className="mr-auto text-xs text-muted-foreground">
+            Prévia do formulário. Nenhum dado será salvo.
+          </p>
+        )}
         <Button type="submit" disabled={pending || submitting}>
           {pending || submitting
             ? 'Enviando...'

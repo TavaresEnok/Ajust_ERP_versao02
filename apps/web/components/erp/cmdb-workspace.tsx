@@ -154,7 +154,7 @@ export function CmdbWorkspace({
               }}
             />
             {content !== null && (
-              <pre className="mt-5 max-h-96 overflow-auto rounded-lg bg-muted p-4 text-[10px]">
+              <pre className="mt-5 max-h-96 overflow-auto rounded-lg bg-muted p-4 text-xs">
                 {content}
               </pre>
             )}
@@ -234,7 +234,7 @@ export function CmdbWorkspace({
                   v{diff.fromVersion} → v{diff.toVersion} · {diff.addedLinesCount} linhas
                   adicionadas · {diff.removedLinesCount} removidas
                 </p>
-                <div className="max-h-96 overflow-auto rounded-lg border border-border font-mono text-[10px]">
+                <div className="max-h-96 overflow-auto rounded-lg border border-border font-mono text-xs">
                   {diff.diffLines.map((line, index) => (
                     <pre
                       className={

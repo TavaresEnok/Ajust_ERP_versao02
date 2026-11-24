@@ -163,8 +163,7 @@ export function SettingsPage({ section: requested = 'geral' }: { section?: strin
                     />
                   </Field>
                   <p className="text-xs leading-6 text-muted-foreground">
-                    Tema e densidade são preferências da interface. O backend original não oferece
-                    contrato de preferências pessoais, idioma ou formato de data.
+                    Tema e densidade são preferências visuais salvas neste navegador.
                   </p>
                 </FieldGroup>
               </div>
@@ -266,7 +265,7 @@ export function NotificationsConfigPage({ section = 'regras' }: { section?: stri
                   <tr key={row.id}>
                     <td>
                       <strong className="block font-medium">{String(row.name)}</strong>
-                      <span className="mt-2 block text-[10px] text-muted-foreground">
+                      <span className="mt-2 block text-xs text-muted-foreground">
                         {String(row.trigger)}
                       </span>
                     </td>

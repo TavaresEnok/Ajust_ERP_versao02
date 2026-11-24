@@ -87,7 +87,7 @@ export function StructuredAccesses({
             <div className="flex items-start justify-between gap-3">
               <h3 className="min-w-0 break-words font-semibold">{entry.label}</h3>
               {method && (
-                <span className="shrink-0 rounded bg-primary/10 px-2 py-1 text-[10px] font-medium text-primary">
+                <span className="shrink-0 rounded bg-primary/10 px-2 py-1 text-xs font-medium text-primary">
                   {method}
                   {entry.port !== null && !web ? ` · porta ${entry.port}` : ''}
                 </span>
@@ -95,7 +95,7 @@ export function StructuredAccesses({
             </div>
             {fields.map((field) => (
               <div key={field.label}>
-                <p className="mb-1 block text-[10px] font-semibold uppercase text-muted-foreground">
+                <p className="mb-1 block text-xs font-semibold uppercase text-muted-foreground">
                   {field.label}
                 </p>
                 {field.secret && !field.value ? (

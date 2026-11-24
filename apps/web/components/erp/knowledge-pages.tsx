@@ -188,7 +188,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
       <header className="tone-surface tone-info relative overflow-hidden rounded-2xl border p-6 sm:p-8">
         <div className="flex flex-wrap items-start justify-between gap-5">
           <div>
-            <p className="mb-3 flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.18em] text-info">
+            <p className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[.18em] text-info">
               <BookOpen className="size-4" />
               Base de conhecimento · Ajust
             </p>
@@ -223,7 +223,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                 <stat.icon className="size-4 text-info" />
               </span>
               <div>
-                <p className="text-[10px] uppercase tracking-wider text-muted-foreground">
+                <p className="text-xs uppercase tracking-wider text-muted-foreground">
                   {stat.label}
                 </p>
                 <p className="mt-1 font-semibold">{stat.value}</p>
@@ -253,7 +253,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
             aria-label="Categorias da Ajustpedia"
             className="rounded-2xl border border-border bg-card p-3"
           >
-            <p className="px-3 py-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Categorias técnicas
             </p>
             {['Todos', ...tags].map((category) => (
@@ -274,7 +274,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                 <span className="flex-1">
                   {category === 'Todos' ? 'Todos os artigos' : category}
                 </span>
-                <span className="rounded bg-muted px-1.5 py-0.5 text-[10px]">
+                <span className="rounded bg-muted px-1.5 py-0.5 text-xs">
                   {category === 'Todos'
                     ? articles.length
                     : articles.filter((article) => (article.tags as string[]).includes(category))
@@ -284,7 +284,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
             ))}
           </nav>
           <div className="rounded-2xl border border-border bg-card p-4">
-            <p className="mb-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Tags da equipe
             </p>
             <div className="flex flex-wrap gap-1.5">
@@ -360,7 +360,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
               <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border bg-card p-3">
                 <p className="text-xs font-semibold">
                   {tag === 'Todos' ? 'Todos os artigos' : tag}
-                  <span className="ml-2 rounded-full bg-muted px-2 py-1 text-[10px] text-muted-foreground">
+                  <span className="ml-2 rounded-full bg-muted px-2 py-1 text-xs text-muted-foreground">
                     {visible.length} artigos
                   </span>
                   {onlyFavorites && <span className="ml-2 text-warning">Favoritos</span>}
@@ -403,7 +403,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                             {(article.tags as string[]).slice(0, 3).map((t) => (
                               <span
                                 key={t}
-                                className="rounded-md bg-primary/5 px-2 py-1 text-[10px] font-medium text-primary"
+                                className="rounded-md bg-primary/5 px-2 py-1 text-xs font-medium text-primary"
                               >
                                 {t}
                               </span>
@@ -423,7 +423,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                         </p>
                         {parsed.command && mode === 'cards' && (
                           <div className="relative mt-4 rounded-xl border border-white/10 bg-slate-950 p-3">
-                            <div className="mb-2 flex items-center justify-between text-[10px] text-slate-400">
+                            <div className="mb-2 flex items-center justify-between text-xs text-slate-400">
                               <span className="flex items-center gap-1">
                                 <Terminal className="size-3" />
                                 COMANDO
@@ -444,7 +444,7 @@ export function KnowledgePage({ id, editing = false }: { id?: string; editing?: 
                           </div>
                         )}
                       </div>
-                      <footer className="flex items-center justify-between gap-2 border-t border-border bg-muted/10 px-5 py-3 text-[10px] text-muted-foreground">
+                      <footer className="flex items-center justify-between gap-2 border-t border-border bg-muted/10 px-5 py-3 text-xs text-muted-foreground">
                         <span className="truncate">
                           {String(article.author)} · {String(article.date)}
                         </span>

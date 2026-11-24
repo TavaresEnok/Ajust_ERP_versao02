@@ -291,7 +291,7 @@ function AnalystHistory() {
             title={mine ? 'Minhas O.S. · evolução' : 'O.S. da Ajust · evolução'}
             description="Aberturas e conclusões nas respectivas datas, sem contar cancelamentos como entregas."
           >
-            <div className="flex gap-3 text-[10px] text-muted-foreground">
+            <div className="flex gap-3 text-xs text-muted-foreground">
               <span className="flex items-center gap-1">
                 <i className="size-2 rounded-full bg-chart-1" />
                 Abertas
@@ -463,7 +463,7 @@ function AnalystHistory() {
                     <span className="text-2xl font-semibold tabular-nums">
                       {totals?.totalActive ?? 0}
                     </span>
-                    <span className="text-[9px] uppercase tracking-wider text-muted-foreground">
+                    <span className="text-xs uppercase tracking-wider text-muted-foreground">
                       Ativas
                     </span>
                   </div>

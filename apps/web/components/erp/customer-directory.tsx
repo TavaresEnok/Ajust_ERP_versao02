@@ -361,7 +361,7 @@ export function CustomerDirectory({ id }: { id?: string }) {
                                       <span className="line-clamp-2">
                                         #{order.protocol} · {order.title}
                                       </span>
-                                      <span className="text-[10px] text-muted-foreground">
+                                      <span className="text-xs text-muted-foreground">
                                         {deadlineSituation(order, new Date())}
                                       </span>
                                     </Link>

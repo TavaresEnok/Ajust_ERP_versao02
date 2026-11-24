@@ -552,3 +552,26 @@ Abaixo está a análise individualizada de cada uma das páginas que compõem os
 4. **Substituição de UUIDs por Seletores Amigáveis:** Trocar o input de texto de UUID em `security-workspace.tsx` pelo combobox com busca de pessoas.
 5. **Ajustes de Acessibilidade Móvel (390 px):** Aplicar containers com rolagem horizontal às barras de filtro e eliminar tamanhos de fonte inferiores a 12 px (`text-[9px]` e `text-[10px]`).
 
+
+---
+
+## 9. Atualização de Resolução (24/11/2026)
+
+Todos os achados levantados na auditoria inicial (09/11/2026) foram endereçados nos lotes recentes e nos ajustes finais aplicados em **24/11/2026**:
+
+### Alto Impacto — Status
+- **[ALTO-01] Rotas do menu da gerência:** Resolvido em [`apps/web/lib/navigation.ts`](file:///home/app/projects/Ajust_ERP/apps/web/lib/navigation.ts) (prefixos ajustados para `/gerencia/*` no catálogo base e reescrita dinâmica em `getPortalNavigation`).
+- **[ALTO-02] Proteção `beforeunload` / `dirty tracking`:** Resolvido em [`apps/web/components/erp/contract-form.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/contract-form.tsx) com monitoramento de alterações e alerta nativo antes de sair.
+- **[ALTO-03] Encerramento em lote de O.S.:** Resolvido em [`apps/web/components/erp/occurrence-attendance.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/occurrence-attendance.tsx) com listagem explícita dos protocolos pendentes e caixa de confirmação obrigatória.
+- **[ALTO-04] Seleção de colaborador em Sessões:** Resolvido em [`apps/web/components/erp/security-workspace.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/security-workspace.tsx) substituindo o input de UUID por seletor pesquisável de usuários.
+- **[ALTO-05] Aviso de modo exemplo na Escala de Plantão:** Resolvido em [`apps/web/components/erp/team-roster.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/team-roster.tsx) com faixa fixa destacada em alerta (`border-warning bg-warning-surface`) indicando que o modo exemplo não salva alterações.
+
+### Médio e Baixo Impacto — Status (24/11/2026)
+- **[MED-02] Contraste de rótulos (`ContractFields`):** Removida a sobrescrita `font-normal text-muted-foreground` em [`contract-form.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/contract-form.tsx).
+- **[MED-03] Disclaimers técnicos expostos:** Removido o texto técnico do rodapé de [`contract-form.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/contract-form.tsx) e simplificada a nota de preferências em [`settings-pages.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/settings-pages.tsx).
+- **[MED-06] Posição da barra de abas em Tipos de Serviço:** Movida para abaixo do `<PageHeading>` em [`service-types-analytics.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/service-types-analytics.tsx) e [`catalog-pages.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/catalog-pages.tsx).
+- **[MED-07] Tema claro/escuro na Ajustpedia:** Aplicados tokens semânticos (`tone-surface`, `bg-card`, `border-border`) em [`knowledge-pages.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/knowledge-pages.tsx).
+- **[MED-08 / MED-11] Catálogo e Políticas de SLA:** Simplificado o texto de *"Carregar serviços padrão"*, condicionado o banner de SLA pendente à ausência de regras e conectada a persistência real do `Switch` via `PATCH` em [`catalog-pages.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/catalog-pages.tsx).
+- **[MED-09] Busca e filtro em Ocorrências:** Adicionados busca textual e filtro de status em [`calendar-pages.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/calendar-pages.tsx).
+- **[MED-10] Estilo do `<textarea>` de conclusão:** Corrigido de `native-select` para `native-input` em [`occurrence-attendance.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/occurrence-attendance.tsx).
+- **[BAIX-01 / BAIX-02 / BAIX-07 / BAIX-08]:** Eliminadas todas as classes `text-[9px]` e `text-[10px]` (substituídas por `text-xs`) em `apps/web/components/erp/*.tsx`, removido o selo `"ERP"` em [`reports-page.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/reports-page.tsx), ampliado o campo de busca em [`people-pages.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/people-pages.tsx) e adicionados ícones `Pencil`/`Trash2` em [`sla-workspace.tsx`](file:///home/app/projects/Ajust_ERP/apps/web/components/erp/sla-workspace.tsx).

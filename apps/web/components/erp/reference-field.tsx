@@ -288,7 +288,7 @@ export function ReferenceField({
           defaultValue={value}
           placeholder={field.type === 'uuid' ? 'UUID do registro no ERP' : undefined}
         />
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           {!query.connected
             ? 'Busca por nome disponível após conectar o ERP. Não há opções fictícias.'
             : 'Seu perfil não pode consultar esta lista.'}
@@ -313,7 +313,7 @@ export function ReferenceField({
             <option key={name} value={name} />
           ))}
         </datalist>
-        <p className="text-[10px] text-muted-foreground">
+        <p className="text-xs text-muted-foreground">
           Sugestões da empresa ativa. Este contrato envia o nome textual; você pode informar outro
           valor.
         </p>
@@ -365,7 +365,7 @@ export function ReferenceField({
           </option>
         ))}
       </select>
-      <p id={`${id}-state`} className="text-[10px] text-muted-foreground" role="status">
+      <p id={`${id}-state`} className="text-xs text-muted-foreground" role="status">
         {query.error
           ? 'Não foi possível buscar as opções. Tente novamente.'
           : query.isLoading

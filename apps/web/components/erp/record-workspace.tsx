@@ -290,7 +290,7 @@ export function RecordWorkspace({
                   .filter((f) => f.type !== 'password' && (!customer || f.name !== 'internalNotes'))
                   .map((field) => (
                     <div key={field.name}>
-                      <dt className="mb-2 text-[10px] text-muted-foreground">{field.label}</dt>
+                      <dt className="mb-2 text-xs text-muted-foreground">{field.label}</dt>
                       <dd className="whitespace-pre-wrap break-words text-xs leading-6">
                         {field.options?.[String(record[field.name])] ||
                           displayValue(record[field.name])}
@@ -299,7 +299,7 @@ export function RecordWorkspace({
                   ))}
                 {kind === 'orders' && (
                   <div>
-                    <dt className="text-[10px] text-muted-foreground">Visível ao cliente</dt>
+                    <dt className="text-xs text-muted-foreground">Visível ao cliente</dt>
                     <dd className="mt-2 text-xs">{displayValue(record.isCustomerVisible)}</dd>
                   </div>
                 )}
@@ -554,7 +554,7 @@ export function RecordWorkspace({
                     <p className="whitespace-pre-wrap break-words text-sm leading-6">
                       {displayValue(row.message)}
                     </p>
-                    <p className="mt-2 text-[10px] text-muted-foreground">
+                    <p className="mt-2 text-xs text-muted-foreground">
                       {new Date(String(row.createdAt)).toLocaleString('pt-BR', {
                         timeZone: 'America/Fortaleza',
                       })}{' '}

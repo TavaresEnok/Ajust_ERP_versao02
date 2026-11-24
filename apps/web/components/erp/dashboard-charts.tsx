@@ -157,7 +157,7 @@ export function StatusChart({
       </ChartContainer>
       <div className="pointer-events-none absolute inset-0 flex flex-col items-center justify-center">
         <strong className="text-[29px] font-semibold tracking-tight">{total}</strong>
-        <span className="text-[10px] text-muted-foreground">{caption}</span>
+        <span className="text-xs text-muted-foreground">{caption}</span>
       </div>
     </div>
   );

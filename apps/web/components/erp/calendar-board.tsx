@@ -114,10 +114,7 @@ export function CalendarBoard() {
         <div className="overflow-x-auto" tabIndex={0} aria-label="Calendário mensal">
           <div className="grid min-w-[700px] grid-cols-7 border-t border-border">
             {['Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb', 'Dom'].map((label) => (
-              <div
-                key={label}
-                className="border-b border-border p-3 text-[10px] text-muted-foreground"
-              >
+              <div key={label} className="border-b border-border p-3 text-xs text-muted-foreground">
                 {label}
               </div>
             ))}
@@ -146,7 +143,7 @@ export function CalendarBoard() {
                     type="button"
                     onClick={() => create(key)}
                     className={cn(
-                      'mb-1 flex size-6 items-center justify-center rounded-full text-[10px] focus-visible:outline focus-visible:outline-primary',
+                      'mb-1 flex size-6 items-center justify-center rounded-full text-xs focus-visible:outline focus-visible:outline-primary',
                       key === localDay(new Date()) && 'bg-primary text-primary-foreground',
                     )}
                     aria-label={`Agendar em ${date.toLocaleDateString('pt-BR')}`}
@@ -157,7 +154,7 @@ export function CalendarBoard() {
                     <button
                       key={event.id}
                       type="button"
-                      className="truncate rounded border border-border bg-secondary px-2 py-1 text-left text-[10px] text-secondary-foreground"
+                      className="truncate rounded border border-border bg-secondary px-2 py-1 text-left text-xs text-secondary-foreground"
                       onClick={() => {
                         setSelected(event);
                         setOpen(true);
@@ -178,7 +175,7 @@ export function CalendarBoard() {
             })}
           </div>
         </div>
-        <p className="p-5 text-[10px] text-muted-foreground">
+        <p className="p-5 text-xs text-muted-foreground">
           {query.connected
             ? `${rows.length} compromissos no intervalo consultado.`
             : 'Calendário sem compromissos: backend não conectado.'}{' '}

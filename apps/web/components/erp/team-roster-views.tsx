@@ -57,10 +57,10 @@ export function MemberChips({
               ownId === id && 'border-primary/30 bg-primary/10 text-primary',
             )}
           >
-            {!compact && <Avatar name={name} className="size-5 shrink-0 text-[9px]" />}
+            {!compact && <Avatar name={name} className="size-5 shrink-0 text-xs" />}
             <span className="min-w-0 break-words">{name}</span>
             {ownId === id && (
-              <span className="shrink-0 rounded bg-primary/10 px-1 text-[9px] font-semibold">
+              <span className="shrink-0 rounded bg-primary/10 px-1 text-xs font-semibold">
                 você
               </span>
             )}
@@ -86,7 +86,7 @@ function RosterStatus({ pending }: { pending: boolean }) {
   return (
     <span
       className={cn(
-        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-[10px] font-semibold',
+        'inline-flex items-center gap-1.5 whitespace-nowrap rounded-full border px-2 py-1 text-xs font-semibold',
         pending
           ? 'border-warning/20 bg-warning/10 text-warning'
           : 'border-success/20 bg-success/10 text-success',
@@ -129,7 +129,7 @@ export function RosterSummary({
       >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               {nextMine
                 ? 'Meu próximo plantão'
                 : next?.date === today
@@ -161,7 +161,7 @@ export function RosterSummary({
       <section className="panel flex min-w-0 flex-col p-4">
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               Próximo feriado
             </p>
             <p className="mt-2 text-sm font-semibold capitalize">
@@ -214,7 +214,7 @@ export function RosterTable({
   return (
     <div className="overflow-x-auto">
       <table className="w-full min-w-[660px] text-left text-xs">
-        <thead className="border-b bg-secondary/40 text-[10px] uppercase tracking-wider text-muted-foreground">
+        <thead className="border-b bg-secondary/40 text-xs uppercase tracking-wider text-muted-foreground">
           <tr>
             <th className="w-44 px-5 py-3 font-semibold">Data especial</th>
             <th className="px-4 py-3 font-semibold">Equipe diurna</th>
@@ -244,12 +244,12 @@ export function RosterTable({
                     {dateLabel(day.date, { day: '2-digit', month: '2-digit' })}
                   </span>
                   {day.date === today && (
-                    <span className="rounded bg-primary px-1.5 py-0.5 text-[9px] font-semibold text-primary-foreground">
+                    <span className="rounded bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
                       Hoje
                     </span>
                   )}
                   {day.holidayName && (
-                    <span className="rounded border border-info/20 bg-info/10 px-1.5 py-0.5 text-[9px] font-medium text-info">
+                    <span className="rounded border border-info/20 bg-info/10 px-1.5 py-0.5 text-xs font-medium text-info">
                       Feriado
                     </span>
                   )}
@@ -258,7 +258,7 @@ export function RosterTable({
                   {dateLabel(day.date, { weekday: 'long' })}
                 </p>
                 {day.holidayName && (
-                  <p className="mt-1 max-w-40 text-[10px] text-info">{day.holidayName}</p>
+                  <p className="mt-1 max-w-40 text-xs text-info">{day.holidayName}</p>
                 )}
               </td>
               <td className="max-w-lg px-4 py-4 align-middle">
@@ -334,7 +334,7 @@ export function RosterBoard({
             <h3 className="text-[11px] font-semibold text-muted-foreground">
               Semana de {dateLabel(week)}
             </h3>
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {entries.length} {entries.length === 1 ? 'data' : 'datas'}
             </span>
           </div>
@@ -369,7 +369,7 @@ export function RosterBoard({
                     </p>
                   </div>
                   {day.date === today ? (
-                    <span className="rounded bg-primary px-1.5 py-0.5 text-[9px] font-semibold text-primary-foreground">
+                    <span className="rounded bg-primary px-1.5 py-0.5 text-xs font-semibold text-primary-foreground">
                       Hoje
                     </span>
                   ) : (
@@ -377,7 +377,7 @@ export function RosterBoard({
                   )}
                 </div>
                 {day.holidayName && (
-                  <p className="mt-2 text-[10px] font-medium text-info">{day.holidayName}</p>
+                  <p className="mt-2 text-xs font-medium text-info">{day.holidayName}</p>
                 )}
                 <div className="my-3 min-h-10">
                   {day.dayPending ? (
@@ -389,7 +389,7 @@ export function RosterBoard({
                 {day.notes && (
                   <p className="mb-3 line-clamp-2 text-[11px] text-muted-foreground">{day.notes}</p>
                 )}
-                <div className="flex items-center justify-between border-t pt-2.5 text-[10px]">
+                <div className="flex items-center justify-between border-t pt-2.5 text-xs">
                   <span className="text-muted-foreground">
                     {day.dayUserIds.length
                       ? `${day.dayUserIds.length} na equipe`

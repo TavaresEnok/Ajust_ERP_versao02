@@ -85,7 +85,7 @@ export function ServiceProcessGraph({
     data: {
       label: (
         <div className="text-left">
-          <div className="text-[10px] uppercase">
+          <div className="text-xs uppercase">
             {n.sector} · {labels[n.kind]}
           </div>
           <strong>{n.name}</strong>

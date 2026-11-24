@@ -161,7 +161,7 @@ function TechnicalFields({
             className="flex items-center justify-between gap-3 rounded-xl border border-border bg-background p-3"
           >
             <div className="min-w-0">
-              <p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                 {field.label}
               </p>
               <p className="mt-1 break-all font-mono text-sm select-all">{field.value}</p>
@@ -752,7 +752,7 @@ export function CredentialsPage() {
             onRetry={() => void providerQuery.mutate()}
           />
           {providerMode === 'table' && (
-            <div className="grid grid-cols-[minmax(0,1fr)_85px_90px] gap-3 border-b border-border bg-muted/30 px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="grid grid-cols-[minmax(0,1fr)_85px_90px] gap-3 border-b border-border bg-muted/30 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <span>Provedor</span>
               <span>Itens</span>
               <span className="text-right">Acesso</span>
@@ -794,7 +794,7 @@ export function CredentialsPage() {
                           <span className="flex size-10 items-center justify-center rounded-xl bg-primary/10 text-primary">
                             <Building2 className="size-5" />
                           </span>
-                          <span className="rounded-full bg-muted px-2.5 py-1 text-[10px] text-muted-foreground">
+                          <span className="rounded-full bg-muted px-2.5 py-1 text-xs text-muted-foreground">
                             {Number(summary?.total || 0)} itens
                           </span>
                         </span>
@@ -859,7 +859,7 @@ export function CredentialsPage() {
               {provider.slice(0, 2)}
             </div>
             <div>
-              <div className="mb-1 text-[10px] font-semibold uppercase tracking-[0.18em] text-muted-foreground">
+              <div className="mb-1 text-xs font-semibold uppercase tracking-[0.18em] text-muted-foreground">
                 Cofre do provedor
               </div>
               <h1 className="text-xl font-semibold tracking-tight">Acessos · {provider}</h1>
@@ -884,7 +884,7 @@ export function CredentialsPage() {
             aria-label="Categorias do cofre"
             className="flex min-w-0 flex-wrap gap-1 rounded-2xl border border-border bg-card p-3 lg:sticky lg:top-4 lg:block lg:space-y-1"
           >
-            <p className="hidden px-3 pb-3 pt-2 text-[10px] font-semibold uppercase tracking-[0.16em] text-muted-foreground lg:block">
+            <p className="hidden px-3 pb-3 pt-2 text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground lg:block">
               Explorar inventário
             </p>
             {types.map((category) => {
@@ -909,7 +909,7 @@ export function CredentialsPage() {
                   <span className="flex-1">{categoryName(category)}</span>
                   <span
                     className={cn(
-                      'rounded-md px-1.5 py-0.5 text-[10px] tabular-nums',
+                      'rounded-md px-1.5 py-0.5 text-xs tabular-nums',
                       type === category ? 'bg-primary/10' : 'bg-muted',
                     )}
                   >
@@ -1003,7 +1003,7 @@ export function CredentialsPage() {
                         >
                           <Icon className="size-4" />
                         </span>
-                        <span className="text-[10px] text-muted-foreground">
+                        <span className="text-xs text-muted-foreground">
                           {categoryName(String(item.equipmentType))}
                         </span>
                       </div>
@@ -1029,7 +1029,7 @@ export function CredentialsPage() {
             ) : (
               <div className="overflow-x-auto">
                 <div className="min-w-[640px]">
-                  <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,.75fr)_90px] gap-4 bg-muted/30 px-5 py-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">
+                  <div className="grid grid-cols-[minmax(0,1.4fr)_minmax(0,1fr)_minmax(0,.75fr)_90px] gap-4 bg-muted/30 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
                     <span className="text-primary">Ativo / Equipamento</span>
                     <span className="text-warning">Host / Endereço IP / URL</span>
                     <span className="text-info">Usuário Autenticado</span>
@@ -1042,7 +1042,7 @@ export function CredentialsPage() {
                         <div className="flex items-center gap-2 border-y border-border bg-muted/40 px-5 py-2.5">
                           <Icon className="size-3.5 text-primary" />
                           <h3 className="text-xs font-semibold">{categoryName(group)}</h3>
-                          <span className="rounded bg-background px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                          <span className="rounded bg-background px-1.5 py-0.5 text-xs text-muted-foreground">
                             {rows.length}
                           </span>
                         </div>
@@ -1058,7 +1058,7 @@ export function CredentialsPage() {
                               <span className="block truncate text-xs font-semibold group-hover:text-primary">
                                 {text(item.equipmentName)}
                               </span>
-                              <span className="mt-1 block text-[10px] text-muted-foreground">
+                              <span className="mt-1 block text-xs text-muted-foreground">
                                 {rowSummary(item)}
                               </span>
                             </button>
@@ -1183,7 +1183,7 @@ export function CredentialsPage() {
                   <div className="flex min-w-0 items-center gap-2">
                     <span
                       className={cn(
-                        'rounded-md border px-2 py-0.5 text-[10px] font-semibold',
+                        'rounded-md border px-2 py-0.5 text-xs font-semibold',
                         typeMeta(selected.equipmentType).chip,
                       )}
                     >
@@ -1327,7 +1327,7 @@ export function CredentialsPage() {
                         {infoOnly ? 'Endereço' : 'Acesso'}
                       </h3>
                       {methodLabel(selected.accessMethod) && (
-                        <span className="rounded bg-primary/5 px-2 py-1 text-[10px] font-medium text-primary">
+                        <span className="rounded bg-primary/5 px-2 py-1 text-xs font-medium text-primary">
                           {methodLabel(selected.accessMethod)}
                         </span>
                       )}
@@ -1353,7 +1353,7 @@ export function CredentialsPage() {
                       .filter((field) => !(infoOnly && field.value === 'Não informado'))
                       .map((field) => (
                         <div key={field.label}>
-                          <p className="mb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                          <p className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">
                             {field.label}
                           </p>
                           <div className="flex items-center gap-2">
@@ -1380,7 +1380,7 @@ export function CredentialsPage() {
                       </p>
                     )}
                     <div hidden={infoOnly}>
-                      <p className="mb-1.5 text-[10px] font-semibold uppercase text-muted-foreground">
+                      <p className="mb-1.5 text-xs font-semibold uppercase text-muted-foreground">
                         Senha
                       </p>
                       {selected.hasSecret === false && (

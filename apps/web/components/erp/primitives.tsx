@@ -22,7 +22,7 @@ export function Brand() {
         <i />
       </span>
       ajust
-      <span className="ml-0.5 mt-3 text-[9px] font-medium tracking-[1.5px] text-muted-foreground">
+      <span className="ml-0.5 mt-3 text-xs font-medium tracking-[1.5px] text-muted-foreground">
         ERP
       </span>
     </div>

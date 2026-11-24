@@ -1,17 +1,18 @@
 'use client';
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import Link from 'next/link';
 import { Layers, Timer, Workflow, ArrowLeft, CheckCircle2, Plus } from 'lucide-react';
+import { toast } from 'sonner';
 import { Button, buttonVariants } from '@/components/ui/button';
 import { Switch } from '@/components/ui/switch';
-import { useErp, useErpQuery } from '@/lib/erp/gateway';
+import { useErp, useErpAction, useErpQuery } from '@/lib/erp/gateway';
 import {
   useVisualCollection,
   useVisualSource,
   useRouteBase,
   listRecords,
 } from '@/lib/erp/visual-data';
-import { priorities, orderTypes, type ErpRecord } from '@/lib/erp/contracts';
+import { priorities, orderTypes, errorMessage, type ErpRecord } from '@/lib/erp/contracts';
 import { PageHeading, PanelHeading, StatusBadge, ViewLink } from './primitives';
 import { RecordDialog } from './record-dialog';
 import { OperationControl } from './operation-controls';
@@ -22,14 +23,17 @@ export function CatalogPage({
   kind,
   id,
   editOnOpen = false,
+  afterHeading,
 }: {
   kind: 'services' | 'policies';
   id?: string;
   editOnOpen?: boolean;
+  afterHeading?: ReactNode;
 }) {
   const portalBase = useRouteBase();
   const isService = kind === 'services';
   const query = useVisualSource(kind);
+  const action = useErpAction();
   const [items, setItems] = useVisualCollection<ErpRecord>(kind);
   const [search, setSearch] = useState('');
   const [editing, setEditing] = useState(editOnOpen);
@@ -210,7 +214,7 @@ export function CatalogPage({
         {isService && (
           <OperationControl
             title="Carregar serviços padrão"
-            description="Solicitar ao ERP a criação dos serviços padrão. A aplicação depende das regras do servidor."
+            description="Carregar modelos sugeridos de serviços para telecom e suporte. Não altera itens já criados."
             path="/service-catalog/seed-defaults"
             roles={['super_admin', 'gerente']}
             after={async () => {
@@ -219,7 +223,8 @@ export function CatalogPage({
           />
         )}
       </PageHeading>
-      {!isService && (
+      {afterHeading}
+      {!isService && !query.isLoading && items.length === 0 && (
         <div className="panel mb-5 p-5 text-sm leading-7">
           <strong>SLA contratual pendente de configuração.</strong> Defina as políticas da Ajust
           antes de usar os indicadores como compromisso contratual. As metas dos fluxos de
@@ -251,12 +256,30 @@ export function CatalogPage({
                 </span>
                 <Switch
                   checked={item.active === true}
-                  disabled={!query.connected || !manager}
-                  onCheckedChange={(active) =>
+                  disabled={!query.connected || !manager || action.pending}
+                  onCheckedChange={async (active) => {
+                    const previous = item.active === true;
                     setItems((rows) =>
                       rows.map((row) => (row.id === item.id ? { ...row, active } : row)),
-                    )
-                  }
+                    );
+                    if (!query.connected || !manager) return;
+                    try {
+                      await action.execute({
+                        path: `${endpoint}/${encodeURIComponent(item.id)}`,
+                        method: 'PATCH',
+                        body: { active },
+                      });
+                      await query.mutate();
+                      toast.success(active ? 'Configuração ativada.' : 'Configuração desativada.');
+                    } catch (err) {
+                      setItems((rows) =>
+                        rows.map((row) =>
+                          row.id === item.id ? { ...row, active: previous } : row,
+                        ),
+                      );
+                      toast.error(errorMessage(err));
+                    }
+                  }}
                   aria-label={`Ativar ${item.name}`}
                 />
               </div>
@@ -270,7 +293,7 @@ export function CatalogPage({
                 {String(item.description)}
               </p>
               <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-                <span className="text-[10px] text-muted-foreground">{String(item.category)}</span>
+                <span className="text-xs text-muted-foreground">{String(item.category)}</span>
                 <ViewLink href={`${base}/${encodeURIComponent(item.id)}`}>Configurar</ViewLink>
               </div>
             </article>
@@ -324,7 +347,7 @@ export function WorkflowsPage({ id }: { id?: string }) {
               {String(row.description || '')}
             </p>
             <div className="mt-5 flex items-center justify-between border-t border-border pt-4">
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 {Array.isArray((row.definition as { nodes?: unknown[] } | undefined)?.nodes)
                   ? (row.definition as { nodes: unknown[] }).nodes.length
                   : '—'}{' '}

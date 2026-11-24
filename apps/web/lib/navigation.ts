@@ -148,19 +148,19 @@ export const navigation: NavGroup[] = [
     items: [
       {
         title: 'Ajustpedia',
-        path: '/analista/ajustpedia',
+        path: '/gerencia/ajustpedia',
         icon: BookOpen,
         description: 'O conhecimento da sua equipe, conectado e acessível.',
       },
       {
         title: 'Cofre de credenciais',
-        path: '/analista/credenciais',
+        path: '/gerencia/credenciais',
         icon: KeyRound,
         description: 'Organize os acessos dos provedores com segurança.',
       },
       {
         title: 'Minhas notas',
-        path: '/analista/notas',
+        path: '/gerencia/notas',
         icon: StickyNote,
         description: 'Ideias e anotações para simplificar seu dia a dia.',
       },

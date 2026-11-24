@@ -143,7 +143,7 @@ export function OrderExportDialog({
               {description}
             </p>
           </section>
-          <footer className="mt-9 border-t border-border pt-4 text-[10px] text-muted-foreground">
+          <footer className="mt-9 border-t border-border pt-4 text-xs text-muted-foreground">
             Documento gerado a partir dos dados retornados pelo Ajust ERP.
           </footer>
         </article>
@@ -178,7 +178,7 @@ export function OrderExportDialog({
               <Send data-icon="inline-start" />
               {action.pending ? 'Solicitando envio...' : 'Solicitar envio pelo ERP'}
             </Button>
-            <p className="text-[10px] text-muted-foreground">
+            <p className="text-xs text-muted-foreground">
               O ERP confirma apenas o recebimento da solicitação, não a entrega da mensagem.
             </p>
           </div>

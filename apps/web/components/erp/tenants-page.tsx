@@ -157,7 +157,7 @@ export function TenantsPage({
                 <StatusBadge status={String(row.status)} />
               </div>
               <h2 className="section-title">{String(row.name)}</h2>
-              <p className="mt-2 text-[10px] text-muted-foreground">{String(row.document)}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{String(row.document)}</p>
               <p className="mt-3 text-xs text-muted-foreground">{String(row.email)}</p>
               <div className="my-5 flex gap-6">
                 <span className="flex items-center gap-1.5 text-xs text-muted-foreground">

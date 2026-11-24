@@ -87,7 +87,7 @@ export function ReportFlowGraph({ data }: { data: unknown }) {
           <Controls showInteractive={false} />
         </ReactFlow>
       </div>
-      <p className="mt-3 text-[10px] text-muted-foreground">
+      <p className="mt-3 text-xs text-muted-foreground">
         Somente conexões retornadas pelo relatório, não regras de transição permitida. Contagens e
         tempos permanecem disponíveis nas tabelas.
       </p>

@@ -172,9 +172,7 @@ export function CustomerPortal({ section, id }: { section?: string; id?: string 
               <div className="space-y-5 px-6 pb-6">
                 {detail.data.occurrences?.map((comment) => (
                   <article key={comment.id} className="border-l-2 border-primary/20 pl-4">
-                    <p className="mb-2 text-[10px] text-muted-foreground">
-                      {date(comment.createdAt)}
-                    </p>
+                    <p className="mb-2 text-xs text-muted-foreground">{date(comment.createdAt)}</p>
                     <p className="whitespace-pre-wrap text-xs leading-6">{comment.message}</p>
                   </article>
                 ))}
@@ -295,7 +293,7 @@ export function CustomerPortal({ section, id }: { section?: string; id?: string 
             <tbody>
               {data?.orders.map((order) => (
                 <tr key={order.id}>
-                  <td className="font-mono text-[10px]">{order.protocol}</td>
+                  <td className="font-mono text-xs">{order.protocol}</td>
                   <td>
                     <Link
                       className="font-medium hover:text-primary"
@@ -303,7 +301,7 @@ export function CustomerPortal({ section, id }: { section?: string; id?: string 
                     >
                       {order.title}
                     </Link>
-                    <span className="mt-1 block text-[10px] text-muted-foreground">
+                    <span className="mt-1 block text-xs text-muted-foreground">
                       {date(order.createdAt)}
                     </span>
                   </td>
@@ -349,7 +347,7 @@ export function CustomerPortal({ section, id }: { section?: string; id?: string 
           </p>
         )}
         <footer className="flex items-center justify-between gap-3 border-t border-border p-4">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {data?.total ?? 0} atendimentos no filtro
           </span>
           <div className="flex gap-2">

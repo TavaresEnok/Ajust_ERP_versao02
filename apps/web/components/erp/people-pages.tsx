@@ -127,22 +127,22 @@ export function ProvidersPage() {
               >
                 {p.name}
               </Link>
-              <p className="mt-1.5 flex items-center gap-1.5 text-[10px] text-muted-foreground">
+              <p className="mt-1.5 flex items-center gap-1.5 text-xs text-muted-foreground">
                 <MapPin className="size-3" />
                 {p.city}
               </p>
-              <p className="mt-2 text-[10px] text-muted-foreground">{p.email}</p>
+              <p className="mt-2 text-xs text-muted-foreground">{p.email}</p>
               <div className="my-5 grid grid-cols-3 divide-x divide-border">
                 <div>
-                  <p className="text-[9px] text-muted-foreground">Total de ordens</p>
+                  <p className="text-xs text-muted-foreground">Total de ordens</p>
                   <strong className="mt-1 block text-xl font-medium">{p.orders}</strong>
                 </div>
                 <div className="pl-3">
-                  <p className="text-[9px] text-muted-foreground">Em aberto</p>
+                  <p className="text-xs text-muted-foreground">Em aberto</p>
                   <strong className="mt-1 block text-xl font-medium">{p.active}</strong>
                 </div>
                 <div className="pl-3">
-                  <p className="text-[9px] text-muted-foreground">Dentro do SLA</p>
+                  <p className="text-xs text-muted-foreground">Dentro do SLA</p>
                   <strong className="mt-1 block text-xl font-medium text-primary">
                     {String(p.sla) === '—' ? '—' : `${String(p.sla).replace('.', ',')}%`}
                   </strong>
@@ -309,7 +309,7 @@ export function ProviderDetail({
                   <div key={i.label} className="flex gap-3">
                     <i.icon className="mt-1 size-4 text-muted-foreground" />
                     <div>
-                      <p className="text-[9px] text-muted-foreground">{i.label}</p>
+                      <p className="text-xs text-muted-foreground">{i.label}</p>
                       <p className="mt-1 text-xs">{i.text}</p>
                     </div>
                   </div>
@@ -452,7 +452,7 @@ export function TechniciansPage() {
               onChange={(e) => setSearch(e.target.value)}
               placeholder="Buscar integrante..."
               aria-label="Buscar integrante"
-              className="w-36 bg-transparent text-xs outline-none"
+              className="w-56 bg-transparent text-xs outline-none sm:w-72"
             />
           </div>
         </PanelHeading>
@@ -482,7 +482,7 @@ export function TechniciansPage() {
                         <Avatar name={t.name} />
                         <span>
                           <strong className="block font-medium">{t.name}</strong>
-                          <span className="mt-1 block text-[9px] text-muted-foreground">
+                          <span className="mt-1 block text-xs text-muted-foreground">
                             {t.email}
                           </span>
                         </span>
@@ -496,7 +496,7 @@ export function TechniciansPage() {
                     <td>{t.done}</td>
                     <td>
                       <span className="block text-primary">{t.sla}</span>
-                      <span className="text-[10px] text-muted-foreground">{t.slaSummary}</span>
+                      <span className="text-xs text-muted-foreground">{t.slaSummary}</span>
                     </td>
                     <td>
                       <RecordDialog

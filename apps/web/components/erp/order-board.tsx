@@ -26,7 +26,7 @@ export function OrderBoard({
   ];
   return (
     <>
-      <p className="px-5 pb-4 text-[10px] text-muted-foreground">
+      <p className="px-5 pb-4 text-xs text-muted-foreground">
         Quadro dos registros desta página e filtros. Mudar etapa exige justificativa e confirmação
         do servidor; não há movimentação simulada.
       </p>
@@ -66,7 +66,7 @@ export function OrderBoard({
                       displayValue(row.priority)
                     }
                   />
-                  <p className="text-[10px] text-muted-foreground">
+                  <p className="text-xs text-muted-foreground">
                     Prazo: {displayValue(row.deadlineAt)}
                   </p>
                   {base !== '/cliente' &&
@@ -108,7 +108,7 @@ export function OrderBoard({
                 </article>
               ))}
               {!rows.length && (
-                <p className="py-5 text-[10px] text-muted-foreground">Sem ordens nesta página.</p>
+                <p className="py-5 text-xs text-muted-foreground">Sem ordens nesta página.</p>
               )}
             </section>
           );

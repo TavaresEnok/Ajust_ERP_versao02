@@ -196,7 +196,7 @@ export function SlaPage() {
                           className="block font-medium hover:text-primary"
                           href={`/gerencia/ordens/${encodeURIComponent(raw.id)}`}
                         >
-                          <span className="mb-1 block text-[10px] text-muted-foreground">
+                          <span className="mb-1 block text-xs text-muted-foreground">
                             #{String(row.protocol)}
                           </span>
                           {String(row.title)}

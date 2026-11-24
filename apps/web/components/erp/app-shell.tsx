@@ -121,7 +121,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <TenantLogo name={tenantName} />
             <span className="flex-1">
               <span className="block text-[11px] font-semibold">{tenantName}</span>
-              <span className="block text-[10px] text-muted-foreground">Workspace principal</span>
+              <span className="block text-xs text-muted-foreground">Workspace principal</span>
             </span>
             <ChevronsUpDown className="size-3 text-muted-foreground" />
           </button>
@@ -187,7 +187,7 @@ export function AppShell({ children }: { children: ReactNode }) {
                 scope && transport ? 'bg-success' : 'bg-warning',
               )}
             />
-            <span className="text-[10px] text-muted-foreground">
+            <span className="text-xs text-muted-foreground">
               {scope && transport ? 'ERP conectado à sessão' : 'ERP original não conectado'}
             </span>
           </div>
@@ -210,7 +210,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             >
               <Search className="size-3.5" />
               Buscar no Ajust...
-              <span className="ml-auto flex items-center gap-0.5 rounded border border-border bg-card px-1 text-[9px]">
+              <span className="ml-auto flex items-center gap-0.5 rounded border border-border bg-card px-1 text-xs">
                 <Command className="size-2.5" />K
               </span>
             </button>
@@ -244,7 +244,7 @@ export function AppShell({ children }: { children: ReactNode }) {
               <Avatar name={name} className="size-8 bg-secondary text-primary" />
               <span className="hidden sm:block">
                 <span className="block text-[11px] font-medium">{name}</span>
-                <span className="block text-[9px] text-muted-foreground">
+                <span className="block text-xs text-muted-foreground">
                   {scope?.role || 'Frontend em desenvolvimento'}
                 </span>
               </span>
@@ -254,7 +254,7 @@ export function AppShell({ children }: { children: ReactNode }) {
         </header>
         {profile && (
           <div className="absolute top-[65px] right-5 z-40 flex w-60 flex-col gap-1 rounded-xl border border-border bg-card p-2 shadow-lg">
-            <p className="px-3 py-2 text-[10px] text-muted-foreground">
+            <p className="px-3 py-2 text-xs text-muted-foreground">
               Visualizar espaços de trabalho
             </p>
             {portalItems.slice(0, 2).map((p) => (

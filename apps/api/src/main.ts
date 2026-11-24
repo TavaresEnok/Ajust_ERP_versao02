@@ -185,16 +185,18 @@ async function bootstrap() {
 
   app.useGlobalFilters(new GlobalExceptionFilter());
 
-  // ✅ Auto-documentação com Swagger/OpenAPI
-  const config = new DocumentBuilder()
-    .setTitle('Ajust ERP API')
-    .setDescription('API do Ajust ERP - BPO Técnico para Provedores')
-    .setVersion('1.0')
-    .addBearerAuth()
-    .build();
+  // ✅ Auto-documentação com Swagger/OpenAPI (desabilitada em produção por padrão)
+  if (!isProduction || process.env.SWAGGER_ENABLED === 'true') {
+    const config = new DocumentBuilder()
+      .setTitle('Ajust ERP API')
+      .setDescription('API do Ajust ERP - BPO Técnico para Provedores')
+      .setVersion('1.0')
+      .addBearerAuth()
+      .build();
 
-  const document = SwaggerModule.createDocument(app, config);
-  SwaggerModule.setup('api/docs', app, document);
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup('api/docs', app, document);
+  }
 
   await app.listen(port, '0.0.0.0');
   console.log(`[api] running on port ${port}`);

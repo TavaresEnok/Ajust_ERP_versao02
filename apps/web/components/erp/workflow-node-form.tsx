@@ -226,7 +226,7 @@ export function WorkflowNodeForm({
           });
         }}
       />
-      <p className="text-[10px] leading-5 text-muted-foreground">
+      <p className="text-xs leading-5 text-muted-foreground">
         Campos avançados existentes são preservados. Nenhum webhook é chamado por esta prévia; URLs
         e autorização são verificadas pelo servidor antes da execução.
       </p>

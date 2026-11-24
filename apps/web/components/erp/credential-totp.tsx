@@ -85,7 +85,7 @@ export function CredentialTotp({ id, configured }: { id: string; configured: boo
   return (
     <div className="border-t border-border pt-4">
       {confirmation.dialog}
-      <div className="mb-2 flex items-center justify-between gap-2 text-[10px] font-semibold uppercase text-muted-foreground">
+      <div className="mb-2 flex items-center justify-between gap-2 text-xs font-semibold uppercase text-muted-foreground">
         <span className="flex items-center gap-1">
           <ShieldCheck className="size-3" />
           Token 2FA / TOTP {configured ? 'ativo' : ''}

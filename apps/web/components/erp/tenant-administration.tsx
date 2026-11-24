@@ -312,7 +312,7 @@ export function TenantAdministration({
               ? roles.data.map((role) => (
                   <div key={role.id} className="border-t border-border p-5">
                     <h3 className="text-xs font-medium">{displayValue(role.name || role.code)}</h3>
-                    <p className="mt-2 break-words text-[10px] text-muted-foreground">
+                    <p className="mt-2 break-words text-xs text-muted-foreground">
                       {displayValue(role.permissions)}
                     </p>
                   </div>

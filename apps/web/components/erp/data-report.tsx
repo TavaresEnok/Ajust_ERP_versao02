@@ -139,7 +139,7 @@ export function DataReport({
               <dl className="grid gap-4 px-6 pb-6 sm:grid-cols-3">
                 {metrics.map((metric) => (
                   <div key={metric.key} className="rounded-lg border border-border p-4">
-                    <dt className="mb-3 text-[10px] text-muted-foreground">{metric.label}</dt>
+                    <dt className="mb-3 text-xs text-muted-foreground">{metric.label}</dt>
                     <dd className="text-2xl font-semibold tracking-tight">
                       {displayValue(atPath(query.data, metric.key))}
                     </dd>

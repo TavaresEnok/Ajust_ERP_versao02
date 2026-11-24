@@ -172,12 +172,12 @@ export function CalendarPage() {
           </span>
         </span>
         {Boolean(event.serviceOrderId) && (
-          <span className="rounded bg-primary/10 px-2 py-1 text-[10px] text-primary">
+          <span className="rounded bg-primary/10 px-2 py-1 text-xs text-primary">
             O.S. vinculada
           </span>
         )}
         {Boolean(event.isGlobal) && (
-          <span className="rounded bg-secondary px-2 py-1 text-[10px]">Toda a equipe</span>
+          <span className="rounded bg-secondary px-2 py-1 text-xs">Toda a equipe</span>
         )}
         <ChevronRight className="mt-1 size-4 shrink-0 text-muted-foreground" />
       </button>
@@ -303,7 +303,7 @@ export function CalendarPage() {
                 <div className="calendar-grid border-t border-border">
                   {['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'].map((label) => (
                     <div
-                      className="border-b border-border py-3 text-center text-[10px] text-muted-foreground"
+                      className="border-b border-border py-3 text-center text-xs text-muted-foreground"
                       key={label}
                     >
                       {label}
@@ -489,8 +489,20 @@ export function OccurrencesPage({
 }) {
   const portalBase = useRouteBase();
   const [items] = useDemoCollection('incidents', initialIncidents);
-  const { orders } = useOrders();
+  const [search, setSearch] = useState('');
+  const [statusFilter, setStatusFilter] = useState('Todos');
+  useOrders();
   if (id) return <OccurrenceAttendance id={id} initialTab={initialTab} />;
+  const query = search.trim().toLocaleLowerCase('pt-BR');
+  const filteredItems = items.filter(
+    (item) =>
+      (statusFilter === 'Todos' || item.status === statusFilter) &&
+      (!query ||
+        `${item.id} ${item.title} ${item.provider} ${item.priority} ${item.status}`
+          .toLocaleLowerCase('pt-BR')
+          .includes(query)),
+  );
+  const availableStatuses = ['Todos', ...new Set(items.map((item) => item.status))];
   return (
     <>
       <PageHeading
@@ -527,7 +539,30 @@ export function OccurrencesPage({
         <PanelHeading
           title="Central de incidentes"
           description="Acompanhe eventos que impactam a operação"
-        />
+        >
+          <div className="flex flex-wrap items-center gap-3">
+            <input
+              type="search"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              placeholder="Buscar ocorrência ou provedor..."
+              aria-label="Buscar ocorrências"
+              className="native-input w-56 sm:w-64 text-xs"
+            />
+            <select
+              className="native-select"
+              aria-label="Filtrar status da ocorrência"
+              value={statusFilter}
+              onChange={(event) => setStatusFilter(event.target.value)}
+            >
+              {availableStatuses.map((statusOption) => (
+                <option key={statusOption} value={statusOption}>
+                  {statusOption === 'Todos' ? 'Todos os status' : statusOption}
+                </option>
+              ))}
+            </select>
+          </div>
+        </PanelHeading>
         <div className="table-wrap">
           <table className="data-table">
             <thead>
@@ -541,11 +576,11 @@ export function OccurrencesPage({
               </tr>
             </thead>
             <tbody>
-              {items.map((i) => (
+              {filteredItems.map((i) => (
                 <tr key={i.id}>
                   <td>
                     <Link href={portalBase + '/ocorrencias/' + i.id}>
-                      <span className="block text-[9px] text-muted-foreground">{i.id}</span>
+                      <span className="block text-xs text-muted-foreground">{i.id}</span>
                       <strong className="mt-1 block font-medium">{i.title}</strong>
                     </Link>
                   </td>
@@ -560,6 +595,13 @@ export function OccurrencesPage({
                   <td className="text-muted-foreground">{i.time}</td>
                 </tr>
               ))}
+              {!filteredItems.length && (
+                <tr>
+                  <td colSpan={6} className="py-6 text-center text-xs text-muted-foreground">
+                    Nenhuma ocorrência encontrada para os filtros aplicados.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>

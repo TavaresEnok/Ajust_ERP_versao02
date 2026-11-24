@@ -219,10 +219,10 @@ export function NotesPage() {
         >
           <div className="space-y-4 p-5">
             <div className="flex items-center justify-between">
-              <span className="text-[10px] font-semibold tracking-widest text-muted-foreground uppercase">
+              <span className="text-xs font-semibold tracking-widest text-muted-foreground uppercase">
                 Seu caderno
               </span>
-              <span className="rounded-md border border-border bg-card px-2 py-1 text-[10px] text-muted-foreground">
+              <span className="rounded-md border border-border bg-card px-2 py-1 text-xs text-muted-foreground">
                 {notes.length} notas
               </span>
             </div>
@@ -280,7 +280,7 @@ export function NotesPage() {
                 <span className="mb-3 line-clamp-2 block text-[11px] leading-5 text-muted-foreground">
                   {note.content || 'Comece a escrever nesta nota.'}
                 </span>
-                <span className="text-[10px] text-muted-foreground">
+                <span className="text-xs text-muted-foreground">
                   {date(note.updatedAt)}
                   {drafts[note.id] ? ' · Não salva' : ''}
                 </span>
@@ -294,7 +294,7 @@ export function NotesPage() {
               </p>
             )}
           </div>
-          <p className="hidden items-center gap-2 border-t border-border px-5 py-4 text-[10px] text-muted-foreground lg:flex">
+          <p className="hidden items-center gap-2 border-t border-border px-5 py-4 text-xs text-muted-foreground lg:flex">
             <ShieldCheck className="size-3.5" />
             Notas pessoais da sua conta
           </p>
@@ -365,7 +365,7 @@ export function NotesPage() {
                 placeholder="Título da nota"
                 className="w-full bg-transparent text-2xl font-semibold tracking-tight outline-none placeholder:text-muted-foreground/60"
               />
-              <span className="text-[10px] text-muted-foreground">
+              <span className="text-xs text-muted-foreground">
                 Última atualização: {date(selected.updatedAt)}
               </span>
               <textarea
@@ -381,7 +381,7 @@ export function NotesPage() {
                   }
                 }}
               />
-              <div className="flex justify-between border-t border-border pt-4 text-[10px] text-muted-foreground">
+              <div className="flex justify-between border-t border-border pt-4 text-xs text-muted-foreground">
                 <span>Salvamento automático após a edição</span>
                 <span>{selected.content.length.toLocaleString('pt-BR')} caracteres</span>
               </div>

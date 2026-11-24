@@ -118,18 +118,11 @@ export function ServiceTypesAnalyticsPage() {
       </button>
     </div>
   ) : null;
-  if (!canAnalyze || tab === 'catalog')
-    return (
-      <>
-        {tabs}
-        <CatalogPage kind="services" />
-      </>
-    );
+  if (!canAnalyze || tab === 'catalog') return <CatalogPage kind="services" afterHeading={tabs} />;
   const value = (key: 'totalOrders' | 'types' | 'overdue' | 'dueSoon') =>
     summary ? number(summary[key]) : '—';
   return (
     <>
-      {tabs}
       <PageHeading
         title="Análise de tipos de serviço"
         description="Volume, duração e responsáveis por tipo de demanda nos provedores atendidos."
@@ -143,6 +136,7 @@ export function ServiceTypesAnalyticsPage() {
           Atualizar
         </Button>
       </PageHeading>
+      {tabs}
       <div className="mb-5 flex flex-wrap items-end gap-3">
         <label className="text-xs">
           Período
@@ -325,7 +319,7 @@ export function ServiceTypesAnalyticsPage() {
               >
                 <span>
                   {row.name}
-                  <span className="mt-1 block text-[10px] text-muted-foreground">
+                  <span className="mt-1 block text-xs text-muted-foreground">
                     {number(row.measuredClosed)} encerramentos com datas válidas
                   </span>
                 </span>

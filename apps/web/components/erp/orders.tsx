@@ -122,7 +122,7 @@ export function OrdersTable({
             <tr key={o.id}>
               <td>
                 <Link href={detailHref(o.id)} className="block">
-                  <span className="mb-1 block text-[9px] text-muted-foreground">
+                  <span className="mb-1 block text-xs text-muted-foreground">
                     #{o.protocol || o.id}
                   </span>
                   <span className="font-medium hover:text-primary">{o.title}</span>
@@ -764,7 +764,7 @@ export function OrdersPage({
                       href={orderBase + '/ordens/' + o.id}
                       className="mb-3 block rounded-lg border border-border bg-card p-4"
                     >
-                      <p className="text-[9px] text-muted-foreground">{o.id}</p>
+                      <p className="text-xs text-muted-foreground">{o.id}</p>
                       <p className="my-2 text-xs font-medium leading-relaxed">{o.title}</p>
                       <div className="flex items-center justify-between">
                         <Priority value={o.priority} />
@@ -777,12 +777,12 @@ export function OrdersPage({
           </div>
         )}
         <div className="flex items-center justify-between border-t border-border px-5 py-3">
-          <span className="text-[10px] text-muted-foreground">
+          <span className="text-xs text-muted-foreground">
             {total !== undefined
               ? `${total} ordens · ${filtered.length} nesta página`
               : `${filtered.length} ordens nesta página`}
           </span>
-          <div className="flex items-center gap-2 text-[10px] text-muted-foreground">
+          <div className="flex items-center gap-2 text-xs text-muted-foreground">
             <Button
               variant="outline"
               size="icon-sm"
@@ -900,9 +900,7 @@ export function OrderDetail({
                 {String(order.description)}
               </p>
               <div className="mt-5 flex gap-2">
-                <span className="rounded-md bg-muted px-2 py-1 text-[10px]">
-                  {String(order.type)}
-                </span>
+                <span className="rounded-md bg-muted px-2 py-1 text-xs">{String(order.type)}</span>
               </div>
             </div>
           </section>

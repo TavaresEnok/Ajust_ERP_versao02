@@ -80,7 +80,7 @@ export function ReportChart({ data, spec }: { data: unknown; spec: ReportChartSp
           ))}
         </BarChart>
       </ChartContainer>
-      <p className="mt-3 text-[10px] text-muted-foreground">
+      <p className="mt-3 text-xs text-muted-foreground">
         Valores do retorno filtrado do ERP. A tabela mantém os dados e rótulos completos.
       </p>
     </figure>

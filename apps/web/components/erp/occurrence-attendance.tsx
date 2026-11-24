@@ -181,7 +181,7 @@ export function OccurrenceAttendance({ id, initialTab }: { id: string; initialTa
                     )}
                     <textarea
                       aria-label="Conclusão da ocorrência"
-                      className="native-select min-h-24 w-full"
+                      className="native-input min-h-24 w-full"
                       maxLength={20000}
                       value={conclusion}
                       onChange={(e) => setConclusion(e.target.value)}
