@@ -161,6 +161,7 @@ model Tenant {
   serviceCatalogItems        ServiceCatalogItem[]
   humanProcessTemplates      ServiceProcessTemplate[]
   customers                  Customer[]
+  shiftReports               ShiftReport[]
 
   @@index([status])
 }
@@ -179,8 +180,8 @@ model TenantSector {
 }
 
 model User {
-  responsibleOccurrences Occurrence[] @relation("OccurrenceResponsible")
-  openedOccurrences Occurrence[] @relation("OccurrenceOpener")
+  responsibleOccurrences  Occurrence[] @relation("OccurrenceResponsible")
+  openedOccurrences       Occurrence[] @relation("OccurrenceOpener")
   id                      String       @id @default(uuid())
   name                    String
   email                   String       @unique
@@ -224,6 +225,7 @@ model User {
   createdApiKeys           ApiKey[]
   createdConfigSnapshots   AssetConfigSnapshot[]
   serviceOrderStatusEvents ServiceOrderStatusEvent[]
+  shiftReports             ShiftReport[]
 
   @@unique([sourceSystem, externalId])
 }
@@ -245,9 +247,9 @@ model Customer {
   updatedAt      DateTime     @updatedAt
   deletedAt      DateTime?
 
-  tenant      Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  occurrences Occurrence[]
-  portalUsers UserTenant[]
+  tenant          Tenant           @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  occurrences     Occurrence[]
+  portalUsers     UserTenant[]
   networkTopology NetworkTopology?
 
   @@unique([tenantId, taxId])
@@ -262,13 +264,13 @@ model NetworkTopology {
   title           String
   xmlEnc          String   @db.Text
   version         Int      @default(1)
-  updatedByUserId  String
-  updatedByName    String
+  updatedByUserId String
+  updatedByName   String
   sourceFileName  String?
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
-  customer Customer @relation(fields: [customerId], references: [id], onDelete: Restrict)
+  customer  Customer                  @relation(fields: [customerId], references: [id], onDelete: Restrict)
   revisions NetworkTopologyRevision[]
 
   @@index([tenantId, updatedAt])
@@ -292,28 +294,28 @@ model NetworkTopologyRevision {
 
 model Occurrence {
   analystResponsibleUserId String?
-  openedByUserId String?
-  responsibleUser User? @relation("OccurrenceResponsible", fields: [analystResponsibleUserId], references: [id], onDelete: SetNull)
-  openedByUser User? @relation("OccurrenceOpener", fields: [openedByUserId], references: [id], onDelete: SetNull)
-  id                 String           @id @default(uuid())
-  tenantId           String
-  number             String
-  provider           String
-  type               String
-  status             OccurrenceStatus @default(ABERTA)
-  sector             String
-  origin             String
-  openedByName       String
-  analystResponsible String
-  description        String
-  sourceSystem       SourceSystem     @default(ERP)
-  externalId         String?
-  sourceMetadata     Json             @default("{}")
-  closedAt           DateTime?
-  createdAt          DateTime         @default(now())
-  updatedAt          DateTime         @updatedAt
-  deletedAt          DateTime?
-  customerId         String?
+  openedByUserId           String?
+  responsibleUser          User?            @relation("OccurrenceResponsible", fields: [analystResponsibleUserId], references: [id], onDelete: SetNull)
+  openedByUser             User?            @relation("OccurrenceOpener", fields: [openedByUserId], references: [id], onDelete: SetNull)
+  id                       String           @id @default(uuid())
+  tenantId                 String
+  number                   String
+  provider                 String
+  type                     String
+  status                   OccurrenceStatus @default(ABERTA)
+  sector                   String
+  origin                   String
+  openedByName             String
+  analystResponsible       String
+  description              String
+  sourceSystem             SourceSystem     @default(ERP)
+  externalId               String?
+  sourceMetadata           Json             @default("{}")
+  closedAt                 DateTime?
+  createdAt                DateTime         @default(now())
+  updatedAt                DateTime         @updatedAt
+  deletedAt                DateTime?
+  customerId               String?
 
   tenant        Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   customer      Customer?                @relation(fields: [customerId], references: [id], onDelete: Restrict)
@@ -360,19 +362,19 @@ model UserTenant {
 }
 
 model Session {
-  id               String    @id @default(uuid())
-  userId           String
-  tenantId         String?
-  refreshTokenHash String
+  id                       String    @id @default(uuid())
+  userId                   String
+  tenantId                 String?
+  refreshTokenHash         String
   previousRefreshTokenHash String?
-  refreshResponseEnc String?
+  refreshResponseEnc       String?
   refreshResponseExpiresAt DateTime?
-  device           String?
-  ip               String?
-  userAgent        String?
-  expiresAt        DateTime
-  revokedAt        DateTime?
-  createdAt        DateTime  @default(now())
+  device                   String?
+  ip                       String?
+  userAgent                String?
+  expiresAt                DateTime
+  revokedAt                DateTime?
+  createdAt                DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -397,52 +399,52 @@ model BootstrapOtp {
 }
 
 model ServiceOrder {
-  id                String             @id @default(uuid())
-  tenantId          String
-  occurrenceId      String?
-  protocol          String
-  externalProtocol  String?
-  sourceSystem      SourceSystem       @default(ERP)
-  sourceMetadata    Json               @default("{}")
-  processInstanceId String?
-  processNodeId     String?
-  parentOrderId     String?
-  rootOrderId       String?
-  slaEligible       Boolean            @default(true)
-  type              ServiceOrderType
-  priority          Priority
-  status            ServiceOrderStatus @default(ABERTA)
-  title             String
-  description       String
-  ownerUserId       String?
-  ownerName         String?
-  assigneeUserId    String?
-  analystName       String?
-  requester         String?
-  sector            String?
-  origin            String?
-  deadlineAt        DateTime
+  id                 String             @id @default(uuid())
+  tenantId           String
+  occurrenceId       String?
+  protocol           String
+  externalProtocol   String?
+  sourceSystem       SourceSystem       @default(ERP)
+  sourceMetadata     Json               @default("{}")
+  processInstanceId  String?
+  processNodeId      String?
+  parentOrderId      String?
+  rootOrderId        String?
+  slaEligible        Boolean            @default(true)
+  type               ServiceOrderType
+  priority           Priority
+  status             ServiceOrderStatus @default(ABERTA)
+  title              String
+  description        String
+  ownerUserId        String?
+  ownerName          String?
+  assigneeUserId     String?
+  analystName        String?
+  requester          String?
+  sector             String?
+  origin             String?
+  deadlineAt         DateTime
   originalDeadlineAt DateTime?
-  pausedAt          DateTime?
-  pauseReason       String?
-  scheduledAt       DateTime?
-  scheduleStartedAt DateTime?
-  handoffNotes      String?
-  changeRequestId   String?
-  changeRequest     ChangeRequest? @relation(fields: [changeRequestId], references: [id], onDelete: SetNull)
-  resolvedAt        DateTime?
-  closedAt          DateTime?
-  canceledAt        DateTime?
-  reopenedCount     Int                @default(0)
-  requiresApproval  Boolean            @default(false)
-  approvalCompleted Boolean            @default(false)
-  tags              String[]           @default([])
-  internalNotes     String?
-  isCustomerVisible Boolean            @default(true)
-  version           Int                @default(1)
-  createdAt         DateTime           @default(now())
-  updatedAt         DateTime           @updatedAt
-  deletedAt         DateTime?
+  pausedAt           DateTime?
+  pauseReason        String?
+  scheduledAt        DateTime?
+  scheduleStartedAt  DateTime?
+  handoffNotes       String?
+  changeRequestId    String?
+  changeRequest      ChangeRequest?     @relation(fields: [changeRequestId], references: [id], onDelete: SetNull)
+  resolvedAt         DateTime?
+  closedAt           DateTime?
+  canceledAt         DateTime?
+  reopenedCount      Int                @default(0)
+  requiresApproval   Boolean            @default(false)
+  approvalCompleted  Boolean            @default(false)
+  tags               String[]           @default([])
+  internalNotes      String?
+  isCustomerVisible  Boolean            @default(true)
+  version            Int                @default(1)
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  deletedAt          DateTime?
 
   tenant                   Tenant                    @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   processInstance          ServiceProcessInstance?   @relation(fields: [processInstanceId], references: [id], onDelete: Restrict)
@@ -479,23 +481,25 @@ model ServiceOrder {
 }
 
 model ServiceOrderOccurrence {
-  editable Boolean @default(false)
-  version Int @default(1)
-  editedAt DateTime?
+  editable             Boolean      @default(false)
+  version              Int          @default(1)
+  editedAt             DateTime?
   mirroredAnnotationId String?
-  id                String       @id @default(uuid())
-  serviceOrderId    String
-  actorUserId       String?
-  sourceSystem      SourceSystem @default(ERP)
-  externalId        String?
-  sourceAuthorName  String?
-  message           String
+  id                   String       @id @default(uuid())
+  serviceOrderId       String
+  actorUserId          String?
+  sourceSystem         SourceSystem @default(ERP)
+  externalId           String?
+  sourceAuthorName     String?
+  message              String
   /// Interno por padrão; só a conclusão do atendimento aparece no portal do cliente.
-  isCustomerVisible Boolean      @default(false)
-  createdAt         DateTime     @default(now())
+  isCustomerVisible    Boolean      @default(false)
+  createdAt            DateTime     @default(now())
 
   serviceOrder ServiceOrder @relation(fields: [serviceOrderId], references: [id], onDelete: Cascade)
   actorUser    User?        @relation(fields: [actorUserId], references: [id])
+
+  mirroredAnnotation OccurrenceAnnotation? @relation(fields: [mirroredAnnotationId], references: [id], onDelete: SetNull, onUpdate: NoAction)
 
   @@unique([serviceOrderId, sourceSystem, externalId])
   @@index([serviceOrderId, createdAt(sort: Desc)])
@@ -806,29 +810,29 @@ model KnowledgeArticleTag {
 }
 
 model KnowledgeCredential {
-  id             String       @id @default(uuid())
-  parentCredentialId String?
-  accessMethod String @default("OUTROS")
-  parentCredential KnowledgeCredential? @relation("CredentialAccesses", fields: [parentCredentialId], references: [id], onDelete: Restrict)
-  accesses KnowledgeCredential[] @relation("CredentialAccesses")
-  tenantId       String
-  createdById    String?
-  provider       String
-  equipmentType  String       @default("OUTROS")
-  equipmentName  String       @default("")
-  environment    String
-  host           String
-  username       String
-  secretEnc      String
-  notes          String?
-  sourceNoteEnc  String?
+  id                  String                @id @default(uuid())
+  parentCredentialId  String?
+  accessMethod        String                @default("OUTROS")
+  parentCredential    KnowledgeCredential?  @relation("CredentialAccesses", fields: [parentCredentialId], references: [id], onDelete: Restrict)
+  accesses            KnowledgeCredential[] @relation("CredentialAccesses")
+  tenantId            String
+  createdById         String?
+  provider            String
+  equipmentType       String                @default("OUTROS")
+  equipmentName       String                @default("")
+  environment         String
+  host                String
+  username            String
+  secretEnc           String
+  notes               String?
+  sourceNoteEnc       String?
   protectedContentEnc String?
-  totpSecretEnc String?
-  sourceSystem   SourceSystem @default(ERP)
-  externalId     String?
-  sourceMetadata Json         @default("{}")
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  totpSecretEnc       String?
+  sourceSystem        SourceSystem          @default(ERP)
+  externalId          String?
+  sourceMetadata      Json                  @default("{}")
+  createdAt           DateTime              @default(now())
+  updatedAt           DateTime              @updatedAt
 
   tenant    Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   createdBy User?  @relation("CredentialCreator", fields: [createdById], references: [id], onDelete: SetNull)
@@ -840,22 +844,27 @@ model KnowledgeCredential {
 }
 
 model ShiftReport {
-  id String @id @default(uuid())
-  tenantId String
-  authorUserId String
-  authorName String
-  shift String
+  id            String                  @id @default(uuid())
+  tenantId      String
+  authorUserId  String
+  authorName    String
+  shift         String
   referenceDate String
-  startAt DateTime?
-  endAt DateTime?
-  content String
-  orderIds Json @default("[]")
-  publishedAt DateTime?
-  version Int @default(1)
-  revisions Json @default("[]")
-  createdAt DateTime @default(now())
-  updatedAt DateTime @updatedAt
-  attachments ShiftReportAttachment[]
+  startAt       DateTime?
+  endAt         DateTime?
+  content       String
+  orderIds      Json                    @default("[]")
+  publishedAt   DateTime?
+  version       Int                     @default(1)
+  revisions     Json                    @default("[]")
+  createdAt     DateTime                @default(now())
+  updatedAt     DateTime                @updatedAt
+  attachments   ShiftReportAttachment[]
+  // FKs criadas pela migration 20261022150000 (RESTRICT, sem ON UPDATE): declaradas aqui para
+  // o `prisma migrate dev` não propor removê-las.
+  tenant        Tenant                  @relation(fields: [tenantId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+  author        User                    @relation(fields: [authorUserId], references: [id], onDelete: Restrict, onUpdate: NoAction)
+
   @@index([tenantId, referenceDate, shift])
   @@index([tenantId, authorUserId])
 }
@@ -901,9 +910,10 @@ model OccurrenceAnnotation {
   isCustomerVisible Boolean  @default(false)
   createdAt         DateTime @default(now())
 
-  tenant     Tenant     @relation(fields: [tenantId], references: [id], onDelete: Cascade)
-  occurrence Occurrence @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
-  actorUser  User?      @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  tenant             Tenant                   @relation(fields: [tenantId], references: [id], onDelete: Cascade)
+  occurrence         Occurrence               @relation(fields: [occurrenceId], references: [id], onDelete: Cascade)
+  actorUser          User?                    @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  mirroredOrderNotes ServiceOrderOccurrence[]
 
   @@index([tenantId, occurrenceId, createdAt(sort: Desc)])
 }
@@ -1052,27 +1062,27 @@ enum ChangeRisk {
 }
 
 model ChangeRequest {
-  version Int @default(0)
+  version         Int            @default(0)
   serviceOrders   ServiceOrder[]
-  id              String       @id @default(uuid())
+  id              String         @id @default(uuid())
   tenantId        String
   number          String
   title           String
   description     String
   justification   String
   rollbackPlan    String?
-  status          ChangeStatus @default(RASCUNHO)
-  risk            ChangeRisk   @default(MEDIO)
+  status          ChangeStatus   @default(RASCUNHO)
+  risk            ChangeRisk     @default(MEDIO)
   plannedStart    DateTime?
   plannedEnd      DateTime?
   requestedById   String?
   approvedById    String?
   approvedAt      DateTime?
   executedById    String?
-  affectedSystems String[]     @default([])
-  tags            String[]     @default([])
-  createdAt       DateTime     @default(now())
-  updatedAt       DateTime     @updatedAt
+  affectedSystems String[]       @default([])
+  tags            String[]       @default([])
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
   deletedAt       DateTime?
 
   tenant      Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
@@ -1211,15 +1221,15 @@ model ApiKey {
 
 model SatisfactionResponse {
   emailSentAt DateTime?
-  id         String    @id @default(uuid())
-  tenantId   String
-  orderId    String    @unique
-  score      Int // 1-5
-  comment    String?
-  token      String    @unique @default(uuid())
-  answered   Boolean   @default(false)
-  createdAt  DateTime  @default(now())
-  answeredAt DateTime?
+  id          String    @id @default(uuid())
+  tenantId    String
+  orderId     String    @unique
+  score       Int // 1-5
+  comment     String?
+  token       String    @unique @default(uuid())
+  answered    Boolean   @default(false)
+  createdAt   DateTime  @default(now())
+  answeredAt  DateTime?
 
   tenant Tenant       @relation(fields: [tenantId], references: [id], onDelete: Cascade)
   order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Restrict)
@@ -1354,20 +1364,20 @@ model ProviderProfile {
 // ─── Service Catalog (Catálogo de Serviços Especializados para ISPs) ─────────
 
 model ServiceCatalogItem {
-  id               String           @id @default(uuid())
-  tenantId         String
-  name             String
+  id                   String           @id @default(uuid())
+  tenantId             String
+  name                 String
   workflowTemplateCode String?
-  category         ServiceOrderType @default(AUDITORIA)
-  description      String?
-  estimatedMinutes Int?             @default(120)
+  category             ServiceOrderType @default(AUDITORIA)
+  description          String?
+  estimatedMinutes     Int?             @default(120)
   /// Prazo (SLA) do serviço em horas úteis do calendário (24 h = 1 dia útil). Vazio: vale a política de SLA.
-  slaHours         Int?
-  defaultPriority  Priority         @default(NORMAL)
-  checklist        Json             @default("[]")
-  active           Boolean          @default(true)
-  createdAt        DateTime         @default(now())
-  updatedAt        DateTime         @updatedAt
+  slaHours             Int?
+  defaultPriority      Priority         @default(NORMAL)
+  checklist            Json             @default("[]")
+  active               Boolean          @default(true)
+  createdAt            DateTime         @default(now())
+  updatedAt            DateTime         @updatedAt
 
   tenant Tenant @relation(fields: [tenantId], references: [id], onDelete: Cascade)
 
