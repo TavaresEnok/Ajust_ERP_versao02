@@ -80,9 +80,14 @@ export function Dashboard() {
   });
   const overview = !report.error ? report.data : undefined;
   const now = overview ? new Date(overview.generatedAt) : null;
+  // Janela ancorada no início do dia: com o `generatedAt` exato na chave, cada atualização do
+  // resumo criava uma consulta nova (e uma entrada nova no cache do SWR). O filtro abaixo
+  // descarta o que já terminou.
+  const agendaFrom = overview ? new Date(overview.generatedAt) : null;
+  agendaFrom?.setHours(0, 0, 0, 0);
   const agenda = useErpQuery<unknown>(
-    overview
-      ? `/calendar/events/all?from=${encodeURIComponent(overview.generatedAt)}&to=${encodeURIComponent(new Date(new Date(overview.generatedAt).getTime() + 7 * 86_400_000).toISOString())}`
+    agendaFrom
+      ? `/calendar/events/all?from=${encodeURIComponent(agendaFrom.toISOString())}&to=${encodeURIComponent(new Date(agendaFrom.getTime() + 8 * 86_400_000).toISOString())}`
       : null,
   );
   const statuses = useStatusData(undefined, summary.data?.byStatus);

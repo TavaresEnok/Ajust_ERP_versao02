@@ -5,6 +5,7 @@ import {
   Inject,
   Injectable,
   Optional,
+  ServiceUnavailableException,
 } from '@nestjs/common';
 import { PrismaService } from '../../prisma/prisma.service';
 import { createHash, createHmac, timingSafeEqual } from 'node:crypto';
@@ -150,44 +151,63 @@ export class IxcService {
     }
   }
 
+  /**
+   * Pede ao worker uma rodada de reconciliação (é ele quem consulta o IXC e aplica os deltas).
+   * Não avança `lastSyncAt` aqui: o worker usa esse campo como ponto de partida do próximo
+   * delta, e avançá-lo sem buscar nada fazia o polling pular o intervalo para sempre.
+   */
   async runManualReconciliation(tenantId: string) {
     const integration = await this.prisma.providerIntegration.findFirst({
-      where: {
-        tenantId,
-        provider: 'IXC',
-      },
+      where: { tenantId, provider: 'IXC' },
+      select: { id: true, status: true },
     });
+    if (!integration) throw new BadRequestException('Integração IXC não configurada.');
+    if (['INACTIVE', 'DISABLED'].includes((integration.status || '').toUpperCase())) {
+      throw new BadRequestException('A integração IXC está inativa.');
+    }
+
+    const workerUrl = (process.env.WORKER_INTERNAL_URL || 'http://worker:3002').replace(/\/$/, '');
+    const token = process.env.WORKER_API_TOKEN;
+    let status: 'PROCESSED' | 'FAILED' = 'FAILED';
+    let errorMessage: string | null = null;
+    try {
+      if (!token) throw new Error('WORKER_API_TOKEN não configurado.');
+      const response = await fetch(`${workerUrl}/jobs/ixc/reconcile`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${token}` },
+        signal: AbortSignal.timeout(120_000),
+      });
+      if (!response.ok) throw new Error(`Worker respondeu ${response.status}.`);
+      status = 'PROCESSED';
+    } catch (error) {
+      errorMessage = error instanceof Error ? error.message : String(error);
+    }
 
     const syncEvent = await this.prisma.syncEvent.create({
       data: {
         tenantId,
-        integrationId: integration?.id,
+        integrationId: integration.id,
         source: 'POLLING',
-        eventType: 'IXC_RECONCILIATION_TICK',
-        status: 'PROCESSED',
+        eventType: 'IXC_MANUAL_RECONCILIATION',
+        status,
         processedAt: new Date(),
+        ...(errorMessage ? { errorMessage: errorMessage.slice(0, 500) } : {}),
       },
     });
-
-    if (integration) {
-      await this.prisma.providerIntegration.update({
-        where: { id: integration.id },
-        data: { lastSyncAt: new Date() },
-      });
-    }
 
     this.eventsGateway.emitTenantEvent(tenantId, 'sync.ixc_reconciliation', {
       tenantId,
       syncEventId: syncEvent.id,
-      integrationId: integration?.id || null,
+      integrationId: integration.id,
       at: new Date().toISOString(),
     });
 
-    return {
-      syncEventId: syncEvent.id,
-      integrationId: integration?.id || null,
-      processed: true,
-    };
+    if (status === 'FAILED') {
+      throw new ServiceUnavailableException(
+        'Não foi possível acionar a reconciliação do IXC agora. Tente novamente em instantes.',
+      );
+    }
+    return { syncEventId: syncEvent.id, integrationId: integration.id, processed: true };
   }
 
   async upsertIntegration(input: UpsertIntegrationInput) {
@@ -246,7 +266,10 @@ export class IxcService {
     return { applied: result.operation !== 'skipped', ...result };
   }
 
-  private async applyWebhookToOrder(input: IxcWebhookInput) {
+  private async applyWebhookToOrder(
+    input: IxcWebhookInput,
+    retried = false,
+  ): Promise<{ orderId?: string; operation: 'created' | 'updated' | 'skipped'; note?: string }> {
     const mappedStatus = this.mapIxcStatus(input.status);
 
     if (!input.externalProtocol && !input.title) {
@@ -427,17 +450,45 @@ export class IxcService {
           origin: 'IXC',
         },
       });
-      const first = (occurrence as { serviceOrders?: Array<{ id: string }> }).serviceOrders?.[0];
-      if (first && input.externalProtocol)
-        await this.prisma.serviceOrder.update({
-          where: { id: first.id },
-          data: {
-            externalProtocol: input.externalProtocol,
-            ...(typeof input.payload.ixcUpdatedAt === 'string'
-              ? { sourceMetadata: { ixcUpdatedAt: input.payload.ixcUpdatedAt } }
-              : {}),
-          },
-        });
+      const first = (occurrence as { id?: string; serviceOrders?: Array<{ id: string }> })
+        .serviceOrders?.[0];
+      if (first && input.externalProtocol) {
+        try {
+          await this.prisma.serviceOrder.update({
+            where: { id: first.id },
+            data: {
+              externalProtocol: input.externalProtocol,
+              ...(typeof input.payload.ixcUpdatedAt === 'string'
+                ? { sourceMetadata: { ixcUpdatedAt: input.payload.ixcUpdatedAt } }
+                : {}),
+            },
+          });
+        } catch (error) {
+          // Outro webhook/polling criou a mesma O.S. externa ao mesmo tempo. Descarta a
+          // duplicata recém-criada (senão ficaria uma O.S. órfã sem vínculo com o IXC) e
+          // aplica o evento sobre a que venceu.
+          if (
+            !(error instanceof Prisma.PrismaClientKnownRequestError) ||
+            error.code !== 'P2002' ||
+            retried
+          )
+            throw error;
+          const occurrenceId = (occurrence as { id?: string }).id;
+          const deletedAt = new Date();
+          await this.prisma.$transaction([
+            this.prisma.serviceOrder.update({ where: { id: first.id }, data: { deletedAt } }),
+            ...(occurrenceId
+              ? [
+                  this.prisma.occurrence.update({
+                    where: { id: occurrenceId },
+                    data: { deletedAt },
+                  }),
+                ]
+              : []),
+          ]);
+          return this.applyWebhookToOrder(input, true);
+        }
+      }
       return { orderId: first?.id, operation: 'created' as const };
     }
 
@@ -537,6 +588,10 @@ export class IxcService {
 
     if (!integration) {
       throw new BadRequestException('IXC integration is not configured for tenant.');
+    }
+    // Integração desativada não cria nem altera O.S. (mesma regra do polling).
+    if (['INACTIVE', 'DISABLED'].includes((integration.status || '').toUpperCase())) {
+      throw new ForbiddenException('A integração IXC deste tenant está inativa.');
     }
 
     const requireSignature =

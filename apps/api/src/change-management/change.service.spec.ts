@@ -21,6 +21,8 @@ function makePrisma(overrides: any = {}): any {
   for (const key of Object.keys(overrides)) base.changeRequest[key] = overrides[key];
   base.auditLog = { create: jest.fn().mockResolvedValue({}) };
   base.$transaction = jest.fn((run) => run(base));
+  base.$executeRaw = jest.fn().mockResolvedValue(1);
+  base.$queryRaw = jest.fn().mockResolvedValue([{ max: null }]);
   return base;
 }
 
@@ -36,14 +38,15 @@ describe('ChangeService.list', () => {
 });
 
 describe('ChangeService.create', () => {
-  it('numera sequencialmente com prefixo RFC-', async () => {
+  it('numera a partir do maior número usado, com trava por tenant', async () => {
     const prisma = makePrisma();
-    prisma.changeRequest.count.mockResolvedValueOnce(7);
+    prisma.$queryRaw.mockResolvedValueOnce([{ max: 7 }]);
     const svc = new ChangeService(prisma);
     await svc.create('t1', 'u1', { title: 'X', description: 'Y', justification: 'Z' });
     expect(prisma.changeRequest.create).toHaveBeenCalledWith(
       expect.objectContaining({ data: expect.objectContaining({ number: 'RFC-00008' }) }),
     );
+    expect(prisma.$executeRaw).toHaveBeenCalled();
   });
 
   it('converte plannedStart/End para Date', async () => {
@@ -116,7 +119,9 @@ describe('ChangeService.remove', () => {
     const svc = new ChangeService(prisma);
     const result = await svc.remove('t1', 'c1');
     expect(prisma.changeRequest.update).toHaveBeenCalledWith(
-      expect.objectContaining({ data: { deletedAt: expect.any(Date) } }),
+      expect.objectContaining({
+        data: { deletedAt: expect.any(Date), version: { increment: 1 } },
+      }),
     );
     expect(result).toBeDefined();
   });

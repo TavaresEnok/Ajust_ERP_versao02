@@ -13,7 +13,7 @@ function makePrisma(): any {
       findFirst: jest.fn().mockResolvedValue(null),
       create: jest.fn().mockResolvedValue({}),
     },
-    serviceOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    $queryRaw: jest.fn().mockResolvedValue([{ total: 0, closed: 0, critical: 0 }]),
   };
 }
 
@@ -52,6 +52,9 @@ describe('MonthlyHealthReportService', () => {
       host: 'smtp.local',
       port: 465,
       secure: true,
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
       auth: { user: 'user', pass: 'pass' },
     });
   });
@@ -78,10 +81,7 @@ describe('MonthlyHealthReportService', () => {
         techContactEmail: 'tech@tenant.local',
       },
     ]);
-    prisma.serviceOrder.findMany.mockResolvedValue([
-      { status: 'FECHADA', priority: 'NORMAL' },
-      { status: 'ABERTA', priority: 'CRITICA' },
-    ]);
+    prisma.$queryRaw.mockResolvedValue([{ total: 2, closed: 1, critical: 1 }]);
     const service = new MonthlyHealthReportService(prisma);
     await service.onModuleInit();
 
@@ -116,7 +116,32 @@ describe('MonthlyHealthReportService', () => {
 
     await service.runCheck();
 
-    expect(prisma.serviceOrder.findMany).not.toHaveBeenCalled();
+    expect(prisma.$queryRaw).not.toHaveBeenCalled();
     expect(prisma.auditLog.create).not.toHaveBeenCalled();
+  });
+
+  it('keeps sending to other tenants when one fails', async () => {
+    jest.useFakeTimers().setSystemTime(new Date('2026-06-01T12:00:00.000Z'));
+    process.env.SMTP_HOST = 'smtp.local';
+    const sendMail = jest
+      .fn()
+      .mockRejectedValueOnce(new Error('mailbox unavailable'))
+      .mockResolvedValueOnce({});
+    (nodemailer.createTransport as jest.Mock).mockReturnValue({ sendMail });
+    const prisma = makePrisma();
+    prisma.tenant.findMany.mockResolvedValue([
+      { id: 'bad', legalName: 'Bad', techContactEmail: 'bad@tenant.local' },
+      { id: 'good', legalName: 'Good', techContactEmail: 'good@tenant.local' },
+    ]);
+    const service = new MonthlyHealthReportService(prisma);
+    await service.onModuleInit();
+
+    await service.runCheck();
+
+    expect(sendMail).toHaveBeenCalledTimes(2);
+    expect(prisma.auditLog.create).toHaveBeenCalledTimes(1);
+    expect(prisma.auditLog.create).toHaveBeenCalledWith({
+      data: expect.objectContaining({ tenantId: 'good' }),
+    });
   });
 });

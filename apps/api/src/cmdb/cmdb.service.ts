@@ -37,6 +37,9 @@ export type SnapshotDiffResult = {
 
 @Injectable()
 export class CmdbService {
+  /** 16M células Uint32 = 64 MB no pior caso. */
+  private static readonly MAX_DIFF_CELLS = 16_000_000;
+
   constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
 
   async list(tenantId: string): Promise<Asset[]> {
@@ -132,29 +135,35 @@ export class CmdbService {
     });
     if (!asset) throw new NotFoundException('Ativo não encontrado.');
 
-    const latest = await this.prisma.assetConfigSnapshot.findFirst({
-      where: { assetId, tenantId },
-      orderBy: { version: 'desc' },
-      select: { version: true },
-    });
-
-    const nextVersion = (latest?.version ?? 0) + 1;
     const checksum = createHash('sha256').update(input.content).digest('hex');
-
-    return this.prisma.assetConfigSnapshot.create({
-      data: {
-        tenantId,
-        assetId,
-        version: nextVersion,
-        content: input.content,
-        notes: input.notes,
-        checksum,
-        createdById: actorId,
-      },
-      include: {
-        createdBy: { select: { id: true, name: true } },
-      },
-    });
+    // A versão é única por ativo (@@unique([assetId, version])): em gravação simultânea a
+    // segunda colide e tenta de novo com a próxima versão.
+    for (let attempt = 1; ; attempt++) {
+      const latest = await this.prisma.assetConfigSnapshot.findFirst({
+        where: { assetId, tenantId },
+        orderBy: { version: 'desc' },
+        select: { version: true },
+      });
+      try {
+        return await this.prisma.assetConfigSnapshot.create({
+          data: {
+            tenantId,
+            assetId,
+            version: (latest?.version ?? 0) + 1,
+            content: input.content,
+            notes: input.notes,
+            checksum,
+            createdById: actorId,
+          },
+          include: {
+            createdBy: { select: { id: true, name: true } },
+          },
+        });
+      } catch (error) {
+        const known = error as Prisma.PrismaClientKnownRequestError;
+        if (known?.code !== 'P2002' || attempt >= 3) throw error;
+      }
+    }
   }
 
   async listSnapshots(tenantId: string, assetId: string) {
@@ -184,7 +193,7 @@ export class CmdbService {
     snapshotId: string,
   ): Promise<AssetConfigSnapshot> {
     const snapshot = await this.prisma.assetConfigSnapshot.findFirst({
-      where: { id: snapshotId, assetId, tenantId },
+      where: { id: snapshotId, assetId, tenantId, asset: { deletedAt: null } },
       include: {
         createdBy: { select: { id: true, name: true } },
       },
@@ -225,40 +234,69 @@ export class CmdbService {
     };
   }
 
-  /** Algoritmo simples e determinístico de diff linha a linha */
+  /**
+   * Diff linha a linha determinístico. Remove o prefixo/sufixo comum e roda o LCS só no
+   * miolo, numa matriz compacta (Uint32Array). Se o miolo ainda passar do teto de memória
+   * (configs grandes e muito diferentes), devolve o miolo como removido + adicionado em vez
+   * de alocar uma matriz de gigabytes e derrubar a API.
+   */
   private computeLineDiff(a: string[], b: string[]): DiffLine[] {
-    const m = a.length;
-    const n = b.length;
-    const dp: number[][] = Array.from({ length: m + 1 }, () => new Array(n + 1).fill(0));
+    let prefix = 0;
+    while (prefix < a.length && prefix < b.length && a[prefix] === b[prefix]) prefix++;
+    let suffix = 0;
+    while (
+      suffix < a.length - prefix &&
+      suffix < b.length - prefix &&
+      a[a.length - 1 - suffix] === b[b.length - 1 - suffix]
+    )
+      suffix++;
 
+    const head: DiffLine[] = a.slice(0, prefix).map((text) => ({ type: 'unchanged', text }));
+    const tail: DiffLine[] = a
+      .slice(a.length - suffix)
+      .map((text) => ({ type: 'unchanged', text }));
+    const midA = a.slice(prefix, a.length - suffix);
+    const midB = b.slice(prefix, b.length - suffix);
+    const m = midA.length;
+    const n = midB.length;
+
+    if ((m + 1) * (n + 1) > CmdbService.MAX_DIFF_CELLS) {
+      return [
+        ...head,
+        ...midA.map((text): DiffLine => ({ type: 'removed', text })),
+        ...midB.map((text): DiffLine => ({ type: 'added', text })),
+        ...tail,
+      ];
+    }
+
+    const width = n + 1;
+    const dp = new Uint32Array((m + 1) * width);
     for (let i = 1; i <= m; i++) {
       for (let j = 1; j <= n; j++) {
-        if (a[i - 1] === b[j - 1]) {
-          dp[i][j] = dp[i - 1][j - 1] + 1;
-        } else {
-          dp[i][j] = Math.max(dp[i - 1][j], dp[i][j - 1]);
-        }
+        dp[i * width + j] =
+          midA[i - 1] === midB[j - 1]
+            ? dp[(i - 1) * width + j - 1] + 1
+            : Math.max(dp[(i - 1) * width + j], dp[i * width + j - 1]);
       }
     }
 
     let i = m;
     let j = n;
-    const result: DiffLine[] = [];
-
+    const middle: DiffLine[] = [];
     while (i > 0 || j > 0) {
-      if (i > 0 && j > 0 && a[i - 1] === b[j - 1]) {
-        result.push({ type: 'unchanged', text: a[i - 1] });
+      if (i > 0 && j > 0 && midA[i - 1] === midB[j - 1]) {
+        middle.push({ type: 'unchanged', text: midA[i - 1] });
         i--;
         j--;
-      } else if (j > 0 && (i === 0 || dp[i][j - 1] >= dp[i - 1][j])) {
-        result.push({ type: 'added', text: b[j - 1] });
+      } else if (j > 0 && (i === 0 || dp[i * width + j - 1] >= dp[(i - 1) * width + j])) {
+        middle.push({ type: 'added', text: midB[j - 1] });
         j--;
-      } else if (i > 0 && (j === 0 || dp[i][j - 1] < dp[i - 1][j])) {
-        result.push({ type: 'removed', text: a[i - 1] });
+      } else {
+        middle.push({ type: 'removed', text: midA[i - 1] });
         i--;
       }
     }
 
-    return result.reverse();
+    return [...head, ...middle.reverse(), ...tail];
   }
 }

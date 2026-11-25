@@ -21,6 +21,21 @@ const urgentHint = (threshold: SlaThreshold, priority: string) =>
 
 type Delivery = { attempted: number; delivered: number };
 
+/**
+ * Mesmo padrão da API (SlaEngineService.getTenantTimezone): fuso inválido no cadastro cai no
+ * padrão em vez de lançar RangeError e parar o monitoramento.
+ */
+const DEFAULT_TIMEZONE = 'America/Sao_Paulo';
+function validTimezone(timezone: string | null | undefined): string {
+  if (!timezone) return DEFAULT_TIMEZONE;
+  try {
+    new Intl.DateTimeFormat('en-US', { timeZone: timezone }).format();
+    return timezone;
+  } catch {
+    return DEFAULT_TIMEZONE;
+  }
+}
+
 @Injectable()
 export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
   private readonly logger = new Logger(SlaMonitoringService.name);
@@ -147,6 +162,8 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
       const stopEvents = openOrders.length
         ? await this.prisma.slaAuditEvent.findMany({
             where: {
+              // tenantId primeiro: usa o índice (tenantId, orderId) em vez de varrer a tabela.
+              tenantId: { in: [...new Set(openOrders.map((order) => order.tenantId))] },
               orderId: { in: openOrders.map((order) => order.id) },
               eventType: { in: ['RESUMED', 'REOPENED'] },
             },
@@ -357,7 +374,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
       this.prisma.businessCalendarException.findMany({ where: { tenantId } }),
     ]);
     const calendar: TenantCalendar = {
-      timezone: timezone || 'America/Fortaleza',
+      timezone: validTimezone(timezone),
       days: defaultDays(rows),
       exceptions: new Map(
         exceptions.map((e) => [
@@ -510,7 +527,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         order.requester ||
         'Provedor';
       const deadlineText = order.deadlineAt.toLocaleString('pt-BR', {
-        timeZone: order.tenant?.timezone || 'America/Fortaleza',
+        timeZone: validTimezone(order.tenant?.timezone),
       });
       const label =
         threshold === 'BREACHED'
@@ -548,10 +565,18 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
         try {
           if (cfg.channel === 'WEBHOOK' || cfg.channel === 'SLACK') {
             await assertSafeUrl(cfg.target);
+            // O Incoming Webhook do Slack exige `text` (sem ele responde 400 no_text).
+            const slackText =
+              `*${label}* — O.S. ${order.protocol}\n` +
+              `Cliente: ${clientName}\nTítulo: ${order.title}\nPrioridade: ${order.priority}\n` +
+              `Prazo: ${deadlineText}\n` +
+              (threshold === 'BREACHED'
+                ? `Atraso: ${delayMinutes} min`
+                : `Decorrido: ${Math.round(percentElapsed)}%`);
             const response = await safeFetch(cfg.target, {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify(payload),
+              body: JSON.stringify(cfg.channel === 'SLACK' ? { text: slackText } : payload),
               signal: AbortSignal.timeout(10000),
             });
             if (!response.ok) throw new Error(`status ${response.status}`);

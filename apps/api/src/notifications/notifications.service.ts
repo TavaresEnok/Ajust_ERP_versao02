@@ -95,12 +95,22 @@ export class NotificationsService {
       for (const cfg of configs) {
         const send = async () => {
           if (cfg.channel === 'WEBHOOK' || cfg.channel === 'SLACK') {
-            const body = JSON.stringify({
-              trigger,
-              tenantId,
-              ...payload,
-              timestamp: new Date().toISOString(),
-            });
+            // O Incoming Webhook do Slack exige `text` (sem ele responde 400 no_text).
+            const body = JSON.stringify(
+              cfg.channel === 'SLACK'
+                ? {
+                    text: [
+                      `*Ajust ERP — ${trigger}*`,
+                      ...Object.entries(payload).map(([key, value]) => `${key}: ${value}`),
+                    ].join('\n'),
+                  }
+                : {
+                    trigger,
+                    tenantId,
+                    ...payload,
+                    timestamp: new Date().toISOString(),
+                  },
+            );
             try {
               await assertSafeUrl(cfg.target);
               const response = await safeFetch(cfg.target, {

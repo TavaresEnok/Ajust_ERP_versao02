@@ -30,7 +30,7 @@ describe('TimeTrackingService.listByOrder', () => {
     const svc = new TimeTrackingService(prisma);
     await svc.listByOrder('t1', 'o1');
     const where = prisma.timeEntry.findMany.mock.calls[0][0].where;
-    expect(where).toEqual({ tenantId: 't1', orderId: 'o1' });
+    expect(where).toEqual({ tenantId: 't1', orderId: 'o1', order: { deletedAt: null } });
   });
 });
 
@@ -151,11 +151,17 @@ describe('Time entry constraints', () => {
     const svc = new TimeTrackingService(prisma);
     await svc.listByTenant('t1', undefined, undefined, 'u1', 500, 10);
     expect(prisma.timeEntry.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { tenantId: 't1', userId: 'u1' }, take: 200, skip: 10 }),
+      expect.objectContaining({
+        where: { tenantId: 't1', userId: 'u1', order: { deletedAt: null } },
+        take: 200,
+        skip: 10,
+      }),
     );
     await svc.summary('t1', 'u1');
     expect(prisma.timeEntry.findMany).toHaveBeenLastCalledWith(
-      expect.objectContaining({ where: { tenantId: 't1', userId: 'u1' } }),
+      expect.objectContaining({
+        where: { tenantId: 't1', userId: 'u1', order: { deletedAt: null } },
+      }),
     );
   });
 });
@@ -177,7 +183,9 @@ describe('Time entry totals', () => {
     const prisma = makePrisma();
     await new TimeTrackingService(prisma).summary('t1', 'u1');
     expect(prisma.timeEntry.groupBy).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { tenantId: 't1', userId: 'u1' } }),
+      expect.objectContaining({
+        where: { tenantId: 't1', userId: 'u1', order: { deletedAt: null } },
+      }),
     );
   });
 });

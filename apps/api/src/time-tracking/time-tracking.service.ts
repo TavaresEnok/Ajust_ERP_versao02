@@ -22,7 +22,7 @@ export class TimeTrackingService {
 
   async listByOrder(tenantId: string, orderId: string, userId?: string, limit = 50, offset = 0) {
     return this.prisma.timeEntry.findMany({
-      where: { tenantId, orderId, ...(userId ? { userId } : {}) },
+      where: { tenantId, orderId, order: { deletedAt: null }, ...(userId ? { userId } : {}) },
       take: Math.min(200, Math.max(1, limit)),
       skip: Math.max(0, offset),
       include: { user: { select: { id: true, name: true } } },
@@ -38,7 +38,11 @@ export class TimeTrackingService {
     limit = 50,
     offset = 0,
   ) {
-    const where: Prisma.TimeEntryWhereInput = { tenantId, ...(userId ? { userId } : {}) };
+    const where: Prisma.TimeEntryWhereInput = {
+      tenantId,
+      order: { deletedAt: null },
+      ...(userId ? { userId } : {}),
+    };
     if (from || to) {
       where.loggedAt = {};
       if (from) where.loggedAt.gte = new Date(from);
@@ -111,7 +115,7 @@ export class TimeTrackingService {
   async summary(tenantId: string, userId?: string) {
     const groups = await this.prisma.timeEntry.groupBy({
       by: ['userId', 'billable'],
-      where: { tenantId, ...(userId ? { userId } : {}) },
+      where: { tenantId, order: { deletedAt: null }, ...(userId ? { userId } : {}) },
       _sum: { minutes: true },
     });
     const users = await this.prisma.user.findMany({

@@ -1015,6 +1015,7 @@ model AssetConfigSnapshot {
   asset     Asset  @relation(fields: [assetId], references: [id], onDelete: Cascade)
   createdBy User?  @relation(fields: [createdById], references: [id], onDelete: SetNull)
 
+  @@unique([assetId, version])
   @@index([assetId, createdAt])
   @@index([tenantId, assetId])
 }
@@ -1331,6 +1332,7 @@ model SlaAuditEvent {
   order  ServiceOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
 
   @@index([tenantId, orderId])
+  @@index([orderId, eventType])
   @@index([tenantId, createdAt])
 }
 

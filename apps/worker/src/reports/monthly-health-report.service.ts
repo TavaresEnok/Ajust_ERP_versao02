@@ -2,6 +2,13 @@ import { Inject, Injectable, Logger, OnModuleInit } from '@nestjs/common';
 import nodemailer, { Transporter } from 'nodemailer';
 import { PrismaService } from '../prisma/prisma.service';
 
+function escapeHtml(value: string) {
+  return value.replace(
+    /[&<>"']/g,
+    (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[char]!,
+  );
+}
+
 @Injectable()
 export class MonthlyHealthReportService implements OnModuleInit {
   private readonly logger = new Logger(MonthlyHealthReportService.name);
@@ -19,6 +26,10 @@ export class MonthlyHealthReportService implements OnModuleInit {
       host: process.env.SMTP_HOST,
       port: Number(process.env.SMTP_PORT) || 587,
       secure: process.env.SMTP_SECURE === 'true',
+      // Sem timeouts um SMTP travado prende o worker indefinidamente.
+      connectionTimeout: 15_000,
+      greetingTimeout: 15_000,
+      socketTimeout: 30_000,
       auth: {
         user: process.env.SMTP_USER,
         pass: process.env.SMTP_PASS,
@@ -53,19 +64,27 @@ export class MonthlyHealthReportService implements OnModuleInit {
 
         if (existingLog) continue; // Already sent
 
-        await this.generateAndSendReport(tenant);
+        // Um tenant com erro (SMTP, e-mail inválido) não pode impedir o envio aos demais.
+        try {
+          await this.generateAndSendReport(tenant);
 
-        // Mark as sent
-        await this.prisma.auditLog.create({
-          data: {
-            tenantId: tenant.id,
-            actorUserId: null,
-            action: 'EXPORT',
-            resourceType: logKey,
-            resourceId: currentMonth,
-            metadata: { type: 'monthly_health_report_email' },
-          },
-        });
+          await this.prisma.auditLog.create({
+            data: {
+              tenantId: tenant.id,
+              actorUserId: null,
+              action: 'EXPORT',
+              resourceType: logKey,
+              resourceId: currentMonth,
+              metadata: { type: 'monthly_health_report_email' },
+            },
+          });
+        } catch (error) {
+          this.logger.error(
+            `Monthly health report failed for tenant ${tenant.id}: ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
       }
     } finally {
       this.running = false;
@@ -82,16 +101,22 @@ export class MonthlyHealthReportService implements OnModuleInit {
     const firstDayLastMonth = new Date(now.getFullYear(), now.getMonth() - 1, 1);
     const lastDayLastMonth = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59);
 
-    const orders = await this.prisma.serviceOrder.findMany({
-      where: {
-        tenantId: tenant.id,
-        createdAt: { gte: firstDayLastMonth, lte: lastDayLastMonth },
-      },
-    });
-
-    const total = orders.length;
-    const closed = orders.filter((o) => ['FECHADA', 'RESOLVIDA'].includes(o.status)).length;
-    const critical = orders.filter((o) => ['CRITICA', 'ALTA'].includes(o.priority)).length;
+    // Contagens no banco (antes carregava todas as O.S. do mês no worker de 512 MB).
+    // Mesmas regras do relatório da API: sem excluídas, sem demonstração, crítica = CRITICA.
+    const [counts] = await this.prisma.$queryRaw<
+      { total: number; closed: number; critical: number }[]
+    >`
+      SELECT
+        COUNT(*)::int AS total,
+        (COUNT(*) FILTER (WHERE "status" IN ('FECHADA', 'RESOLVIDA')))::int AS closed,
+        (COUNT(*) FILTER (WHERE "priority" = 'CRITICA'))::int AS critical
+      FROM "ServiceOrder"
+      WHERE "tenantId" = ${tenant.id}
+        AND "deletedAt" IS NULL
+        AND "createdAt" >= ${firstDayLastMonth} AND "createdAt" <= ${lastDayLastMonth}
+        AND ("sourceMetadata"->'demonstration') IS DISTINCT FROM 'true'::jsonb
+    `;
+    const { total = 0, closed = 0, critical = 0 } = counts ?? {};
 
     const resolutionRate = total > 0 ? Math.round((closed / total) * 100) : 100;
 
@@ -117,7 +142,7 @@ export class MonthlyHealthReportService implements OnModuleInit {
           <p>Relatório de Saúde Operacional - ${monthName}</p>
         </div>
         <div style="border: 1px solid #e2e8f0; padding: 20px; border-radius: 0 0 8px 8px;">
-          <p>Olá equipe da <strong>${tenant.legalName}</strong>,</p>
+          <p>Olá equipe da <strong>${escapeHtml(tenant.legalName)}</strong>,</p>
           <p>Aqui está o resumo da sua saúde operacional no último mês.</p>
           
           <div style="background-color: #f8fafc; padding: 15px; border-radius: 8px; margin: 20px 0; display: flex; justify-content: space-between; align-items: center;">
@@ -135,7 +160,7 @@ export class MonthlyHealthReportService implements OnModuleInit {
               <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; text-align: right;">${total}</td>
             </tr>
             <tr>
-              <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; color: #64748b;">O.S Críticas/Altas:</td>
+              <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; color: #64748b;">O.S Críticas:</td>
               <td style="padding: 10px; border-bottom: 1px solid #e2e8f0; font-weight: bold; text-align: right;">${critical}</td>
             </tr>
             <tr>

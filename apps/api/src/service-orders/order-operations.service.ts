@@ -35,6 +35,22 @@ type Command = {
   evidence?: Record<string, string>;
   change?: { impact: string; rollbackPlan: string };
 };
+/**
+ * RFC que pode ser concluída pela O.S.: não excluída e já em execução/aprovada; rascunho só
+ * quando a mudança é operacional sem aprovação obrigatória. Rejeitada/cancelada nunca.
+ */
+function concludableChange(id: string, tenantId: string): Prisma.ChangeRequestWhereInput {
+  return {
+    id,
+    tenantId,
+    deletedAt: null,
+    OR: [
+      { status: { in: ['APROVADO', 'EM_EXECUCAO'] } },
+      { status: 'RASCUNHO', tags: { has: 'aprovacao-nao-obrigatoria' } },
+    ],
+  };
+}
+
 @Injectable()
 export class OrderOperationsService {
   constructor(
@@ -273,6 +289,7 @@ export class OrderOperationsService {
         where: {
           tenantId,
           processInstanceId: process.id,
+          deletedAt: null,
           status: { notIn: ['FECHADA', 'CANCELADA'] },
         },
       });
@@ -293,8 +310,8 @@ export class OrderOperationsService {
         (await this.prisma.serviceOrder.findUniqueOrThrow({ where: { id } })).status === 'FECHADA'
       )
         await this.prisma.changeRequest.updateMany({
-          where: { id: order.changeRequestId, tenantId },
-          data: { status: 'CONCLUIDO', executedById: actorId },
+          where: concludableChange(order.changeRequestId, tenantId),
+          data: { status: 'CONCLUIDO', executedById: actorId, version: { increment: 1 } },
         });
       return this.prisma.serviceOrder.findUniqueOrThrow({ where: { id } });
     }
@@ -423,13 +440,21 @@ export class OrderOperationsService {
       }
       if (changeRequestId && input.action === 'start')
         await tx.changeRequest.updateMany({
-          where: { id: changeRequestId, tenantId, tags: { has: 'aprovacao-nao-obrigatoria' } },
-          data: { status: 'EM_EXECUCAO', executedById: actorId },
+          where: {
+            id: changeRequestId,
+            tenantId,
+            deletedAt: null,
+            status: { in: ['RASCUNHO', 'APROVADO'] },
+            tags: { has: 'aprovacao-nao-obrigatoria' },
+          },
+          data: { status: 'EM_EXECUCAO', executedById: actorId, version: { increment: 1 } },
         });
-      if (changeRequestId && input.action === 'finish')
+      // A RFC só conclui quando a O.S. fecha de fato (resolvida aguardando aprovação não
+      // conta) e respeitando a máquina de estados da mudança.
+      if (changeRequestId && input.action === 'finish' && data.status === 'FECHADA')
         await tx.changeRequest.updateMany({
-          where: { id: changeRequestId, tenantId },
-          data: { status: 'CONCLUIDO', executedById: actorId },
+          where: concludableChange(changeRequestId, tenantId),
+          data: { status: 'CONCLUIDO', executedById: actorId, version: { increment: 1 } },
         });
       await tx.serviceOrderOccurrence.create({
         data: {

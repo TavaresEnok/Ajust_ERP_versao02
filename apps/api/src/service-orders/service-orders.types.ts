@@ -178,5 +178,4 @@ export type ExportHistoryItem = {
 export type ExportDownloadResult = {
   fileName: string;
   filePath: string;
-  content: string;
 };

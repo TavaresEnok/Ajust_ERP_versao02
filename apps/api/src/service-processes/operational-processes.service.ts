@@ -177,7 +177,13 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
   }
   async list(tenantId: string) {
     const rows = await this.prisma.serviceProcessInstance.findMany({
-      where: { tenantId, engineVersion: 2, status: { not: 'SUPERSEDED' } },
+      // Atendimento excluído some da lista; O.S. excluídas não aparecem dentro do fluxo.
+      where: {
+        tenantId,
+        engineVersion: 2,
+        status: { not: 'SUPERSEDED' },
+        occurrence: { is: { deletedAt: null } },
+      },
       include: {
         occurrence: true,
         links: {
@@ -200,6 +206,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
           },
         },
         orders: {
+          where: { deletedAt: null },
           select: {
             id: true,
             protocol: true,
@@ -628,6 +635,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
               where: {
                 tenantId,
                 processInstanceId: id,
+                deletedAt: null,
                 pausedAt: null,
                 slaEligible: true,
                 status: { notIn: ['RESOLVIDA', 'FECHADA', 'CANCELADA'] },
@@ -684,6 +692,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
               where: {
                 tenantId,
                 processInstanceId: id,
+                deletedAt: null,
                 pausedAt: { not: null },
                 pauseReason: { startsWith: PROCESS_PAUSE_PREFIX },
               },
@@ -758,6 +767,7 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
               where: {
                 tenantId,
                 processInstanceId: id,
+                deletedAt: null,
                 status: { notIn: ['FECHADA', 'CANCELADA'] },
               },
             });
@@ -1167,14 +1177,17 @@ export class OperationalProcessesService implements OnModuleInit, OnModuleDestro
     const now = new Date();
     // Mesma regra de aprovação da transição manual (C-039): alta/crítica atrasada fica
     // resolvida aguardando a gestão, e o fechamento sai pela aba Aprovações.
-    const blocked = needsClosingApproval(order, now) && !(await hasCurrentApproval(tx, order));
-    if (blocked && order.status === 'RESOLVIDA') return;
-    const target = blocked ? 'RESOLVIDA' : 'FECHADA';
     // Encerrar com o SLA pausado: a pausa termina agora e o tempo útil parado volta ao prazo,
-    // para a entrega não contar como atrasada por causa da pausa.
+    // para a entrega não contar como atrasada por causa da pausa. O prazo ajustado vale
+    // também para decidir se o fechamento precisa de aprovação.
     const resumed = order.pausedAt
       ? await deadlineAfterStop(this.sla, tenantId, order.pausedAt, order.deadlineAt, now)
       : null;
+    const effectiveOrder = resumed ? { ...order, deadlineAt: resumed.deadlineAt } : order;
+    const blocked =
+      needsClosingApproval(effectiveOrder, now) && !(await hasCurrentApproval(tx, order));
+    if (blocked && order.status === 'RESOLVIDA') return;
+    const target = blocked ? 'RESOLVIDA' : 'FECHADA';
     const changed = await tx.serviceOrder.updateMany({
       where: { id: orderId, version: order.version },
       data: {

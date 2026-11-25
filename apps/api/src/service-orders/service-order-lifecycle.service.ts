@@ -272,6 +272,8 @@ export class ServiceOrderLifecycleService implements OnModuleInit {
         where: {
           tenantId,
           processInstanceId: instanceId,
+          // O.S. excluída não pode prender o processo aberto para sempre.
+          deletedAt: null,
           status: { notIn: ['FECHADA', 'CANCELADA'] },
         },
       }),

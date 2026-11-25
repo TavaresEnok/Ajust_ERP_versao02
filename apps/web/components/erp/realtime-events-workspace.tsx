@@ -55,7 +55,7 @@ export function RealtimeEventsWorkspace() {
   return <RealtimeEventsSession key={`${scope?.sessionKey}:${scope?.tenantId}:${scope?.role}`} />;
 }
 function RealtimeEventsSession() {
-  const { scope, transport } = useErp();
+  const { scope } = useErp();
   const action = useErpAction();
   const socketRef = useRef<Socket | null>(null);
   const eventSequence = useRef(0);
@@ -64,14 +64,19 @@ function RealtimeEventsSession() {
   const [lastError, setLastError] = useState('');
   const canMonitor = !!scope && ['super_admin', 'gerente'].includes(scope.role);
 
+  // Cada tentativa de conexão tem um número; uma resposta atrasada de /auth/socket-token
+  // (de antes de desmontar ou de clicar de novo) não pode abrir um socket órfão.
+  const generation = useRef(0);
+  // A sessão/tenant já remonta este componente (key no pai). Não depende de `transport`:
+  // a identidade dele muda a cada router.refresh() e derrubava a conexão sem aviso.
   useEffect(() => {
-    socketRef.current?.disconnect();
-    socketRef.current = null;
+    const current = generation;
     return () => {
+      current.current++;
       socketRef.current?.disconnect();
       socketRef.current = null;
     };
-  }, [scope?.sessionKey, scope?.tenantId, scope?.role, transport]);
+  }, []);
 
   function addEvent(name: string, payload: unknown) {
     const event = {
@@ -89,9 +94,11 @@ function RealtimeEventsSession() {
     socketRef.current = null;
     setLastError('');
     setStatus('connecting');
+    const attempt = ++generation.current;
 
     try {
       const credentials = await action.execute<SocketCredentials>({ path: '/auth/socket-token' });
+      if (attempt !== generation.current) return;
       if (!credentials || typeof credentials.token !== 'string' || !credentials.token)
         throw new Error('O BFF não emitiu uma credencial para o canal em tempo real.');
       const endpoint = safeEndpoint(credentials.socketUrl || window.location.origin);
@@ -99,6 +106,8 @@ function RealtimeEventsSession() {
       const socket = io(endpoint, {
         autoConnect: false,
         transports: ['websocket'],
+        // Sem teto o socket tentaria para sempre após a sessão expirar.
+        reconnectionAttempts: 10,
         auth: async (callback) => {
           try {
             const token =
@@ -136,6 +145,7 @@ function RealtimeEventsSession() {
   }
 
   function disconnect() {
+    generation.current++;
     socketRef.current?.disconnect();
     socketRef.current = null;
     setStatus('idle');

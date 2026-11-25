@@ -233,7 +233,12 @@ export function ReportsPage() {
               description="Entradas por criação e entregas por resolução ou fechamento, em dias de Fortaleza."
             />
             <div className="px-6 pb-5">
-              <VolumeChart period={period} series={report?.series} />
+              {/* Enquanto o resumo carrega, série vazia: sem ela o gráfico baixaria todas as
+                  O.S. do período por conta própria. */}
+              <VolumeChart
+                period={period}
+                series={report?.series ?? (kpi.isLoading ? [] : undefined)}
+              />
             </div>
           </section>
           <section className="panel">

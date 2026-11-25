@@ -175,7 +175,7 @@ export async function getOperationalSummary(
             WHERE ${ACTIVE_STATUS_SQL}
               AND so."pausedAt" IS NULL
               AND so."slaEligible" = true
-              AND to_char(so."deadlineAt" AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') = ${today}
+              AND to_char((so."deadlineAt" AT TIME ZONE 'UTC') AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') = ${today}
           ) AS "dueToday",
           COUNT(*) FILTER (
             WHERE ${ACTIVE_STATUS_SQL}
@@ -259,7 +259,7 @@ export async function getOperationalSummary(
 
     prisma.$queryRaw<Array<{ day: string; count: bigint }>>(Prisma.sql`
         SELECT
-          to_char(so."createdAt" AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') AS day,
+          to_char((so."createdAt" AT TIME ZONE 'UTC') AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') AS day,
           COUNT(*) AS count
         FROM "ServiceOrder" so
         WHERE ${baseWhere} AND ${openedInPeriodExpr}
@@ -269,7 +269,7 @@ export async function getOperationalSummary(
 
     prisma.$queryRaw<Array<{ day: string; count: bigint }>>(Prisma.sql`
         SELECT
-          to_char(${finishedExpr} AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') AS day,
+          to_char((${finishedExpr} AT TIME ZONE 'UTC') AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') AS day,
           COUNT(*) AS count
         FROM "ServiceOrder" so
         WHERE ${baseWhere} AND ${closedInPeriodExpr}
@@ -386,7 +386,7 @@ export async function getOperationalQueue(
         ACTIVE_STATUS_SQL,
         Prisma.sql`so."pausedAt" IS NULL`,
         Prisma.sql`so."slaEligible" = true`,
-        Prisma.sql`to_char(so."deadlineAt" AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') = ${today}`,
+        Prisma.sql`to_char((so."deadlineAt" AT TIME ZONE 'UTC') AT TIME ZONE ${OPERATIONAL_TIMEZONE}, 'YYYY-MM-DD') = ${today}`,
       );
       break;
     case 'within':

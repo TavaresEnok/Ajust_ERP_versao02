@@ -459,13 +459,22 @@ export class ReportsService {
     const orderIds = orders.map((o) => o.id);
     const orderById = new Map(orders.map((o) => [o.id, o]));
 
-    const events =
-      orderIds.length > 0
-        ? await this.prisma.serviceOrderStatusEvent.findMany({
-            where: { tenantId, serviceOrderId: { in: orderIds } },
-            orderBy: { createdAt: 'asc' },
-          })
-        : [];
+    // Em lotes: um IN com dezenas de milhares de ids passa do limite de 32.767 parâmetros
+    // do PostgreSQL. Só os campos usados, ordenados por O.S. e data para o cálculo abaixo.
+    const events: Array<{
+      serviceOrderId: string;
+      fromStatus: string;
+      toStatus: string;
+      createdAt: Date;
+    }> = [];
+    for (let index = 0; index < orderIds.length; index += 5000) {
+      const batch = await this.prisma.serviceOrderStatusEvent.findMany({
+        where: { tenantId, serviceOrderId: { in: orderIds.slice(index, index + 5000) } },
+        select: { serviceOrderId: true, fromStatus: true, toStatus: true, createdAt: true },
+        orderBy: [{ serviceOrderId: 'asc' }, { createdAt: 'asc' }],
+      });
+      events.push(...batch);
+    }
 
     const statusCounts = new Map<
       string,

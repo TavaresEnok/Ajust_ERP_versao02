@@ -15,7 +15,7 @@ import {
 
 /**
  * Limites de corpo aceitos pelo BFF; o NestJS aplica os seus por rota (anexos: 10 arquivos de
- * 10 MB; logo: 5 MB). Multipart é lido em memória, por isso o teto acompanha o maior caso real.
+ * 10 MB; logo: 5 MB). Multipart passa em streaming, limitado ao maior caso real.
  */
 export const MAX_MULTIPART_BYTES = 101 * 1024 * 1024;
 export const MAX_JSON_BYTES = 2 * 1024 * 1024;
@@ -131,10 +131,22 @@ async function buildBody(
   if (length > (multipart ? MAX_MULTIPART_BYTES : jsonLimit))
     return json(413, 'Arquivo ou conteúdo acima do limite permitido.');
   if (multipart) {
-    const buffer = await request.arrayBuffer();
-    if (buffer.byteLength > MAX_MULTIPART_BYTES)
-      return json(413, 'Arquivo ou conteúdo acima do limite permitido.');
-    return buffer;
+    // Repassa em streaming (o contêiner web tem 512 MB; ler 101 MB por upload na memória
+    // derrubava o processo com poucos envios simultâneos). O tamanho declarado é obrigatório
+    // e o contador corta o envio se o corpo real passar do limite.
+    if (!length) return json(411, 'Envio sem tamanho declarado.');
+    if (!request.body) return undefined;
+    let received = 0;
+    return request.body.pipeThrough(
+      new TransformStream<Uint8Array, Uint8Array>({
+        transform(chunk, controller) {
+          received += chunk.byteLength;
+          if (received > MAX_MULTIPART_BYTES || received > length)
+            controller.error(new Error('Corpo maior que o declarado.'));
+          else controller.enqueue(chunk);
+        },
+      }),
+    );
   }
   const text = await request.text();
   if (!text) return undefined;
@@ -208,7 +220,9 @@ export async function forwardToApi(request: NextRequest, segments: string[], hoo
       body,
       cache: 'no-store',
       redirect: 'manual',
-    });
+      // Corpo em stream (multipart) exige duplex no fetch do Node.
+      ...(body instanceof ReadableStream ? { duplex: 'half' } : {}),
+    } as RequestInit);
   } catch {
     return json(502, 'O ERP está indisponível no momento. Tente novamente em instantes.');
   }
@@ -220,6 +234,22 @@ export async function forwardToApi(request: NextRequest, segments: string[], hoo
     clearAuthCookies(response.cookies);
   } else if (auth.refreshed) {
     applyAuthCookies(response.cookies, auth.refreshed as RefreshApiResponse);
+  }
+  return response;
+}
+
+/** Cabeçalhos de diagnóstico e limite que o navegador precisa ver também em JSON/erro. */
+const PASSTHROUGH_META_HEADERS = [
+  'x-trace-id',
+  'x-request-id',
+  'x-ratelimit-limit',
+  'x-ratelimit-remaining',
+  'retry-after',
+];
+function withMetaHeaders(response: NextResponse, upstream: Response) {
+  for (const name of PASSTHROUGH_META_HEADERS) {
+    const value = upstream.headers.get(name);
+    if (value) response.headers.set(name, value);
   }
   return response;
 }
@@ -246,7 +276,7 @@ async function toClientResponse(
             ? 'Registro não encontrado.'
             : 'O ERP recusou a operação.';
     const message = upstream.status >= 500 ? fallback : upstreamErrorMessage(text, fallback);
-    return json(upstream.status, message);
+    return withMetaHeaders(json(upstream.status, message), upstream);
   }
 
   if (upstream.status === 204 || upstream.status === 304) {
@@ -264,7 +294,7 @@ async function toClientResponse(
     const etag = upstream.headers.get('etag');
     if (etag) response.headers.set('etag', etag);
     response.headers.set('cache-control', 'no-store');
-    return response;
+    return withMetaHeaders(response, upstream);
   }
 
   const headers = new Headers();

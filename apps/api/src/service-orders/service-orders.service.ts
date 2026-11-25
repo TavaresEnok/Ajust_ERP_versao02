@@ -771,7 +771,7 @@ export class ServiceOrdersService {
     const created = await this.withCreateRetry(() =>
       this.prisma.$transaction(async (tx) => {
         const protocol = await nextOrderProtocolInTransaction(tx, input.tenantId);
-        const occurrenceNumber = await this.buildOccurrenceNumber(input.tenantId);
+        const occurrenceNumber = await this.buildOccurrenceNumber(tx, input.tenantId);
 
         const occurrence = await tx.occurrence.create({
           data: {
@@ -1599,8 +1599,11 @@ export class ServiceOrdersService {
     if (order.pausedAt && !autoPaused && (to === 'RESOLVIDA' || to === 'FECHADA'))
       throw new BadRequestException('Retome a O.S. antes de encerrar.');
 
+    // Com pausa automática ainda aberta, o prazo só é ajustado abaixo; a checagem final
+    // (na transação) usa o prazo já creditado.
     if (
       to === 'FECHADA' &&
+      !autoPaused &&
       needsClosingApproval(order) &&
       !(await hasCurrentApproval(this.prisma, order))
     ) {
@@ -1673,9 +1676,13 @@ export class ServiceOrdersService {
     let updated;
     try {
       updated = await this.prisma.$transaction(async (tx) => {
+        const approvalOrder =
+          slaPatch && 'deadlineAt' in slaPatch && slaPatch.deadlineAt instanceof Date
+            ? { ...order, deadlineAt: slaPatch.deadlineAt }
+            : order;
         if (
           to === 'FECHADA' &&
-          needsClosingApproval(order) &&
+          needsClosingApproval(approvalOrder) &&
           !(await hasCurrentApproval(tx, order))
         )
           throw new ForbiddenException('O fechamento precisa de aprovação gerencial vigente.');
@@ -2153,9 +2160,10 @@ export class ServiceOrdersService {
     }
   }
 
-  private async buildOccurrenceNumber(tenantId: string) {
+  /** Dentro da transação que já segura a trava de numeração do tenant (order-protocol). */
+  private async buildOccurrenceNumber(tx: Prisma.TransactionClient, tenantId: string) {
     const year = new Date().getFullYear();
-    const rows = await this.prisma.$queryRaw<{ max: number | null }[]>`
+    const rows = await tx.$queryRaw<{ max: number | null }[]>`
       SELECT MAX(CAST(SUBSTRING("number" FROM 5) AS INTEGER)) AS "max"
       FROM "Occurrence"
       WHERE "tenantId" = ${tenantId} AND "number" ~ ${`^${year}[0-9]{6}$`}`;

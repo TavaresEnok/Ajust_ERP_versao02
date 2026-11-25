@@ -34,7 +34,10 @@ describe('Lifecycle outbox delivery', () => {
       }),
     };
     const create = (handler: (_event: any, effect: EffectRunner) => Promise<void>) => {
-      const service = new LifecycleOutboxService({ serviceOrderLifecycleEvent: delegate } as never);
+      const service = new LifecycleOutboxService({
+        serviceOrderLifecycleEvent: delegate,
+        $executeRaw: jest.fn(async () => 0),
+      } as never);
       service.start(handler);
       services.push(service);
       return service;

@@ -2,7 +2,7 @@ import { BadRequestException, ForbiddenException, NotFoundException } from '@nes
 import { AuditAction, Prisma } from '@prisma/client';
 import { createWriteStream } from 'node:fs';
 import { once } from 'node:events';
-import { mkdir, readFile } from 'node:fs/promises';
+import { access, mkdir } from 'node:fs/promises';
 import { basename, join } from 'node:path';
 import { validatePathWithinBase } from '../common/path-security';
 import { PrismaService } from '../prisma/prisma.service';
@@ -299,7 +299,9 @@ export async function downloadServiceOrderExportCsv(params: {
     operation: 'download',
   });
 
-  // Mantém `content` disponível para chamadores internos, mas o controller faz streaming por `filePath`.
-  const content = await readFile(safePath, 'utf-8');
-  return { fileName, filePath: safePath, content };
+  // O controller faz streaming por `filePath`; ler o CSV inteiro aqui só gastava memória.
+  await access(safePath).catch(() => {
+    throw new NotFoundException('Export file not found.');
+  });
+  return { fileName, filePath: safePath };
 }

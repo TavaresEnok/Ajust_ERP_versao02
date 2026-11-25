@@ -566,7 +566,9 @@ export class WorkflowsService {
       if (outgoing.length === 0) continue;
 
       if (node.type === 'condition') {
-        if (node.subtype === 'gateway_parallel') {
+        // Split envia para todos os ramos; o join (já sincronizado acima) segue a saída única
+        // mesmo sem rótulo "true" — antes um join criado pela API encerrava o fluxo calado.
+        if (node.subtype === 'gateway_parallel' || node.subtype === 'gateway_parallel_join') {
           for (const edge of outgoing) {
             const targetTokens = deliveredTokens.get(edge.target) || new Set<string>();
             targetTokens.add(currentId);
@@ -669,7 +671,9 @@ export class WorkflowsService {
       const outgoing = outBySource.get(node.id) || [];
       const incoming = inByTarget.get(node.id) || [];
       if (node.type === 'condition') {
-        if (node.subtype === 'gateway_parallel') {
+        // Split envia para todos os ramos; o join (já sincronizado acima) segue a saída única
+        // mesmo sem rótulo "true" — antes um join criado pela API encerrava o fluxo calado.
+        if (node.subtype === 'gateway_parallel' || node.subtype === 'gateway_parallel_join') {
           if (incoming.length !== 1) {
             throw new BadRequestException(
               `Parallel split gateway "${node.id}" must have exactly 1 incoming branch.`,

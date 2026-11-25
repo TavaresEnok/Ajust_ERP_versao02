@@ -48,33 +48,33 @@ export class ChangeService {
       throw new BadRequestException('plannedEnd must be after plannedStart.');
     }
 
-    for (let attempt = 1; attempt <= 3; attempt++) {
-      const count = await this.prisma.changeRequest.count({ where: { tenantId } });
-      const number = `RFC-${String(count + 1).padStart(5, '0')}`;
-      try {
-        return await this.prisma.changeRequest.create({
-          data: {
-            tenantId,
-            number,
-            title: input.title,
-            description: input.description,
-            justification: input.justification,
-            rollbackPlan: input.rollbackPlan,
-            risk: input.risk ?? 'MEDIO',
-            status: 'RASCUNHO',
-            plannedStart,
-            plannedEnd,
-            affectedSystems: input.affectedSystems ?? [],
-            tags: input.tags ?? [],
-            requestedById: actorId,
-          },
-        });
-      } catch (error) {
-        const known = error as Prisma.PrismaClientKnownRequestError;
-        if (known.code !== 'P2002' || attempt === 3) throw error;
-      }
-    }
-    throw new BadRequestException('Could not allocate RFC number.');
+    // Numeração serializada por tenant (trava de transação) a partir do maior número já
+    // usado: com count + 1, qualquer lacuna repetia o mesmo número nas 3 tentativas.
+    return this.prisma.$transaction(async (tx) => {
+      await tx.$executeRaw`SELECT pg_advisory_xact_lock(hashtext(${`change-number:${tenantId}`}))`;
+      const rows = await tx.$queryRaw<{ max: number | null }[]>`
+        SELECT MAX(CAST(SUBSTRING("number" FROM 5) AS INTEGER)) AS "max"
+        FROM "ChangeRequest"
+        WHERE "tenantId" = ${tenantId} AND "number" ~ '^RFC-[0-9]+$'`;
+      const number = `RFC-${String(Number(rows[0]?.max ?? 0) + 1).padStart(5, '0')}`;
+      return tx.changeRequest.create({
+        data: {
+          tenantId,
+          number,
+          title: input.title,
+          description: input.description,
+          justification: input.justification,
+          rollbackPlan: input.rollbackPlan,
+          risk: input.risk ?? 'MEDIO',
+          status: 'RASCUNHO',
+          plannedStart,
+          plannedEnd,
+          affectedSystems: input.affectedSystems ?? [],
+          tags: input.tags ?? [],
+          requestedById: actorId,
+        },
+      });
+    });
   }
 
   async transition(
@@ -140,9 +140,15 @@ export class ChangeService {
   }
 
   async remove(tenantId: string, id: string): Promise<ChangeRequest> {
-    const rfc = await this.prisma.changeRequest.findFirst({ where: { id, tenantId } });
+    // Já excluída: não regrava a data de exclusão.
+    const rfc = await this.prisma.changeRequest.findFirst({
+      where: { id, tenantId, deletedAt: null },
+    });
     if (!rfc) throw new NotFoundException('RFC not found.');
-    return this.prisma.changeRequest.update({ where: { id }, data: { deletedAt: new Date() } });
+    return this.prisma.changeRequest.update({
+      where: { id },
+      data: { deletedAt: new Date(), version: { increment: 1 } },
+    });
   }
 
   private parseOptionalDate(value: string | undefined, field: string): Date | undefined {
