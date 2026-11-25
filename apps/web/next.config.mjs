@@ -25,7 +25,16 @@ const nextConfig = {
   poweredByHeader: false,
   ...(isDev
     ? {
-        allowedDevOrigins: ['localhost', '127.0.0.1', 'http://SERVIDOR_IP:8070', 'SERVIDOR_IP'],
+        // Origens extras do servidor de desenvolvimento (ex.: IP da máquina) vêm do ambiente,
+        // não do repositório: DEV_ALLOWED_ORIGINS="http://IP:8070,IP".
+        allowedDevOrigins: [
+          'localhost',
+          '127.0.0.1',
+          ...(process.env.DEV_ALLOWED_ORIGINS || '')
+            .split(',')
+            .map((origin) => origin.trim())
+            .filter(Boolean),
+        ],
       }
     : {}),
   ...(process.env.NEXT_DIST_DIR ? { distDir: process.env.NEXT_DIST_DIR } : {}),

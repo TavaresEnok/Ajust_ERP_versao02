@@ -1,4 +1,4 @@
-import { SGP_CUSTOMERS } from '../customers/import-sgp-registry';
+import { SGP_CUSTOMERS, type SgpCustomer } from '../customers/import-sgp-registry';
 
 export type SourceRow = Record<string, any>;
 // Freeze the reviewed pilot: reruns must not silently expand it as new SGP orders arrive.
@@ -43,7 +43,7 @@ export async function collectSgpSample() {
     return result;
   }
   const result: {
-    customer: (typeof SGP_CUSTOMERS)[number];
+    customer: SgpCustomer;
     selected: { occurrence: SourceRow; order: SourceRow; detail: SourceRow }[];
     inspected: number;
     availableTypes: string[];

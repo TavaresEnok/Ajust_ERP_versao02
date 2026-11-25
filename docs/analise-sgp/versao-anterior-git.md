@@ -5,8 +5,8 @@ Para comparação com o redesign atual, foi publicada uma cópia isolada do cód
 - Commit: `09ffe985adbd617d81621e35bd56853f886e2405` (`feat(core): gestao de sessoes, rate limiting ixc, snapshots cmdb com diff e escala on-call`)
 - Data do commit: 16/10/2026 19:59 UTC
 - Código isolado em: `/home/app/projects/Ajust_ERP-pre-redesign`
-- Interface anterior: http://SERVIDOR_IP:8071
-- Interface atual: http://SERVIDOR_IP:8070
+- Interface anterior: http://<IP-do-servidor>:8071
+- Interface atual: http://<IP-do-servidor>:8070
 - API anterior (uso interno da interface antiga): porta 8091
 - API atual: porta 8092 (a porta 8071, antes usada pela API atual, foi liberada para a interface antiga)
 

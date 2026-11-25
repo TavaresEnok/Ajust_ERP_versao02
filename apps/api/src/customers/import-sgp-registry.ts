@@ -1,15 +1,39 @@
 import { Prisma, PrismaClient } from '@prisma/client';
 import { randomBytes } from 'node:crypto';
 import { hash } from 'bcryptjs';
+import { existsSync, readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 
-export const SGP_CUSTOMERS = [
-  { id: 60, taxId: '00000000000000', tradeName: 'MEGANET' },
-  { id: 108, taxId: '00000000000000', tradeName: 'HOMENET' },
-  { id: 53, taxId: '00000000000000', tradeName: 'ECOTELECOM' },
-  { id: 89, taxId: '00000000000000', tradeName: 'INFOTEL' },
-  { id: 25, taxId: '00000000000000', tradeName: 'ULTRANET' },
-  { id: 9, taxId: '00000000000000', tradeName: 'G5 JABOATÃO' },
-] as const;
+export type SgpCustomer = { id: number; taxId: string; tradeName: string };
+
+/**
+ * Clientes do SGP autorizados para importação (ID no SGP + CNPJ esperado). São dados reais de
+ * clientes: ficam em config/sgp-customers.json (fora do Git; modelo em
+ * config/sgp-customers.example.json) ou no caminho de SGP_CUSTOMERS_FILE. Sem o arquivo, a
+ * lista fica vazia e nenhuma importação acontece.
+ */
+export function loadSgpCustomers(
+  file = process.env.SGP_CUSTOMERS_FILE ||
+    ['.', '..', '../..']
+      .map((up) => resolve(process.cwd(), up, 'config/sgp-customers.json'))
+      .find((candidate) => existsSync(candidate)),
+): SgpCustomer[] {
+  if (!file || !existsSync(file)) return [];
+  const parsed = JSON.parse(readFileSync(file, 'utf8')) as unknown;
+  if (
+    !Array.isArray(parsed) ||
+    !parsed.every(
+      (row) =>
+        Number.isInteger(row?.id) &&
+        /^\d{14}$/.test(String(row?.taxId)) &&
+        typeof row?.tradeName === 'string',
+    )
+  )
+    throw new Error(`${file}: esperado [{ id, taxId (14 dígitos), tradeName }].`);
+  return parsed as SgpCustomer[];
+}
+
+export const SGP_CUSTOMERS: readonly SgpCustomer[] = loadSgpCustomers();
 const domain = 'ajustconsulting.sgp.net.br';
 const strings = (v: unknown): string[] =>
   Array.isArray(v)
@@ -25,10 +49,7 @@ const strings = (v: unknown): string[] =>
 const text = (v: unknown) =>
   typeof v === 'string' || typeof v === 'number' ? String(v).trim() : '';
 
-export function sanitizeCustomer(
-  raw: Record<string, unknown>,
-  expected: (typeof SGP_CUSTOMERS)[number],
-) {
+export function sanitizeCustomer(raw: Record<string, unknown>, expected: SgpCustomer) {
   if (Number(raw.id) !== expected.id || text(raw.cpfcnpj).replace(/\D/g, '') !== expected.taxId)
     throw new Error(`Cliente ${expected.id}: ID/CNPJ divergente; nenhuma escrita autorizada.`);
   if (!text(raw.nome)) throw new Error(`Cliente ${expected.id} sem razão social.`);
@@ -90,7 +111,10 @@ export async function importSgpRegistry(
   prisma: PrismaClient,
   apply = false,
   fetcher: typeof fetch = fetch,
+  allowlist: readonly SgpCustomer[] = SGP_CUSTOMERS,
 ) {
+  if (!allowlist.length)
+    throw new Error('Nenhum cliente do SGP configurado (config/sgp-customers.json).');
   const token = process.env.SGP_TOKEN;
   if (!token) throw new Error('Defina SGP_TOKEN no ambiente (não gravado pelo importador).');
   const tenant = await prisma.tenant.findUnique({
@@ -112,7 +136,7 @@ export async function importSgpRegistry(
   // Only cadastral endpoints. Ask the source to omit contracts and financial titles.
   const technicians = sanitizeTechnicians(await read('/api/ura/tecnicos/', {}));
   const customers = await Promise.all(
-    SGP_CUSTOMERS.map(async (spec) => {
+    allowlist.map(async (spec) => {
       const response = await read('/api/ura/clientes/', {
         cliente_id: String(spec.id),
         limit: '1',

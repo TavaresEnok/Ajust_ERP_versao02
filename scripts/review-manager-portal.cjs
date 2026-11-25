@@ -1,6 +1,7 @@
 const fs = require('node:fs');
 const { chromium } = require('../apps/web/node_modules/@playwright/test');
-const base = process.env.ERP_REVIEW_BASE_URL || 'http://SERVIDOR_IP:8070';
+const base = process.env.ERP_REVIEW_BASE_URL;
+if (!base) throw new Error('Defina ERP_REVIEW_BASE_URL (ex.: http://IP-do-servidor:8070).');
 const output = process.env.ERP_REVIEW_OUTPUT || '/tmp/ajust-manager-review';
 const active = (row) => !['FECHADA', 'RESOLVIDA', 'CANCELADA'].includes(row.status);
 const completed = (row) => ['FECHADA', 'RESOLVIDA'].includes(row.status);

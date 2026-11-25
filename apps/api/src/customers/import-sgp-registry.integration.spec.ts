@@ -1,6 +1,13 @@
 import { PrismaClient } from '@prisma/client';
 import { randomUUID } from 'node:crypto';
-import { importSgpRegistry, SGP_CUSTOMERS } from './import-sgp-registry';
+import { importSgpRegistry } from './import-sgp-registry';
+
+// Fictícios: os clientes reais ficam em config/sgp-customers.json, fora do Git.
+const CUSTOMERS = [60, 108, 53, 89, 25, 9].map((id, index) => ({
+  id,
+  taxId: `1122233300${String(index + 10).padStart(4, '0')}`,
+  tradeName: `PROVEDOR ${index + 1}`,
+}));
 
 const dbDescribe = process.env.REGISTRY_DB_TESTS === '1' ? describe : describe.skip;
 dbDescribe('Cadastral import: atomic real-DB scenario, always rolled back', () => {
@@ -40,7 +47,7 @@ dbDescribe('Cadastral import: atomic real-DB scenario, always rolled back', () =
                   { id: 23, username: 'Chamados_em_Espera', nome: '' },
                 ]),
               );
-            const spec = SGP_CUSTOMERS.find(
+            const spec = CUSTOMERS.find(
               (x) => String(x.id) === (init.body as URLSearchParams).get('cliente_id'),
             )!;
             return new Response(
@@ -57,7 +64,7 @@ dbDescribe('Cadastral import: atomic real-DB scenario, always rolled back', () =
               }),
             );
           }) as typeof fetch;
-          const result = await importSgpRegistry(facade, true, fetcher);
+          const result = await importSgpRegistry(facade, true, fetcher, CUSTOMERS);
           expect(result.status).toBe('IMPORTED');
           expect('before' in result && result.before).toEqual('after' in result && result.after);
           expect(await tx.customer.count({ where: { tenantId: tenant.id } })).toBe(6);
@@ -74,7 +81,7 @@ dbDescribe('Cadastral import: atomic real-DB scenario, always rolled back', () =
           });
           const audited = await tx.auditLog.count({ where: { tenantId: tenant.id } });
           expect(audited).toBe(8);
-          const repeat = await importSgpRegistry(facade, true, fetcher);
+          const repeat = await importSgpRegistry(facade, true, fetcher, CUSTOMERS);
           expect(repeat.status).toBe('ALREADY_IMPORTED');
           expect(await tx.userTenant.count({ where: { tenantId: tenant.id } })).toBe(1);
           expect(await tx.auditLog.count({ where: { tenantId: tenant.id } })).toBe(audited);

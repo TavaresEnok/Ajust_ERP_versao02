@@ -35,3 +35,8 @@ apps/web/public/extensao/
 # Relatórios e prints das análises externas (telas reais do sistema)
 docs/analises/prints/
 entregas/
+
+# Dados reais de clientes (IDs e CNPJs do SGP): nunca no Git.
+config/sgp-customers.json
+# Capturas de tela com dados reais de clientes: ficam só na máquina.
+docs/analise-sgp/*.png

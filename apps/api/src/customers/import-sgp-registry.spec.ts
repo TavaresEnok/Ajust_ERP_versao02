@@ -1,21 +1,20 @@
 import { PrismaClient } from '@prisma/client';
-import {
-  importSgpRegistry,
-  sanitizeCustomer,
-  sanitizeTechnicians,
-  SGP_CUSTOMERS,
-} from './import-sgp-registry';
+import { importSgpRegistry, sanitizeCustomer, sanitizeTechnicians } from './import-sgp-registry';
+
+// Fictícios: os clientes reais ficam em config/sgp-customers.json, fora do Git.
+const CUSTOMERS = [60, 108, 53, 89, 25, 9].map((id, index) => ({
+  id,
+  taxId: `1122233300${String(index + 10).padStart(4, '0')}`,
+  tradeName: `PROVEDOR ${index + 1}`,
+}));
 
 describe('SGP cadastral allowlist', () => {
-  it('limits the client scope to the six requested IDs', () => {
-    expect(SGP_CUSTOMERS.map((x) => x.id)).toEqual([60, 108, 53, 89, 25, 9]);
-  });
   it('keeps customer registration/contact fields, never credentials, financial or service data', () => {
     const sanitized = sanitizeCustomer(
       {
         id: 60,
-        nome: 'MEGANET original',
-        cpfcnpj: '00000000000000',
+        nome: 'PROVEDOR 1 original',
+        cpfcnpj: '11.222.333/0000-10',
         tipo: 'J',
         endereco: { cidade: 'Recife', logradouro: 'Rua A', senha: 'secret' },
         contatos: {
@@ -28,18 +27,18 @@ describe('SGP cadastral allowlist', () => {
         observacao: 'sensitive',
         dataNascimento: 'private',
       },
-      SGP_CUSTOMERS[0],
+      CUSTOMERS[0],
     );
-    expect(sanitized.legalName).toBe('MEGANET original');
+    expect(sanitized.legalName).toBe('PROVEDOR 1 original');
     expect(sanitized.contacts.emails).toEqual(['a@example.com']);
     expect(JSON.stringify(sanitized)).not.toMatch(/secret|sensitive|999|private/);
     expect(sanitized.address.cidade).toBe('Recife');
   });
   it('rejects mismatched identity rather than trusting filters', () => {
-    expect(() => sanitizeCustomer({ id: 61, cpfcnpj: '00000000000000' }, SGP_CUSTOMERS[0])).toThrow(
+    expect(() => sanitizeCustomer({ id: 61, cpfcnpj: '11222333000010' }, CUSTOMERS[0])).toThrow(
       'divergente',
     );
-    expect(() => sanitizeCustomer({ id: 60, cpfcnpj: '00000000000000' }, SGP_CUSTOMERS[0])).toThrow(
+    expect(() => sanitizeCustomer({ id: 60, cpfcnpj: '00000000000000' }, CUSTOMERS[0])).toThrow(
       'divergente',
     );
   });
@@ -87,7 +86,7 @@ describe('SGP cadastral allowlist', () => {
         return new Response(JSON.stringify([{ id: 15, username: 'vitor', nome: 'Vitor Andrade' }]));
       expect(params.get('omitir_contratos')).toBe('1');
       expect(params.get('omitir_titulos')).toBe('1');
-      const spec = SGP_CUSTOMERS.find((x) => String(x.id) === params.get('cliente_id'))!;
+      const spec = CUSTOMERS.find((x) => String(x.id) === params.get('cliente_id'))!;
       return new Response(
         JSON.stringify({ clientes: [{ id: spec.id, nome: spec.tradeName, cpfcnpj: spec.taxId }] }),
       );
@@ -97,6 +96,7 @@ describe('SGP cadastral allowlist', () => {
         fakePrisma as unknown as PrismaClient,
         false,
         fetcher as unknown as typeof fetch,
+        CUSTOMERS,
       );
       expect(result.status).toBe('DRY_RUN');
       expect(transaction).not.toHaveBeenCalled();

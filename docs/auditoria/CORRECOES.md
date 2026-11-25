@@ -523,7 +523,7 @@
 ### C-033 · Ao resolver ou fechar, o sistema dispara uma mensagem de "escalonamento" com link interno e IP fixo
 - **Severidade:** Média
 - **Área / item do plano:** 1.5 · Notificações
-- **Onde:** `apps/api/src/notifications/notifications.service.ts:dispatchWhatsAppOrder` (usa o gatilho `ORDER_ESCALATED`, título "🚨 [AJUST NOC] ORDEM DE SERVIÇO", `PUBLIC_APP_URL || 'http://SERVIDOR_IP:8070'`, link para `/gerencia?...exportPdf=`, `deadlineAt.toLocaleString('pt-BR')` sem fuso); chamado por `transition` em RESOLVIDA e FECHADA
+- **Onde:** `apps/api/src/notifications/notifications.service.ts:dispatchWhatsAppOrder` (usa o gatilho `ORDER_ESCALATED`, título "🚨 [AJUST NOC] ORDEM DE SERVIÇO", `PUBLIC_APP_URL || 'http://<IP-do-servidor>:8070'`, link para `/gerencia?...exportPdf=`, `deadlineAt.toLocaleString('pt-BR')` sem fuso); chamado por `transition` em RESOLVIDA e FECHADA
 - **O problema:** (a) quem configurou o canal "O.S. escalonada" passa a receber também toda resolução e todo fechamento, com o mesmo visual de alerta 🚨; (b) uma O.S. resolvida e depois fechada gera duas mensagens; (c) o link aponta para a área de gerência (exige login da equipe) e, sem variável de ambiente, para um IP fixo de produção; (d) o horário sai em UTC; (e) a mensagem inclui 300 caracteres da descrição interna.
 - **Impacto:** ruído no canal de escalonamento, links quebrados fora da produção, possível exposição de descrição interna se o canal for do cliente.
 - **Correção proposta:** gatilho próprio (`ORDER_RESOLVED` / `ORDER_CLOSED`) e texto próprio; remover o IP fixo e falhar a configuração se `PUBLIC_APP_URL` não existir; formatar data com o fuso do tenant; não incluir descrição interna.
@@ -710,7 +710,7 @@
 
 ## Fase 2 — Segurança e partes críticas da plataforma
 
-> Contexto verificado em 04/11 (só leitura): **este servidor é o host público SERVIDOR_IP**. A
+> Contexto verificado em 04/11 (só leitura): **este servidor é o host público <IP-do-servidor>**. A
 > aplicação roda em modo de desenvolvimento (`pnpm dev` / `tsx watch`, como root dentro dos contêineres),
 > com `NODE_ENV=development` no `.env`. Não consegui ver o firewall (exige root). Os valores dos
 > segredos **não** foram lidos nem copiados, só o tamanho e o formato.
@@ -720,11 +720,11 @@
 - **Área / item do plano:** 2.3 · Borda; 6 · Infraestrutura
 - **Onde:** `docker-compose.yml` (`ports`: `8071` API, `8072` Postgres, `8073` Redis, `8076` worker, `8077` pgAdmin com `PGADMIN_DEFAULT_EMAIL: admin@example.com` / `PGADMIN_DEFAULT_PASSWORD: admin123`); `ss -ltn` mostra todas em `0.0.0.0`
 - **O problema:** o Redis responde `PONG` **sem senha** (teste local de leitura). O Postgres e o pgAdmin ficam expostos com credenciais de formato padrão (ver C-047). A API e o worker podem ser chamados direto, sem passar pelo BFF. Portas publicadas pelo Docker costumam **ignorar as regras do ufw**, porque o Docker escreve as próprias regras de iptables.
-- **Como acontece:** de qualquer lugar da internet: `redis-cli -h SERVIDOR_IP -p 8073` (lê e apaga chaves de sessão e rate limit, ou usa `CONFIG SET` para gravar arquivos); `psql -h SERVIDOR_IP -p 8072` com a senha fraca; pgAdmin em `:8077` com `admin123`.
+- **Como acontece:** de qualquer lugar da internet: `redis-cli -h <IP-do-servidor> -p 8073` (lê e apaga chaves de sessão e rate limit, ou usa `CONFIG SET` para gravar arquivos); `psql -h <IP-do-servidor> -p 8072` com a senha fraca; pgAdmin em `:8077` com `admin123`.
 - **Impacto:** controle total dos dados (cofre de credenciais criptografado, O.S., usuários) e possivelmente do servidor.
 - **Correção proposta (urgente, sem esperar o fim da análise):** (1) no `docker-compose.yml`, publicar Postgres, Redis, pgAdmin e worker só em `127.0.0.1:` (ou não publicar), e a API também, se o BFF for a única porta de entrada; (2) remover o pgAdmin do compose ou exigir credenciais fortes e acesso por túnel SSH; (3) `requirepass` no Redis; (4) conferir o firewall do provedor (fora da máquina); (5) rodar o compose de produção (`docker-compose.prod.yml`) em vez do de desenvolvimento.
 - **Atenção:** pôr senha no Redis exige corrigir antes C-065 (o worker não lê a senha da URL e pararia de processar as filas).
-- **Como validar:** de fora do servidor, `nc -zv SERVIDOR_IP 8072 8073 8076 8077` recusado; `redis-cli` sem senha → `NOAUTH`.
+- **Como validar:** de fora do servidor, `nc -zv <IP-do-servidor> 8072 8073 8076 8077` recusado; `redis-cli` sem senha → `NOAUTH`.
 - **Andamento (04/11):** `docker-compose.yml`: Postgres, Redis, API, worker e Loki só em `127.0.0.1`; web em `${WEB_BIND:-127.0.0.1}` (fica `0.0.0.0` até o HTTPS existir); pgAdmin removido; Redis com `requirepass`. Aplicação por `scripts/lote0-aplicar.sh`. O firewall do provedor e o projeto vizinho `ajust_erp-pre-redesign` (portas 8071 e 8091 públicas) ficam fora deste lote.
 - **Aplicado (04/11, 16:26):** `scripts/lote0-aplicar.sh` rodou: Postgres, Redis, API, worker e Loki escutam só em `127.0.0.1`; pgAdmin removido; Redis responde `NOAUTH` sem senha. A porta 8070 (web) continua pública até C-075. Pendente: firewall do provedor e o projeto `ajust_erp-pre-redesign` (8071/8091).
 - **HTTPS (05/11):** a porta 8070 (web) também passou a escutar só em `127.0.0.1`; teste pelo IP público: 8070, 8072, 8073, 8076, 8092 e 3100 fechadas. O acesso é só por `https://erp.ajustconsulting.com.br`.
@@ -1076,7 +1076,7 @@
 ### C-075 · O ERP é acessado por HTTP puro, sem TLS
 - **Severidade:** Alta
 - **Área / item do plano:** 6 · Infraestrutura; 2.3 · Borda
-- **Onde:** acesso direto em `http://SERVIDOR_IP:8070` (`docker-compose.yml`, `web` publicado em `0.0.0.0:8070`); fallback `PUBLIC_APP_URL || 'http://SERVIDOR_IP:8070'` em `notifications.service.ts`; `docker-compose.prod.yml` publica `web` em `80:3000`, também sem TLS; o nginx do host não tem site para o ERP
+- **Onde:** acesso direto em `http://<IP-do-servidor>:8070` (`docker-compose.yml`, `web` publicado em `0.0.0.0:8070`); fallback `PUBLIC_APP_URL || 'http://<IP-do-servidor>:8070'` em `notifications.service.ts`; `docker-compose.prod.yml` publica `web` em `80:3000`, também sem TLS; o nginx do host não tem site para o ERP
 - **O problema:** login, senha, cookies de sessão, senhas reveladas do cofre e dados dos provedores trafegam em texto claro pela internet. Como `NODE_ENV=development`, os cookies também saem sem `Secure`. Em produção (`NODE_ENV=production`), os cookies passariam a ser `Secure` e o login **pararia de funcionar** em HTTP, a menos que se use `COOKIE_INSECURE=true` (que desliga a proteção).
 - **Impacto:** qualquer rede no caminho (Wi-Fi público, provedor) lê as credenciais da equipe e do cofre.
 - **Correção proposta:** publicar o ERP atrás do Caddy que já termina o HTTPS do host (novo arquivo em `sites/`), com `web` em `127.0.0.1:8070`; redirecionar HTTP → HTTPS; `NODE_ENV=production` e cookies `Secure`; `PUBLIC_APP_URL`/`WEB_BASE_URL` com o domínio HTTPS.

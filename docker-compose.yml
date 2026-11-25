@@ -155,7 +155,7 @@ services:
 
 
   # pgAdmin removido em 04/11/2026 (auditoria C-046). Para acessar o banco use um túnel SSH:
-  #   ssh -L 8072:127.0.0.1:8072 app@SERVIDOR_IP   e conecte em localhost:8072.
+  #   ssh -L 8072:127.0.0.1:8072 app@<IP-do-servidor>   e conecte em localhost:8072.
 
   # Centralized log aggregation — accessible at http://localhost:3100
   # Connect Grafana to http://loki:3100 as a Loki datasource to query logs.

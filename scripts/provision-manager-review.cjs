@@ -16,10 +16,16 @@ if (
 if (fs.existsSync(output))
   throw new Error('Access file already exists; refusing to reset accounts again.');
 const prisma = new PrismaClient();
+// CNPJ do cliente usado na revisão: vem do ambiente, não do repositório.
+function reviewCustomerTaxId() {
+  const taxId = String(process.env.REVIEW_CUSTOMER_TAX_ID || '').replace(/\D/g, '');
+  if (taxId.length !== 14) throw new Error('Defina REVIEW_CUSTOMER_TAX_ID (CNPJ do cliente).');
+  return taxId;
+}
 async function main() {
   const tenant = await prisma.tenant.findUniqueOrThrow({ where: { slug: 'ajust-demo' } });
   const meganet = await prisma.customer.findUniqueOrThrow({
-    where: { tenantId_taxId: { tenantId: tenant.id, taxId: '00000000000000' } },
+    where: { tenantId_taxId: { tenantId: tenant.id, taxId: reviewCustomerTaxId() } },
   });
   const anderson = await prisma.user.findUniqueOrThrow({
     where: {
@@ -124,7 +130,7 @@ async function main() {
     JSON.stringify(
       {
         createdAt,
-        base: 'http://SERVIDOR_IP:8070',
+        base: process.env.ERP_REVIEW_BASE_URL || null,
         tenantId: tenant.id,
         customerId: meganet.id,
         accounts: safeAccounts,

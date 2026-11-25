@@ -34,7 +34,7 @@ Manutenção com impacto pode registrar janela, impacto e plano de reversão, vi
 
 ## Roteiro dos gestores
 
-1. Acesse http://SERVIDOR_IP:8070/login e use os atalhos de demonstração.
+1. Acesse http://<IP-do-servidor>:8070/login e use os atalhos de demonstração.
 2. Como analista, abra Minhas ordens. Confira situação atual, prazo e agendamento; os botões executam ações na própria O.S.
 3. Use **Ver atendimento completo** e expanda **Acompanhar etapas**. Azul identifica etapa atual, verde concluída e amarelo espera. O desenho representa os registros da execução, não apenas um modelo.
 4. Na ocorrência de configuração de OLT, veja a principal encerrada e as entregas complementares independentes.

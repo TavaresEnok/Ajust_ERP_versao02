@@ -58,4 +58,4 @@ O teste `scripts/check-analyst-workspace-ui.cjs` recebe um arquivo privado de co
 
 ## Acesso
 
-Área atual: `http://SERVIDOR_IP:8070/analista`. As credenciais existentes foram preservadas.
+Área atual: `http://<IP-do-servidor>:8070/analista`. As credenciais existentes foram preservadas.

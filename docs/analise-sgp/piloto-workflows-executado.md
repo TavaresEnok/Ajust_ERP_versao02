@@ -4,12 +4,12 @@ Atualizado em 21/10/2026. Ambiente principal: porta 8070. O SGP foi apenas consu
 
 ## Resultado e acesso
 
-- [Workflows: editar modelos](http://SERVIDOR_IP:8070/gerencia/workflows).
-- [Processos: acompanhar os atendimentos](http://SERVIDOR_IP:8070/gerencia/processos).
-- [OLT Meganet: principal concluída, três filhas e progresso de 33%](http://SERVIDOR_IP:8070/gerencia/processos/6317fb3d-ebcf-41fd-aeb0-0ddf176884f9).
-- [DNS Meganet: diagnóstico na mesma O.S.](http://SERVIDOR_IP:8070/gerencia/processos/f99d5d75-8617-4cc9-bfda-fc7612502376).
-- [Ultranet: O.S. aberta de preparação de script, iniciada apenas na triagem](http://SERVIDOR_IP:8070/gerencia/processos/27904ad1-046c-494d-b952-ece5b9660788).
-- [Provedores em tabela](http://SERVIDOR_IP:8070/gerencia/provedores).
+- [Workflows: editar modelos](http://<IP-do-servidor>:8070/gerencia/workflows).
+- [Processos: acompanhar os atendimentos](http://<IP-do-servidor>:8070/gerencia/processos).
+- [OLT Meganet: principal concluída, três filhas e progresso de 33%](http://<IP-do-servidor>:8070/gerencia/processos/6317fb3d-ebcf-41fd-aeb0-0ddf176884f9).
+- [DNS Meganet: diagnóstico na mesma O.S.](http://<IP-do-servidor>:8070/gerencia/processos/f99d5d75-8617-4cc9-bfda-fc7612502376).
+- [Ultranet: O.S. aberta de preparação de script, iniciada apenas na triagem](http://<IP-do-servidor>:8070/gerencia/processos/27904ad1-046c-494d-b952-ece5b9660788).
+- [Provedores em tabela](http://<IP-do-servidor>:8070/gerencia/provedores).
 
 Foram selecionadas **30 O.S., cinco por provedor**, com cinco tipos de origem diferentes em cada provedor. Uma O.S. já estava no piloto anterior; foram acrescentadas 29, sem duplicá-la. Foram preservados os vínculos com cliente/ocorrência, protocolos de origem, datas e 28 comentários de origem. Na leitura de origem havia 28 ordens encerradas e duas abertas. A importação não simula retroativamente etapas que não foram registradas no SGP.
 
