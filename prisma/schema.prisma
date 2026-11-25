@@ -1140,6 +1140,8 @@ model NotificationConfig {
   channel   NotificationChannel
   trigger   NotificationTrigger
   target    String // email address, webhook URL, slack webhook
+  /// WhatsApp: telefone ou grupo que recebe a mensagem (o `target` é a URL do gateway).
+  recipient String?
   active    Boolean             @default(true)
   createdAt DateTime            @default(now())
   updatedAt DateTime            @updatedAt

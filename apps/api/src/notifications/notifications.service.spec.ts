@@ -3,7 +3,7 @@ jest.mock('../common/ssrf-guard', () => ({
   assertSafeUrl: jest.fn().mockResolvedValue(undefined),
 }));
 
-import { NotificationsService } from './notifications.service';
+import { NotificationsService, normalizeWhatsAppRecipient } from './notifications.service';
 
 function makeEmail(): any {
   return { sendEmail: jest.fn() };
@@ -153,7 +153,7 @@ describe('Durable notification delivery', () => {
   it('surfaces HTTP failures to the outbox and sends a stable idempotency key', async () => {
     const prisma = makePrisma();
     prisma.notificationConfig.findMany.mockResolvedValue([
-      { id: 'n1', channel: 'WHATSAPP', target: 'https://gateway.test' },
+      { id: 'n1', channel: 'WHATSAPP', target: 'https://gateway.test', recipient: '5585999990000' },
     ]);
     const spy = jest
       .spyOn(global, 'fetch')
@@ -179,6 +179,47 @@ describe('Durable notification delivery', () => {
           headers: expect.objectContaining({ 'idempotency-key': 'event-1:n1' }),
         }),
       );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+});
+
+describe('WhatsApp recipient', () => {
+  it('normaliza telefone e aceita grupo; recusa lixo', () => {
+    expect(normalizeWhatsAppRecipient('+55 (85) 99999-0000')).toBe('5585999990000');
+    expect(normalizeWhatsAppRecipient('120363000000000000@g.us')).toBe('120363000000000000@g.us');
+    expect(normalizeWhatsAppRecipient('  ')).toBeNull();
+    expect(() => normalizeWhatsAppRecipient('123')).toThrow('Telefone');
+    expect(() => normalizeWhatsAppRecipient('x@evil.com')).toThrow('Grupo');
+  });
+
+  it('exige destinatário ao criar regra WhatsApp e grava o número normalizado', async () => {
+    const prisma = makePrisma();
+    const svc = new NotificationsService(prisma, makeEmail());
+    const base = {
+      name: 'W',
+      channel: 'WHATSAPP' as const,
+      trigger: 'ORDER_ESCALATED' as const,
+      target: 'https://gateway.test',
+    };
+    await expect(svc.create('t1', base)).rejects.toThrow('telefone ou grupo');
+    await svc.create('t1', { ...base, recipient: '55 85 99999-0000' });
+    expect(prisma.notificationConfig.create.mock.calls[0][0].data.recipient).toBe('5585999990000');
+  });
+
+  it('envia o número da regra, nunca a URL do gateway', async () => {
+    const prisma = makePrisma();
+    prisma.notificationConfig.findMany.mockResolvedValue([
+      { id: 'n1', channel: 'WHATSAPP', target: 'https://gateway.test', recipient: '5585999990000' },
+      { id: 'n2', channel: 'WHATSAPP', target: 'https://gateway.test', recipient: null },
+    ]);
+    const spy = jest.spyOn(global, 'fetch').mockResolvedValue({ ok: true } as Response);
+    try {
+      await new NotificationsService(prisma, makeEmail()).dispatch('t', 'ORDER_CLOSED', {});
+      expect(spy).toHaveBeenCalledTimes(1);
+      const body = JSON.parse((spy.mock.calls[0][1] as RequestInit).body as string);
+      expect(body.number).toBe('5585999990000');
     } finally {
       spy.mockRestore();
     }

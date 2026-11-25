@@ -26,6 +26,7 @@ const NotificationConfigObjectSchema = z.object({
   channel: z.nativeEnum(NotificationChannel),
   trigger: z.nativeEnum(NotificationTrigger),
   target: z.string().trim().min(3).max(2048),
+  recipient: z.string().trim().max(120).nullable().optional(),
   active: z.boolean().optional(),
 });
 
@@ -36,6 +37,12 @@ const NotificationConfigSchema = NotificationConfigObjectSchema.superRefine((dat
       : z.string().url().safeParse(data.target).success;
   if (!valid)
     ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['target'], message: 'Invalid target.' });
+  if (data.channel === NotificationChannel.WHATSAPP && !data.recipient)
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['recipient'],
+      message: 'Informe o telefone ou grupo do WhatsApp.',
+    });
 });
 
 const UpdateNotificationConfigSchema = NotificationConfigObjectSchema.partial().refine(

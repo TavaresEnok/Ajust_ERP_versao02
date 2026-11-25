@@ -581,6 +581,8 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
             });
             if (!response.ok) throw new Error(`status ${response.status}`);
           } else if ((cfg.channel as string) === 'WHATSAPP') {
+            // `cfg.target` é a URL do gateway; o número/grupo fica em `recipient`.
+            if (!cfg.recipient) throw new Error('WhatsApp rule without recipient');
             await assertSafeUrl(cfg.target);
             const messageText =
               `*${label}*\n` +
@@ -595,7 +597,7 @@ export class SlaMonitoringService implements OnModuleInit, OnModuleDestroy {
               (onCall ? `*Plantonista:* ${onCall.name}\n` : '');
 
             const waBody = JSON.stringify({
-              number: cfg.target,
+              number: cfg.recipient,
               textMessage: { text: messageText },
               message: messageText,
               metadata: payload,

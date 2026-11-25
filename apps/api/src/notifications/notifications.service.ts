@@ -11,8 +11,27 @@ export type NotificationConfigInput = {
   channel?: NotificationChannel;
   trigger?: NotificationTrigger;
   target?: string;
+  recipient?: string | null;
   active?: boolean;
 };
+
+/**
+ * Telefone (só dígitos, com DDI) ou grupo/contato do WhatsApp (`...@g.us`,
+ * `...@s.whatsapp.net`). Vazio vira null.
+ */
+export function normalizeWhatsAppRecipient(value: string | null | undefined): string | null {
+  const raw = (value ?? '').trim();
+  if (!raw) return null;
+  if (raw.includes('@')) {
+    if (!/^[\w.-]+@(g\.us|s\.whatsapp\.net)$/.test(raw))
+      throw new BadRequestException('Grupo do WhatsApp inválido (ex.: 1203630...@g.us).');
+    return raw;
+  }
+  const digits = raw.replace(/[\s()+.-]/g, '');
+  if (!/^\d{10,15}$/.test(digits))
+    throw new BadRequestException('Telefone do WhatsApp inválido: use DDI + DDD + número.');
+  return digits;
+}
 
 @Injectable()
 export class NotificationsService {
@@ -40,6 +59,12 @@ export class NotificationsService {
     },
   ) {
     await this.validateTarget(input.channel, input.target);
+    const recipient =
+      input.channel === NotificationChannel.WHATSAPP
+        ? normalizeWhatsAppRecipient(input.recipient)
+        : null;
+    if (input.channel === NotificationChannel.WHATSAPP && !recipient)
+      throw new BadRequestException('Informe o telefone ou grupo do WhatsApp.');
     return this.prisma.notificationConfig.create({
       data: {
         tenantId,
@@ -47,6 +72,7 @@ export class NotificationsService {
         channel: input.channel,
         trigger: input.trigger,
         target: input.target,
+        recipient,
         active: input.active ?? true,
       },
     });
@@ -55,16 +81,26 @@ export class NotificationsService {
   async update(tenantId: string, id: string, input: NotificationConfigInput) {
     const existing = await this.prisma.notificationConfig.findFirst({
       where: { id, tenantId },
-      select: { id: true, channel: true, target: true },
+      select: { id: true, channel: true, target: true, recipient: true },
     });
     if (!existing) throw new NotFoundException('Configuração de notificação não encontrada');
-    await this.validateTarget(input.channel ?? existing.channel, input.target ?? existing.target);
+    const channel = input.channel ?? existing.channel;
+    await this.validateTarget(channel, input.target ?? existing.target);
+    const recipient =
+      channel === NotificationChannel.WHATSAPP
+        ? normalizeWhatsAppRecipient(
+            input.recipient !== undefined ? input.recipient : existing.recipient,
+          )
+        : null;
+    if (channel === NotificationChannel.WHATSAPP && !recipient)
+      throw new BadRequestException('Informe o telefone ou grupo do WhatsApp.');
 
     const data: Prisma.NotificationConfigUpdateInput = {
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.channel !== undefined ? { channel: input.channel } : {}),
       ...(input.trigger !== undefined ? { trigger: input.trigger } : {}),
       ...(input.target !== undefined ? { target: input.target } : {}),
+      ...(recipient !== (existing.recipient ?? null) ? { recipient } : {}),
       ...(input.active !== undefined ? { active: input.active } : {}),
     };
     return this.prisma.notificationConfig.update({ where: { id }, data });
@@ -150,8 +186,14 @@ export class NotificationsService {
                 `*Título:* ${payload.title || '-'}\n` +
                 (payload.pdfUrl ? `\n*📄 Relatório PDF:* ${payload.pdfUrl}` : '');
 
+            // `cfg.target` é a URL do gateway: nunca serve de número de destino.
+            const number = payload.targetNumber || payload.groupJid || cfg.recipient;
+            if (!number) {
+              this.logger.warn(`WhatsApp rule ${cfg.id} has no recipient; skipped.`);
+              return;
+            }
             const waBody = JSON.stringify({
-              number: payload.targetNumber || payload.groupJid || cfg.target,
+              number,
               textMessage: { text: messageText },
               message: messageText,
               pdfUrl: payload.pdfUrl,
@@ -229,7 +271,7 @@ export class NotificationsService {
       title: order.title,
       pdfUrl,
       message: formattedMessage,
-      targetNumber: input.target || '',
+      targetNumber: normalizeWhatsAppRecipient(input.target) ?? '',
     });
 
     return {

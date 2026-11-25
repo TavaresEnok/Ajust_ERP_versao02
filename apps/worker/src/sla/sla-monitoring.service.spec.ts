@@ -390,7 +390,7 @@ describe('SlaMonitoringService & Processor', () => {
 
     it('mensagem usa o provedor atendido e o horário do tenant', async () => {
       prismaMock.notificationConfig.findMany.mockResolvedValue([
-        { channel: 'WHATSAPP', target: 'https://wa.example/api' },
+        { channel: 'WHATSAPP', target: 'https://wa.example/api', recipient: '5585999990000' },
       ]);
       const deadlineAt = new Date('2026-11-04T15:00:00Z');
       prismaMock.serviceOrder.findMany.mockResolvedValue([
@@ -404,6 +404,7 @@ describe('SlaMonitoringService & Processor', () => {
       expect(body.message).toContain('*Cliente:* Meganet');
       expect(body.message).not.toContain('Ajust Consultoria');
       expect(body.message).toContain('04/11/2026, 12:00:00');
+      expect(body.number).toBe('5585999990000');
     });
 
     it('violação de O.S. crítica cita o plantonista atual (C-059)', async () => {
