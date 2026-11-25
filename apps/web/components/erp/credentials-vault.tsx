@@ -530,6 +530,15 @@ export function CredentialsPage() {
         body: entry === undefined ? body : { ...body, entry },
         method: 'POST',
       });
+      // Site sem criptografia (comum em painéis de roteador/OLT): a senha trafega em texto
+      // claro na rede, então a pessoa confirma antes de a extensão preencher.
+      if (
+        payload.url.toLowerCase().startsWith('http://') &&
+        !window.confirm(
+          `${payload.origin} não usa criptografia (http). Usuário e senha vão trafegar sem proteção na rede. Preencher mesmo assim?`,
+        )
+      )
+        return;
       const result = await sendAutofill(payload);
       if (!result.ok) {
         toast.error(result.error || 'A extensão não conseguiu abrir o site.');
