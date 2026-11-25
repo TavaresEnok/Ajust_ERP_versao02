@@ -157,7 +157,7 @@ test.describe('Jornada real da gerência', () => {
     await page.getByRole('button', { name: 'Simular', exact: true }).click();
     await page.getByRole('button', { name: 'Concluído', exact: true }).click();
     await page.getByRole('button', { name: 'Concluído', exact: true }).click();
-    await expect(page.getByText('Fluxo chegou ao encerramento.', { exact: true })).toBeVisible();
+    await expect(page.getByText('O fluxo chegou ao fim.', { exact: true })).toBeVisible();
     expect(await db.serviceOrder.count({ where: { tenantId } })).toBe(before);
     await page.getByRole('button', { name: 'Sair da simulação', exact: true }).click();
     await page.getByRole('button', { name: 'Salvar rascunho', exact: true }).click();
@@ -256,7 +256,7 @@ test.describe('Jornada real da gerência', () => {
     await page.getByRole('button', { name: 'Simular', exact: true }).click();
     for (let i = 0; i < 3; i++)
       await page.getByRole('button', { name: 'Concluído', exact: true }).first().click();
-    await expect(page.getByText('Fluxo chegou ao encerramento.', { exact: true })).toBeVisible();
+    await expect(page.getByText('O fluxo chegou ao fim.', { exact: true })).toBeVisible();
     await page.getByRole('button', { name: 'Sair da simulação', exact: true }).click();
     await page.getByRole('button', { name: 'Publicar', exact: true }).click();
     await page.getByRole('dialog').getByRole('button', { name: 'Publicar', exact: true }).click();

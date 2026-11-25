@@ -105,8 +105,11 @@ jobs:
       - name: Build Worker
         run: pnpm --filter @ajust/worker build
 
+      # O Next não compila com NODE_ENV=development (falha ao pré-renderizar /_global-error).
       - name: Build Web
         run: pnpm --filter @ajust/web build
+        env:
+          NODE_ENV: production
 
       - name: Seed isolated integration database
         run: node scripts/seed-test-db.cjs
@@ -136,11 +139,22 @@ jobs:
       - name: E2E smoke
         run: pnpm --filter @ajust/api test:e2e
 
+      # Os testes de segurança rodam contra a API em modo produção (validação de segredos,
+      # chave do cofre, cookies e Swagger como no servidor real).
       - name: Start API server
         env:
           REQUIRE_2FA_ROLES: super_admin
+          NODE_ENV: production
+          # Validado pelo SecretsValidationService em produção (o banco do CI usa outra senha).
+          POSTGRES_PASSWORD: ci_postgres_password_minimum_32_chars
+          # Em produção o CORS do WebSocket aceita só WEB_BASE_URL: a origem do navegador do CI.
+          WEB_BASE_URL: http://127.0.0.1:3000
+          UPLOAD_ROOT: ${{ runner.temp }}/uploads
+          VAULT_KEY_FILE: ${{ runner.temp }}/vault/vault.key
         working-directory: apps/api
         run: |
+          mkdir -p "$UPLOAD_ROOT" "$(dirname "$VAULT_KEY_FILE")"
+          head -c 32 /dev/urandom > "$VAULT_KEY_FILE"
           node dist/main.js &
           echo $! > /tmp/ajust-api.pid
           for i in $(seq 1 90); do
@@ -169,6 +183,10 @@ jobs:
       - name: Start Web server
         working-directory: apps/web
         env:
+          NODE_ENV: production
+          # O CI serve o web por http://: sem isto os cookies Secure não voltam nas chamadas
+          # diretas do Playwright (page.request) e a sessão parece expirada.
+          COOKIE_INSECURE: 'true'
           API_INTERNAL_URL: http://127.0.0.1:3001
         run: |
           pnpm start > /tmp/ajust-web.log 2>&1 &
