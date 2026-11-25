@@ -1,9 +1,11 @@
 import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
+import { assertDevSeedAllowed } from './dev-seed-guard';
 
 const prisma = new PrismaClient();
 
 async function main() {
+  assertDevSeedAllowed('seed-dev-admin');
   const tenant = await prisma.tenant.upsert({
     where: { slug: 'ajust-demo' },
     update: {},

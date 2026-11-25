@@ -58,7 +58,7 @@ describe('TwoFactorRateLimitGuard', () => {
 
     await expect(guard.canActivate(makeContext({ temporaryToken: 'valid' }))).resolves.toBe(true);
 
-    expect(redis.incrEx).toHaveBeenCalledWith('2fa-attempts:session-1', 15 * 60);
+    expect(redis.incrEx).toHaveBeenCalledWith('2fa-attempts:user:user-1', 15 * 60);
     expect(timer).not.toHaveBeenCalled();
     timer.mockRestore();
   });
@@ -77,8 +77,8 @@ describe('TwoFactorRateLimitGuard', () => {
     await expect(guard.canActivate(makeContext({ temporaryToken: 'valid' }))).rejects.toMatchObject(
       { status: HttpStatus.TOO_MANY_REQUESTS },
     );
-    expect(redis.set).toHaveBeenCalledWith('2fa-lockout:session-1', '1', 15 * 60);
-    expect(redis.del).toHaveBeenCalledWith('2fa-attempts:session-1');
+    expect(redis.set).toHaveBeenCalledWith('2fa-lockout:user:user-1', '1', 15 * 60);
+    expect(redis.del).toHaveBeenCalledWith('2fa-attempts:user:user-1');
   });
 
   it('fails closed when Redis is unavailable', async () => {

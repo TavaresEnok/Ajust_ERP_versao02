@@ -44,11 +44,11 @@ export class IxcWebhookRateLimitGuard implements CanActivate {
     }
   }
 
+  /**
+   * `request.ip` já considera o X-Forwarded-For só dos proxies confiáveis (`trust proxy` no
+   * main.ts). Ler o header direto deixava qualquer um trocar de "IP" a cada requisição.
+   */
   private getClientIp(request: Request): string {
-    const forwarded = request.headers['x-forwarded-for'];
-    if (typeof forwarded === 'string') {
-      return forwarded.split(',')[0].trim();
-    }
     return request.ip || '0.0.0.0';
   }
 }

@@ -58,6 +58,9 @@ chrome.runtime.onMessage.addListener((message, sender, reply) => {
       // Só a página do ERP pode pedir uma entrada automática.
       if (!sender.tab || !ERP_ORIGINS.includes(originOf(sender.url)))
         return reply({ ok: false, error: 'Pedido fora do Ajust ERP.' });
+      // Só o documento principal da aba: um iframe da mesma origem (ex.: editor Draw.io)
+      // não pode disparar a abertura de um site com credenciais.
+      if (sender.frameId !== 0) return reply({ ok: false, error: 'Pedido de um quadro interno.' });
       // Mesmo pedido chegando duas vezes (duas pontes na aba): só o primeiro abre o site.
       const seenKey = `seen:${message.requestId}`;
       if (message.requestId) {

@@ -34,6 +34,15 @@ export class TwoFactorRateLimitGuard implements CanActivate {
 
   constructor(@Inject(RedisService) private readonly redis: RedisService) {}
 
+  static attemptsKey(userId: string) {
+    return `2fa-attempts:user:${userId}`;
+  }
+
+  /** Código aceito: zera o contador da conta (o lockout ativo continua valendo). */
+  async recordSuccess(userId: string) {
+    await this.redis.del(TwoFactorRateLimitGuard.attemptsKey(userId));
+  }
+
   async canActivate(context: ExecutionContext): Promise<boolean> {
     const request = context.switchToHttp().getRequest<Request>();
     const body = request.body as { temporaryToken?: string };
@@ -43,27 +52,28 @@ export class TwoFactorRateLimitGuard implements CanActivate {
       throw new UnauthorizedException('Missing temporary token');
     }
 
-    // Extrair userId do JWT token (não confiar no body)
-    let sessionId: string | null = null;
+    // Extrair userId do JWT token (não confiar no body). O limite é por conta: cada login
+    // gera um sid novo, então contar por sessão permitiria tentativas ilimitadas.
+    let userId: string | null = null;
     try {
       const secret = process.env.JWT_ACCESS_SECRET;
       if (!secret) throw new Error('JWT_ACCESS_SECRET não configurada');
-      const payload = verify(temporaryToken, secret) as { sid: string; typ: string };
-      if (payload.typ !== '2fa-pending' || !payload.sid) {
+      const payload = verify(temporaryToken, secret) as { sub?: string; sid: string; typ: string };
+      if (payload.typ !== '2fa-pending' || !payload.sid || !payload.sub) {
         throw new UnauthorizedException('Invalid token type');
       }
-      sessionId = payload.sid;
+      userId = payload.sub;
     } catch (error) {
       if (error instanceof HttpException) throw error;
       throw new UnauthorizedException('Invalid temporary token');
     }
 
-    if (!sessionId) {
+    if (!userId) {
       throw new UnauthorizedException('Invalid token payload');
     }
 
-    const attemptsKey = `2fa-attempts:${sessionId}`;
-    const lockoutKey = `2fa-lockout:${sessionId}`;
+    const attemptsKey = TwoFactorRateLimitGuard.attemptsKey(userId);
+    const lockoutKey = `2fa-lockout:user:${userId}`;
 
     try {
       // Verificar lockout

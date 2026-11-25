@@ -1,4 +1,8 @@
-import { ShiftReportsController, ReportInput } from './shift-reports.controller';
+import {
+  ShiftReportsController,
+  ReportInput,
+  attachmentContentMatches,
+} from './shift-reports.controller';
 import { RequestWithAuth } from '../common/request-with-auth';
 const req = (role = 'analista') =>
   ({ auth: { tenantId: 'ajust', userId: 'author', role } }) as unknown as RequestWithAuth;
@@ -71,5 +75,21 @@ describe('Shift reports', () => {
       orderBy: [{ referenceDate: 'desc' }, { createdAt: 'desc' }, { id: 'desc' }],
     });
     expect(findMany.mock.calls[0][0].select).not.toHaveProperty('content');
+  });
+});
+
+describe('attachmentContentMatches', () => {
+  it('aceita arquivos cujo conteúdo corresponde à extensão', () => {
+    expect(
+      attachmentContentMatches('.png', Buffer.from([0x89, 0x50, 0x4e, 0x47, 13, 10, 26, 10, 0])),
+    ).toBe(true);
+    expect(attachmentContentMatches('.pdf', Buffer.from('%PDF-1.7'))).toBe(true);
+    expect(attachmentContentMatches('.txt', Buffer.from('interface ether1'))).toBe(true);
+  });
+
+  it('recusa binário renomeado e HTML disfarçado de imagem', () => {
+    expect(attachmentContentMatches('.png', Buffer.from('<html><script>'))).toBe(false);
+    expect(attachmentContentMatches('.txt', Buffer.from([0x4d, 0x5a, 0x00, 0x00]))).toBe(false);
+    expect(attachmentContentMatches('.docx', Buffer.from('%PDF-1.7'))).toBe(false);
   });
 });

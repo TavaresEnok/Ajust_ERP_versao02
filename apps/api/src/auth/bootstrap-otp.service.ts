@@ -85,29 +85,28 @@ export class BootstrapOtpService {
       throw new BadRequestException('OTP inválido ou expirado. Solicite um novo.');
     }
 
-    // Verifica se já excedeu tentativas máximas
-    if (otpRecord.attempts >= this.MAX_ATTEMPTS) {
+    // Reserva a tentativa de forma atômica: ler e depois gravar `attempts + 1` deixava
+    // requisições paralelas testarem vários códigos com o mesmo contador.
+    const reserved = await this.prisma.bootstrapOtp.updateMany({
+      where: { id: otpRecord.id, validatedAt: null, attempts: { lt: this.MAX_ATTEMPTS } },
+      data: { attempts: { increment: 1 } },
+    });
+    if (reserved.count !== 1) {
       throw new UnauthorizedException(
         `Muitas tentativas falhas. Espere ${this.OTP_VALIDITY_MINUTES} minutos e solicite novo OTP.`,
       );
     }
 
-    // Incrementa contador de tentativas
-    await this.prisma.bootstrapOtp.update({
-      where: { id: otpRecord.id },
-      data: { attempts: otpRecord.attempts + 1 },
-    });
-
     // Valida OTP (usando comparação segura contra timing attacks)
     const isValid = this.secureCompare(this.hashOtp(providedOtp), otpRecord.otp);
 
     if (isValid) {
-      // Marca como validado
-      await this.prisma.bootstrapOtp.update({
-        where: { id: otpRecord.id },
+      // Uso único: só a primeira requisição válida consome o código.
+      const consumed = await this.prisma.bootstrapOtp.updateMany({
+        where: { id: otpRecord.id, validatedAt: null },
         data: { validatedAt: new Date() },
       });
-      return true;
+      return consumed.count === 1;
     }
 
     return false;

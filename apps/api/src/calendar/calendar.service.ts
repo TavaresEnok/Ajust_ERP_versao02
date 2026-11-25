@@ -109,6 +109,8 @@ export class CalendarService {
     const userTenants = await this.prisma.userTenant.findMany({
       where: {
         tenantId,
+        // Participantes são a equipe interna: contas de cliente (provedores) ficam fora.
+        role: { code: { not: 'cliente' } },
         user: {
           status: 'ACTIVE',
           deletedAt: null,

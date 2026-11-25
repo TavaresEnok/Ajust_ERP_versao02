@@ -10,6 +10,7 @@ import {
 import { Inject, OnModuleDestroy } from '@nestjs/common';
 import { Socket, Server } from 'socket.io';
 import { verify } from 'jsonwebtoken';
+import { requiresTwoFactor } from './auth/two-factor-policy';
 import { PrismaService } from './prisma/prisma.service';
 
 type AccessPayload = {
@@ -180,7 +181,7 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
       const session = await this.prisma.session.findUnique({
         where: { id: payload.sid },
         include: {
-          user: { select: { id: true, status: true, deletedAt: true } },
+          user: { select: { id: true, status: true, deletedAt: true, twoFactorEnabled: true } },
         },
       });
 
@@ -212,6 +213,8 @@ export class EventsGateway implements OnGatewayConnection, OnGatewayDisconnect, 
         if (payload.role !== membership.role.code) return false;
         // A sala do tenant recebe eventos de todos os provedores; contas cliente ficam fora (C-019/C-053).
         if (payload.role === 'cliente') return false;
+        // Mesma regra do AuthGuard (C-051): perfil que exige 2FA sem 2FA ativo não recebe eventos.
+        if (requiresTwoFactor(membership.role.code) && !user.twoFactorEnabled) return false;
       }
 
       return true;

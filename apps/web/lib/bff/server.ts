@@ -170,6 +170,11 @@ export function refreshSession(refreshToken: string): Promise<RefreshApiResponse
   })();
   inflightRefresh.set(refreshToken, promise);
   setTimeout(() => inflightRefresh.delete(refreshToken), 15_000);
+  // Falha transitória (rede, 5xx) não pode ficar em cache: o próximo pedido tenta de novo
+  // em vez de devolver 503 por 15 s.
+  promise.catch(() => {
+    if (inflightRefresh.get(refreshToken) === promise) inflightRefresh.delete(refreshToken);
+  });
   return promise;
 }
 
@@ -179,6 +184,29 @@ export type ResolvedSession = {
   sessionId: string;
   refreshed: RefreshApiResponse | null;
 };
+
+/**
+ * Verificação leve para os arquivos estáticos do Draw.io (centenas por abertura do editor):
+ * reaproveita por 60 s o /auth/me de um access token válido em vez de consultar a API a
+ * cada arquivo. Sem access token válido, cai no resolveSession completo.
+ */
+const recentlyValidated = new Map<string, number>();
+export async function hasValidSession(cookies: CookieReader): Promise<boolean> {
+  const accessToken = cookies.get(ACCESS_COOKIE)?.value || '';
+  const now = Date.now();
+  if (jwtIsLikelyValid(accessToken)) {
+    const until = recentlyValidated.get(accessToken);
+    if (until && until > now) return true;
+    const me = await fetchMe(accessToken);
+    if (me?.tenant?.id) {
+      if (recentlyValidated.size > 5000) recentlyValidated.clear();
+      recentlyValidated.set(accessToken, now + 60_000);
+      return true;
+    }
+    recentlyValidated.delete(accessToken);
+  }
+  return false;
+}
 
 export async function resolveSession(cookies: CookieReader): Promise<ResolvedSession | null> {
   let accessToken = cookies.get(ACCESS_COOKIE)?.value || '';

@@ -41,4 +41,33 @@ describe('assertSafeUrl', () => {
       BadRequestException,
     );
   });
+
+  it('allows dual-stack hostnames whose IPv6 is public', async () => {
+    mockedLookup.mockResolvedValue([
+      { address: '2606:4700::6810:84e5', family: 6 },
+      { address: '104.16.132.229', family: 4 },
+    ]);
+    await expect(assertSafeUrl('https://api.cloudflare.example')).resolves.toBeUndefined();
+  });
+
+  it.each([
+    '::1',
+    '::',
+    'fe80::1',
+    'fd00::1',
+    'ff02::1',
+    '::ffff:127.0.0.1',
+    '::ffff:10.0.0.5',
+    '64:ff9b::a00:1',
+    '2002:c0a8:101::1',
+    '2001:db8::1',
+  ])('rejects hostname resolving to non-public IPv6 %s', async (address) => {
+    mockedLookup.mockResolvedValue([
+      { address: '8.8.8.8', family: 4 },
+      { address, family: 6 },
+    ]);
+    await expect(assertSafeUrl('https://mixed.example')).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+  });
 });

@@ -159,13 +159,16 @@ export class AuditInterceptor implements NestInterceptor {
   }
 
   private sanitizeValue(value: unknown): unknown {
-    if (Array.isArray(value)) return value.map((item) => this.sanitizeValue(item));
+    if (Array.isArray(value)) return value.slice(0, 50).map((item) => this.sanitizeValue(item));
+    // Texto longo (configs, anexos em base64) não cabe no log visível a gerentes.
+    if (typeof value === 'string' && value.length > 1000)
+      return `${value.slice(0, 200)}… [${value.length} caracteres omitidos]`;
     if (!value || typeof value !== 'object') return value;
 
     return Object.fromEntries(
       Object.entries(value as Record<string, unknown>).map(([key, item]) => [
         key,
-        /(password|token|secret|api.?key|authorization|credential|protectedContent|sourceNote|accessEntries|diagramXml)/i.test(
+        /(password|token|secret|api.?key|authorization|credential|protectedContent|sourceNote|accessEntries|diagramXml|^content$|totp|otp|^code$)/i.test(
           key,
         )
           ? '[REDACTED]'

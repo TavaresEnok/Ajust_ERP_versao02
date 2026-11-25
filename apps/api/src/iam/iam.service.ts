@@ -516,6 +516,7 @@ export class IamService {
       throw new NotFoundException('User membership not found for this tenant.');
     }
     await this.assertCanManageUser(input.actorRole, input.userId);
+    await this.assertCanEditGlobalAccount(input);
 
     const nextRole = input.roleCode
       ? await this.prisma.role.findUnique({ where: { code: input.roleCode } })
@@ -600,6 +601,29 @@ export class IamService {
    * Só um super admin altera ou remove outro super admin. Vale para qualquer vínculo da
    * conta, porque o usuário (e a senha) é global entre tenants (C-021).
    */
+  /**
+   * Nome, e-mail, senha e situação ficam na conta global. Quem não é super admin só os
+   * altera quando a conta pertence apenas ao tenant dele; senão um gerente poderia
+   * vincular a conta de outra empresa e trocar a senha dela (tomada de conta).
+   */
+  private async assertCanEditGlobalAccount(input: UpdateUserInTenantInput) {
+    if (input.actorRole === 'super_admin') return;
+    const touchesAccount =
+      input.name !== undefined ||
+      input.email !== undefined ||
+      input.status !== undefined ||
+      Boolean(input.password);
+    if (!touchesAccount) return;
+    const otherTenants = await this.prisma.userTenant.count({
+      where: { userId: input.userId, tenantId: { not: input.tenantId } },
+    });
+    if (otherTenants > 0) {
+      throw new ForbiddenException(
+        'Esta conta também pertence a outra empresa. Nome, e-mail, senha e situação só podem ser alterados pelo próprio usuário ou por um super admin.',
+      );
+    }
+  }
+
   private async assertCanManageUser(actorRole: string | undefined, targetUserId: string) {
     if (actorRole === 'super_admin') return;
     const privileged = await this.prisma.userTenant.count({

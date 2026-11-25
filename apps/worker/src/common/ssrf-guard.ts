@@ -28,8 +28,7 @@ function cidr(base: string, prefix: number, label: string) {
   return { start: start & mask, end: (start & mask) | (~mask & 0xffffffffn), label };
 }
 
-function isPrivateIp(ip: string): boolean {
-  if (isIP(ip) !== 4) return true;
+function isPrivateIpv4(ip: string): boolean {
   if (!ip.match(/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/)) return true;
   try {
     const n = ipToBigInt(ip);
@@ -37,6 +36,72 @@ function isPrivateIp(ip: string): boolean {
   } catch {
     return true;
   }
+}
+
+/** Expande um IPv6 (inclusive com sufixo IPv4) para 128 bits. */
+function ipv6ToBigInt(ip: string): bigint | null {
+  let address = ip.toLowerCase().split('%')[0];
+  const v4 = address.match(/(\d{1,3}(?:\.\d{1,3}){3})$/);
+  if (v4) {
+    const n = ipToBigInt(v4[1]);
+    address = `${address.slice(0, -v4[1].length)}${(n >> 16n).toString(16)}:${(n & 0xffffn).toString(16)}`;
+  }
+  const halves = address.split('::');
+  if (halves.length > 2) return null;
+  const head = halves[0] ? halves[0].split(':') : [];
+  const tail = halves.length === 2 && halves[1] ? halves[1].split(':') : [];
+  const missing = 8 - head.length - tail.length;
+  if (halves.length === 1 ? missing !== 0 : missing < 1) return null;
+  const groups = [...head, ...Array(halves.length === 2 ? missing : 0).fill('0'), ...tail];
+  let n = 0n;
+  for (const group of groups) {
+    if (!/^[0-9a-f]{1,4}$/.test(group)) return null;
+    n = (n << 16n) | BigInt(parseInt(group, 16));
+  }
+  return n;
+}
+
+function ipv6InPrefix(n: bigint, base: string, prefix: number): boolean {
+  const start = ipv6ToBigInt(base);
+  if (start === null) return false;
+  const shift = BigInt(128 - prefix);
+  return n >> shift === start >> shift;
+}
+
+function embeddedIpv4(n: bigint): string {
+  const v4 = Number(n & 0xffffffffn);
+  return [v4 >>> 24, (v4 >>> 16) & 255, (v4 >>> 8) & 255, v4 & 255].join('.');
+}
+
+/**
+ * IPv6 público é permitido (hosts dual-stack publicam AAAA); bloqueia loopback, não
+ * especificado, ULA, link-local, multicast, documentação e formatos que embutem um IPv4
+ * (mapeado, NAT64, 6to4), que valem pelo IPv4 embutido.
+ */
+function isPrivateIpv6(ip: string): boolean {
+  const n = ipv6ToBigInt(ip);
+  if (n === null) return true;
+  if (n === 0n || n === 1n) return true;
+  if (ipv6InPrefix(n, '::ffff:0:0', 96) || ipv6InPrefix(n, '64:ff9b::', 96))
+    return isPrivateIpv4(embeddedIpv4(n));
+  if (ipv6InPrefix(n, '2002::', 16)) return isPrivateIpv4(embeddedIpv4(n >> 80n));
+  if (ipv6InPrefix(n, '::', 96)) return true; // IPv4-compatível (obsoleto)
+  return [
+    ['fc00::', 7],
+    ['fe80::', 10],
+    ['fec0::', 10],
+    ['ff00::', 8],
+    ['100::', 64],
+    ['2001:db8::', 32],
+    ['2001::', 32], // Teredo
+  ].some(([base, prefix]) => ipv6InPrefix(n, base as string, prefix as number));
+}
+
+function isPrivateIp(ip: string): boolean {
+  const family = isIP(ip);
+  if (family === 4) return isPrivateIpv4(ip);
+  if (family === 6) return isPrivateIpv6(ip);
+  return true;
 }
 
 /**
@@ -81,7 +146,8 @@ async function resolveSafeUrl(rawUrl: string): Promise<{ address: string; family
         );
       }
     }
-    return addresses[0];
+    // Prefere IPv4: a rede Docker padrão não roteia IPv6.
+    return addresses.find((entry) => entry.family === 4) ?? addresses[0];
   } catch (err) {
     if (err instanceof BadRequestException) throw err;
     throw new BadRequestException(`Could not resolve hostname: ${hostname}`);

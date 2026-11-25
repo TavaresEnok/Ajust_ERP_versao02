@@ -77,6 +77,7 @@ export class AuthController {
   constructor(
     @Inject(AuthService) private readonly authService: AuthService,
     @Inject(RateLimitGuard) private readonly loginLimit: RateLimitGuard,
+    @Inject(TwoFactorRateLimitGuard) private readonly twoFactorLimit: TwoFactorRateLimitGuard,
   ) {}
 
   @Post('login')
@@ -96,7 +97,11 @@ export class AuthController {
       ip: req.ip,
       userAgent: req.headers['user-agent'],
     });
-    await this.loginLimit.recordSuccess(req);
+    // Com 2FA pendente a autenticação ainda não terminou: o limite de login só é zerado
+    // quando o código for aceito, senão cada novo login renovaria as tentativas.
+    if ((result as { status?: string }).status !== '2fa_challenge') {
+      await this.loginLimit.recordSuccess(req);
+    }
     return result;
   }
 
@@ -176,12 +181,15 @@ export class AuthController {
   @UseGuards(TwoFactorRateLimitGuard)
   async verify2FA(@Body() body: unknown, @Req() req: RequestWithAuth) {
     const input = Verify2FASchema.parse(body);
-    return this.authService.verify2FA(
+    const result = await this.authService.verify2FA(
       input.temporaryToken,
       input.code,
       req.ip,
       req.headers['user-agent'],
     );
+    const userId = (result as { user?: { id?: string } }).user?.id;
+    if (userId) await this.twoFactorLimit.recordSuccess(userId);
+    return result;
   }
 
   @UseGuards(AuthGuard)

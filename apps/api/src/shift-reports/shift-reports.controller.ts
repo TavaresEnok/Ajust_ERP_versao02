@@ -64,6 +64,40 @@ const ATTACHMENT_MIME_TYPES: Record<string, string[]> = {
   '.zip': ['application/zip', 'application/x-zip-compressed'],
 };
 
+/**
+ * Assinatura (magic bytes) dos formatos binários: extensão e Content-Type vêm do navegador e
+ * podem ser forjados. Texto puro não pode ter byte nulo (HTML/binário renomeado como .txt).
+ */
+const ZIP = [[0x50, 0x4b, 0x03, 0x04]];
+const OLE = [[0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1]];
+const ATTACHMENT_SIGNATURES: Record<string, number[][]> = {
+  '.png': [[0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]],
+  '.jpg': [[0xff, 0xd8, 0xff]],
+  '.jpeg': [[0xff, 0xd8, 0xff]],
+  '.gif': [[0x47, 0x49, 0x46, 0x38]],
+  '.webp': [[0x52, 0x49, 0x46, 0x46]],
+  '.pdf': [[0x25, 0x50, 0x44, 0x46]],
+  '.zip': ZIP,
+  '.docx': ZIP,
+  '.xlsx': ZIP,
+  '.odt': ZIP,
+  '.doc': OLE,
+  '.xls': OLE,
+  '.wav': [[0x52, 0x49, 0x46, 0x46]],
+  '.ogg': [[0x4f, 0x67, 0x67, 0x53]],
+  '.opus': [[0x4f, 0x67, 0x67, 0x53]],
+  '.webm': [[0x1a, 0x45, 0xdf, 0xa3]],
+};
+const TEXT_EXTENSIONS = new Set(['.cfg', '.conf', '.csv', '.json', '.log', '.sql', '.txt', '.xml']);
+
+export function attachmentContentMatches(extension: string, buffer: Buffer): boolean {
+  const signatures = ATTACHMENT_SIGNATURES[extension];
+  if (signatures)
+    return signatures.some((signature) => signature.every((byte, index) => buffer[index] === byte));
+  if (TEXT_EXTENSIONS.has(extension)) return !buffer.subarray(0, 8192).includes(0);
+  return true; // .aac/.m4a/.mp3: vários containers válidos; já servidos com nosniff.
+}
+
 export const ReportInput = z
   .object({
     shift: z.enum(['DAY', 'NIGHT']),
@@ -242,6 +276,11 @@ export class ShiftReportsController {
       }
       if (!file.size || file.size > ATTACHMENT_MAX_BYTES) {
         throw new BadRequestException('Cada anexo deve ter até 10 MB.');
+      }
+      if (!attachmentContentMatches(extension, file.buffer)) {
+        throw new BadRequestException(
+          `O conteúdo de ${safeName} não corresponde ao formato ${extension}.`,
+        );
       }
       const storedName = `${randomUUID()}${extension}`;
       return {

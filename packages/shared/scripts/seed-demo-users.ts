@@ -1,5 +1,6 @@
 import { PrismaClient } from '@prisma/client';
 import { hash } from 'bcryptjs';
+import { assertDevSeedAllowed } from './dev-seed-guard';
 
 const prisma = new PrismaClient();
 
@@ -25,6 +26,7 @@ const USERS = [
 ];
 
 async function main() {
+  assertDevSeedAllowed('seed-demo-users');
   const tenant = await prisma.tenant.findUnique({
     where: { slug: 'ajust-demo' },
   });

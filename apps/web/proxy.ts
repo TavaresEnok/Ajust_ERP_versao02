@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from 'next/server';
 import {
   applyAuthCookies,
   clearAuthCookies,
+  hasValidSession,
   resolveSession,
   roleHome,
   type RefreshApiResponse,
@@ -71,6 +72,26 @@ export async function proxy(request: NextRequest) {
   requestHeaders.set('x-nonce', nonce);
   requestHeaders.set('Content-Security-Policy', cspHeader);
 
+  // O editor Draw.io roda na mesma origem do ERP: só abre com sessão válida, para não
+  // expor o Tomcat/servlets do drawio a quem não está logado. Mantém o CSP próprio dele
+  // (next.config.mjs), por isso não recebe o CSP com nonce das páginas.
+  const isDrawio = pathname.startsWith('/drawio/');
+
+  const passthrough = () => {
+    const headers = new Headers(request.headers);
+    headers.delete(SCOPE_HEADER);
+    headers.delete('x-middleware-subrequest');
+    headers.delete('x-nonce');
+    return NextResponse.next({ request: { headers } });
+  };
+  if (isDrawio) {
+    try {
+      if (await hasValidSession(request.cookies)) return passthrough();
+    } catch {
+      // API fora: segue para o fluxo completo, que responde 503
+    }
+  }
+
   const isPublic = PUBLIC_PATHS.includes(pathname) || pathname.startsWith('/csat/');
   const hasSessionCookie =
     request.cookies.has('ajust_live_access_token') ||
@@ -93,6 +114,16 @@ export async function proxy(request: NextRequest) {
   }
   const role = session?.me.tenant.role || null;
   const home = roleHome(role);
+
+  if (isDrawio) {
+    if (!session || !home) {
+      return new NextResponse('Sessão necessária.', {
+        status: 401,
+        headers: { 'content-type': 'text/plain; charset=utf-8', 'cache-control': 'no-store' },
+      });
+    }
+    return withRefreshedCookies(passthrough(), session.refreshed);
+  }
 
   const legacy = legacyRedirect(pathname, home);
   if (legacy && legacy !== pathname) {
@@ -159,7 +190,9 @@ export async function proxy(request: NextRequest) {
 
 export const config = {
   matcher: [
-    // Imagens públicas passam direto, exceto os prints do guia (/guia/*), que exigem login.
-    '/((?!api/|drawio/|_next/|favicon.ico|icon|apple-icon|placeholder|(?!guia/).*\\.(?:png|svg|jpg|jpeg|webp|ico|txt)$).*)',
+    // Só os arquivos públicos conhecidos (ícones e placeholders na raiz) passam direto.
+    // Não liberar por extensão: /gerencia/ordens/1.png casaria com a rota [...slug] e
+    // renderizaria a página sem o proxy (sem CSP e com os headers internos vindos do cliente).
+    '/((?!api/|_next/|favicon\\.ico$|icon|apple-icon|placeholder).*)',
   ],
 };

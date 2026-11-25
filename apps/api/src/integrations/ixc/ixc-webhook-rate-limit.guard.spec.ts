@@ -53,13 +53,13 @@ describe('IxcWebhookRateLimitGuard', () => {
     }
   });
 
-  it('extrai IP correto do header x-forwarded-for', async () => {
+  it('ignora x-forwarded-for enviado pelo cliente e usa request.ip (trust proxy)', async () => {
     (redisService.incrEx as jest.Mock).mockResolvedValue(1);
     const context = createMockContext('10.0.0.1', '203.0.113.195, 70.41.3.18');
 
     await guard.canActivate(context);
 
-    expect(redisService.incrEx).toHaveBeenCalledWith('rate-limit:ixc-webhook:203.0.113.195', 60);
+    expect(redisService.incrEx).toHaveBeenCalledWith('rate-limit:ixc-webhook:10.0.0.1', 60);
   });
 
   it('permite a requisição em modo fallback se o Redis apresentar erro transitório', async () => {

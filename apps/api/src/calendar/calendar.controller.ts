@@ -135,13 +135,28 @@ export class CalendarController {
   async checkConflict(@Req() req: RequestWithAuth, @Body() body: unknown) {
     if (!req.auth?.tenantId) throw new UnauthorizedException('Missing tenantId');
     const input = ConflictSchema.parse(body);
-    return this.calendarService.checkConflict(
+    const result = await this.calendarService.checkConflict(
       req.auth.tenantId,
       input.userId,
       new Date(input.startAt),
       new Date(input.endAt),
       input.excludeEventId,
     );
+    // Agenda de outra pessoa: o analista só precisa saber que o horário está ocupado, não o
+    // título, a descrição nem o link de reunião dos compromissos dela.
+    const canSeeDetails =
+      input.userId === req.auth.userId || ['super_admin', 'gerente'].includes(req.auth.role || '');
+    if (canSeeDetails) return result;
+    return {
+      hasConflict: result.hasConflict,
+      conflictingEvents: result.conflictingEvents.map((event) => ({
+        id: event.id,
+        title: 'Ocupado',
+        startAt: event.startAt,
+        endAt: event.endAt,
+        allDay: event.allDay,
+      })),
+    };
   }
 
   /**

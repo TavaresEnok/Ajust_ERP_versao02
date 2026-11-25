@@ -5,6 +5,7 @@ import { verify } from 'jsonwebtoken';
 import { PrometheusService } from './prometheus.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { RedisService } from '../common/redis.service';
+import { requiresTwoFactor } from '../auth/two-factor-policy';
 
 type MetricsAccessPayload = {
   typ?: string;
@@ -89,7 +90,8 @@ export class MetricsController {
     token: string,
     secret: string,
   ): Promise<{ ok: true } | { ok: false; status: number; error: string }> {
-    const adminRoles = ['super_admin', 'gerente'];
+    // As métricas são do processo inteiro (todos os tenants): só super admin lê.
+    const adminRoles = ['super_admin'];
 
     let payload: MetricsAccessPayload;
     try {
@@ -105,7 +107,7 @@ export class MetricsController {
     const session = await this.prisma.session.findUnique({
       where: { id: payload.sid },
       include: {
-        user: { select: { id: true, status: true, deletedAt: true } },
+        user: { select: { id: true, status: true, deletedAt: true, twoFactorEnabled: true } },
       },
     });
 
@@ -147,6 +149,9 @@ export class MetricsController {
 
     if (!effectiveRole || !adminRoles.includes(effectiveRole)) {
       return { ok: false, status: 403, error: 'Admin role required' };
+    }
+    if (requiresTwoFactor(effectiveRole) && !session.user.twoFactorEnabled) {
+      return { ok: false, status: 403, error: 'Two-factor authentication required' };
     }
 
     return { ok: true };
