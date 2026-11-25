@@ -85,6 +85,22 @@ fi
 
 START_TIME=$(date +%s)
 
+# 0. Para quem usa o banco: com api/worker no ar, eles reconectam entre o
+#    pg_terminate_backend e o DROP e o DROP falha (ou gravam no banco pela metade).
+STOPPED_SERVICES=""
+for svc in api worker; do
+  if [ -n "$(docker compose -f "$COMPOSE_FILE" ps -q "$svc" 2>/dev/null)" ]; then
+    STOPPED_SERVICES="$STOPPED_SERVICES $svc"
+  fi
+done
+if [ -n "$STOPPED_SERVICES" ]; then
+  log_step "0/4 Stopping:${STOPPED_SERVICES}"
+  # shellcheck disable=SC2086
+  docker compose -f "$COMPOSE_FILE" stop $STOPPED_SERVICES
+  # shellcheck disable=SC2086
+  trap 'log_warn "Restore interrompido; religando:${STOPPED_SERVICES}"; docker compose -f "$COMPOSE_FILE" start $STOPPED_SERVICES' ERR
+fi
+
 # 1. Terminate existing client connections to avoid drop/restore locks
 log_step "1/4 Terminating active connections to '$POSTGRES_DB'..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U "$POSTGRES_USER" -d postgres -c "
@@ -97,7 +113,7 @@ docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U "$POSTGRES_USER" -d p
 # 2. Recreate target database
 log_step "2/4 Recreating clean database '$POSTGRES_DB'..."
 docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U "$POSTGRES_USER" -d postgres -c "
-  DROP DATABASE IF EXISTS \"$POSTGRES_DB\";
+  DROP DATABASE IF EXISTS \"$POSTGRES_DB\" WITH (FORCE);
 " >/dev/null
 docker compose -f "$COMPOSE_FILE" exec -T postgres psql -U "$POSTGRES_USER" -d postgres -c "
   CREATE DATABASE \"$POSTGRES_DB\" OWNER \"$POSTGRES_USER\";
@@ -135,9 +151,18 @@ echo "  - Tenants:       $TENANT_COUNT"
 echo "  - ServiceOrders: $ORDER_COUNT"
 echo "  - Elapsed time:  ${DURATION}s"
 
+trap - ERR
+if [ -n "$STOPPED_SERVICES" ]; then
+  log_step "Starting:${STOPPED_SERVICES}"
+  # shellcheck disable=SC2086
+  docker compose -f "$COMPOSE_FILE" start $STOPPED_SERVICES
+fi
+
+# O Postgres não publica porta no host: verifica as migrations de dentro do contêiner da api.
 if [ -f "$SCHEMA" ]; then
   log_step "Checking Prisma schema compatibility..."
-  pnpm exec prisma migrate status --schema "$SCHEMA" || true
+  docker compose -f "$COMPOSE_FILE" run --rm --no-deps api \
+    sh -c "./node_modules/.bin/prisma migrate status --schema=$SCHEMA" || true
 fi
 
 echo ""

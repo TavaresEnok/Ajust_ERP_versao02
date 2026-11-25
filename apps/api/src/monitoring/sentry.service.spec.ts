@@ -43,8 +43,8 @@ describe('SentryService', () => {
     service.clearUser();
     service.addBreadcrumb('orders', 'created', 'info', { id: '1' });
 
-    expect(console.log).toHaveBeenCalledWith(
-      '✅ Sentry error tracking initialized for production environment',
+    expect(console.warn).toHaveBeenCalledWith(
+      'SENTRY_DSN definido, mas o SDK do Sentry não está instalado: os erros vão apenas para o log.',
     );
     expect(console.error).toHaveBeenCalledWith('Exception (would send to Sentry):', 'boom', {
       orderId: '1',

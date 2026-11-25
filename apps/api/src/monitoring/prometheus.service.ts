@@ -52,6 +52,14 @@ function observe(series: BoundedSeries, value: number): void {
   }
 }
 
+/**
+ * Escapa valores de label no formato de exposição do Prometheus. Nomes de regra, rota ou
+ * endpoint com aspas ou quebra de linha quebravam o scrape (ou injetavam séries falsas).
+ */
+function labelValue(value: unknown): string {
+  return String(value).replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
+}
+
 @Injectable()
 export class PrometheusService {
   private httpRequestCounter: Counter = {};
@@ -175,8 +183,8 @@ export class PrometheusService {
   }
 
   getMetrics(): string {
-    let metrics = '# HELP metrics Ajust ERP Metrics\n';
-    metrics += '# TYPE metrics gauge\n\n';
+    // Sem "# TYPE metrics gauge": declarava uma métrica que não existe.
+    let metrics = '';
 
     // HTTP Requests (bounded ring + fixed histogram buckets)
     metrics += '# HTTP Requests\n';
@@ -189,19 +197,19 @@ export class PrometheusService {
       const series = this.httpRequestDuration.get(key);
       const avgDuration = this.calculateMean(series);
       const p95Duration = this.calculatePercentile(series, 95);
-      metrics += `http_requests_total{method="${method}",route="${route}",status="${status}"} ${count}\n`;
-      metrics += `http_request_duration_ms{method="${method}",route="${route}",status="${status}",quantile="mean"} ${avgDuration.toFixed(2)}\n`;
-      metrics += `http_request_duration_ms{method="${method}",route="${route}",status="${status}",quantile="p95"} ${p95Duration.toFixed(2)}\n`;
+      metrics += `http_requests_total{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}"} ${count}\n`;
+      metrics += `http_request_duration_ms{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}",quantile="mean"} ${avgDuration.toFixed(2)}\n`;
+      metrics += `http_request_duration_ms{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}",quantile="p95"} ${p95Duration.toFixed(2)}\n`;
       if (series) {
         let cumulative = 0;
         for (let i = 0; i < DURATION_BUCKETS_MS.length; i++) {
           cumulative += series.buckets[i];
-          metrics += `http_request_duration_ms_bucket{method="${method}",route="${route}",status="${status}",le="${DURATION_BUCKETS_MS[i]}"} ${cumulative}\n`;
+          metrics += `http_request_duration_ms_bucket{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}",le="${DURATION_BUCKETS_MS[i]}"} ${cumulative}\n`;
         }
         cumulative += series.buckets[DURATION_BUCKETS_MS.length];
-        metrics += `http_request_duration_ms_bucket{method="${method}",route="${route}",status="${status}",le="+Inf"} ${cumulative}\n`;
-        metrics += `http_request_duration_ms_sum{method="${method}",route="${route}",status="${status}"} ${series.sum.toFixed(2)}\n`;
-        metrics += `http_request_duration_ms_count{method="${method}",route="${route}",status="${status}"} ${series.count}\n`;
+        metrics += `http_request_duration_ms_bucket{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}",le="+Inf"} ${cumulative}\n`;
+        metrics += `http_request_duration_ms_sum{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}"} ${series.sum.toFixed(2)}\n`;
+        metrics += `http_request_duration_ms_count{method="${labelValue(method)}",route="${labelValue(route)}",status="${labelValue(status)}"} ${series.count}\n`;
       }
     }
 
@@ -215,14 +223,14 @@ export class PrometheusService {
       const [operation, model] = key.split(':');
       const avgDuration = this.calculateMean(series);
       const p95Duration = this.calculatePercentile(series, 95);
-      metrics += `database_query_duration_ms{operation="${operation}",model="${model}",quantile="mean"} ${avgDuration.toFixed(2)}\n`;
-      metrics += `database_query_duration_ms{operation="${operation}",model="${model}",quantile="p95"} ${p95Duration.toFixed(2)}\n`;
+      metrics += `database_query_duration_ms{operation="${labelValue(operation)}",model="${labelValue(model)}",quantile="mean"} ${avgDuration.toFixed(2)}\n`;
+      metrics += `database_query_duration_ms{operation="${labelValue(operation)}",model="${labelValue(model)}",quantile="p95"} ${p95Duration.toFixed(2)}\n`;
     }
 
     // Authentication Attempts
     metrics += `\n# Authentication Attempts\n`;
     for (const [status, count] of Object.entries(this.authenticationAttempts)) {
-      metrics += `authentication_attempts_total{status="${status}"} ${count}\n`;
+      metrics += `authentication_attempts_total{status="${labelValue(status)}"} ${count}\n`;
     }
 
     // Security Violations
@@ -232,20 +240,20 @@ export class PrometheusService {
     // Rate Limit Violations
     metrics += `\n# Rate Limit Violations\n`;
     for (const [endpoint, count] of Object.entries(this.rateLimitExceeded)) {
-      metrics += `rate_limit_exceeded_total{endpoint="${endpoint}"} ${count}\n`;
+      metrics += `rate_limit_exceeded_total{endpoint="${labelValue(endpoint)}"} ${count}\n`;
     }
 
     // Orders Created
     metrics += `\n# Orders Created\n`;
     for (const [key, count] of Object.entries(this.ordersCreatedCounter)) {
       const [priority, type] = key.split(':');
-      metrics += `ajust_orders_created_total{priority="${priority}",type="${type}"} ${count}\n`;
+      metrics += `ajust_orders_created_total{priority="${labelValue(priority)}",type="${labelValue(type)}"} ${count}\n`;
     }
 
     // SLA Breaches
     metrics += `\n# SLA Breaches\n`;
     for (const [tenant, count] of Object.entries(this.slaBreachesCounter)) {
-      metrics += `ajust_sla_breaches_total{tenant="${tenant}"} ${count}\n`;
+      metrics += `ajust_sla_breaches_total{tenant="${labelValue(tenant)}"} ${count}\n`;
     }
 
     // Active Sessions
@@ -256,7 +264,7 @@ export class PrometheusService {
     metrics += `\n# Workflow Executions\n`;
     for (const [key, count] of Object.entries(this.workflowExecutionsCounter)) {
       const [rule, status] = key.split(':');
-      metrics += `ajust_workflow_executions_total{rule="${rule}",status="${status}"} ${count}\n`;
+      metrics += `ajust_workflow_executions_total{rule="${labelValue(rule)}",status="${labelValue(status)}"} ${count}\n`;
     }
 
     return metrics;

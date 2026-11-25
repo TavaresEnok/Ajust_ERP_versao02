@@ -9,10 +9,11 @@ useDefault = true
 # Allow CI test secrets, dev-only test values, and docs that mention sample env values
 [allowlist]
 description = "CI placeholders, dev-only test values, and documentation"
+# Placeholders explícitos, não pastas inteiras: docs/, *.md e o ci.yml continuam
+# varridos (um segredo colado num relatório ou no workflow precisa ser pego).
 regexes = [
-  '''ci_access_secret_minimum_thirty_two_characters_x''',
-  '''ci_refresh_secret_minimum_thirty_two_characters_x''',
-  '''ci_encryption_secret_minimum_thirty_two_characters_x''',
+  '''ci_[a-z_]+_minimum_[a-z0-9_]+''',
+  '''CiOnlyPassword@123''',
   '''dev-temporary-password-change-in-prod''',
   '''postgres:postgres@localhost''',
   '''postgresql://postgres:postgres@localhost''',
@@ -24,15 +25,9 @@ paths = [
   '''(^|/)dist/''',
   '''(^|/)coverage/''',
   '''(^|/)test-results/''',
-  '''(^|/)\.env$''',
   '''(^|/)pnpm-lock\.yaml$''',
-  '''\.md$''',
-  '''(^|/)docs/''',
-  '''(^|/)README\.md$''',
-  '''(^|/)CHANGELOG\.md$''',
   '''\.env\.example$''',
   '''\.env\.staging\.example$''',
-  '''\.github/workflows/ci\.yml$''',
   '''jest\.setup\.js$''',
   '''\.gitleaks\.toml$''',
 ]

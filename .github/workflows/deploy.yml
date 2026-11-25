@@ -35,21 +35,21 @@ jobs:
       image_tag: ${{ github.sha }}
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Log in to Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
 
       - name: Extract metadata
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@c299e40c65443455700f0fdfc63efafe5b349051 # v5
         with:
           images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           tags: |
@@ -58,7 +58,7 @@ jobs:
             type=raw,value=latest
 
       - name: Build and push API image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: api
@@ -68,7 +68,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Worker image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: worker
@@ -78,7 +78,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build and push Web image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
         with:
           context: .
           target: web
@@ -89,6 +89,9 @@ jobs:
 
   deploy-staging:
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     needs: build-and-push
     environment: staging
     concurrency:
@@ -96,10 +99,10 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Upload validated staging configuration and scripts
-        uses: appleboy/scp-action@v1
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
@@ -108,7 +111,7 @@ jobs:
           target: ${{ secrets.STAGING_DEPLOY_PATH }}
 
       - name: Deploy to staging via SSH
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
@@ -116,6 +119,8 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.STAGING_DEPLOY_PATH }}
+            # O host precisa autenticar no GHCR para baixar imagens privadas.
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
 
             export IMAGE_TAG=${{ github.sha }}
             export REGISTRY=${{ env.REGISTRY }}
@@ -123,7 +128,7 @@ jobs:
             DEPLOY_ID=${{ github.run_id }}-${{ github.run_attempt }} COMPOSE_FILE=docker-compose.staging.yml bash scripts/deploy-images.sh
 
       - name: Wait for staging to be healthy
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3
         with:
           timeout_seconds: 120
           max_attempts: 24
@@ -151,7 +156,7 @@ jobs:
 
       - name: Rollback staging on failure
         if: failure()
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.STAGING_HOST }}
           username: ${{ secrets.STAGING_USER }}
@@ -163,6 +168,9 @@ jobs:
   deploy-production:
     if: ${{ github.event_name == 'workflow_dispatch' && inputs.deploy_production }}
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: read
     needs: [build-and-push, deploy-staging]
     environment: production
     concurrency:
@@ -170,10 +178,10 @@ jobs:
       cancel-in-progress: false
 
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Upload validated production configuration and scripts
-        uses: appleboy/scp-action@v1
+        uses: appleboy/scp-action@ff85246acaad7bdce478db94a363cd2bf7c90345 # v1
         with:
           host: ${{ secrets.PRODUCTION_HOST }}
           username: ${{ secrets.PRODUCTION_USER }}
@@ -182,7 +190,7 @@ jobs:
           target: ${{ secrets.PRODUCTION_DEPLOY_PATH }}
 
       - name: Deploy production via SSH
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.PRODUCTION_HOST }}
           username: ${{ secrets.PRODUCTION_USER }}
@@ -190,6 +198,8 @@ jobs:
           script: |
             set -e
             cd ${{ secrets.PRODUCTION_DEPLOY_PATH }}
+            # O host precisa autenticar no GHCR para baixar imagens privadas.
+            echo "${{ secrets.GITHUB_TOKEN }}" | docker login ${{ env.REGISTRY }} -u ${{ github.actor }} --password-stdin
             export IMAGE_TAG=${{ github.sha }}
             export REGISTRY=${{ env.REGISTRY }}
             export IMAGE_NAME=${{ env.IMAGE_NAME }}
@@ -197,7 +207,7 @@ jobs:
             DEPLOY_ID=${{ github.run_id }}-${{ github.run_attempt }} COMPOSE_FILE=docker-compose.prod.yml bash scripts/deploy-images.sh
 
       - name: Wait for production health
-        uses: nick-fields/retry@v3
+        uses: nick-fields/retry@ce71cc2ab81d554ebbe88c79ab5975992d79ba08 # v3
         with:
           timeout_seconds: 180
           max_attempts: 36
@@ -206,7 +216,7 @@ jobs:
 
       - name: Rollback production on failure
         if: failure()
-        uses: appleboy/ssh-action@v1
+        uses: appleboy/ssh-action@0ff4204d59e8e51228ff73bce53f80d53301dee2 # v1
         with:
           host: ${{ secrets.PRODUCTION_HOST }}
           username: ${{ secrets.PRODUCTION_USER }}

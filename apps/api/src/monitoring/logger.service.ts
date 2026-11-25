@@ -18,7 +18,13 @@ interface LogEntry {
 
 @Injectable()
 export class LoggerService {
-  private logDir: string;
+  /** Arquivo só quando LOG_DIR é definido: em contêiner o stdout já vai para o Docker. */
+  private logDir: string | null;
+  private readonly maxFileBytes = Math.max(
+    1024 * 1024,
+    Number(process.env.LOG_MAX_BYTES) || 50 * 1024 * 1024,
+  );
+  private readonly streams = new Map<string, { stream: fs.WriteStream; bytes: number }>();
   private lokiUrl: string | null;
   private lokiBuffer: LogEntry[] = [];
   private lokiFlushTimer: ReturnType<typeof setInterval> | null = null;
@@ -26,16 +32,51 @@ export class LoggerService {
   constructor(
     @Optional() @Inject(RequestContext) private readonly requestContext?: RequestContext,
   ) {
-    this.logDir = process.env.LOG_DIR || 'logs';
+    this.logDir = process.env.LOG_DIR?.trim() || null;
     this.lokiUrl = process.env.LOKI_URL || null;
     this.ensureLogDir();
     if (this.lokiUrl) this.startLokiFlush();
   }
 
   private ensureLogDir(): void {
-    if (!fs.existsSync(this.logDir)) {
+    if (!this.logDir) return;
+    try {
       fs.mkdirSync(this.logDir, { recursive: true });
+    } catch (error) {
+      console.error('Failed to create log dir, file logging disabled:', error);
+      this.logDir = null;
     }
+  }
+
+  /** Escrita assíncrona (não bloqueia o event loop) com rotação simples por tamanho. */
+  private appendToFile(name: string, line: string): void {
+    if (!this.logDir) return;
+    const filePath = path.join(this.logDir, name);
+    let current = this.streams.get(name);
+    if (current && current.bytes >= this.maxFileBytes) {
+      current.stream.end();
+      this.streams.delete(name);
+      try {
+        fs.renameSync(filePath, `${filePath}.1`);
+      } catch {
+        // arquivo já removido/rotacionado por fora
+      }
+      current = undefined;
+    }
+    if (!current) {
+      let bytes = 0;
+      try {
+        bytes = fs.statSync(filePath).size;
+      } catch {
+        bytes = 0;
+      }
+      const stream = fs.createWriteStream(filePath, { flags: 'a' });
+      stream.on('error', (error) => console.error('Failed to write log:', error));
+      current = { stream, bytes };
+      this.streams.set(name, current);
+    }
+    current.bytes += Buffer.byteLength(line);
+    current.stream.write(line);
   }
 
   private startLokiFlush(): void {
@@ -137,12 +178,8 @@ export class LoggerService {
     }
 
     try {
-      if (level === 'ERROR') {
-        const errorLogPath = path.join(this.logDir, 'error.log');
-        fs.appendFileSync(errorLogPath, jsonLine + '\n');
-      }
-      const combinedLogPath = path.join(this.logDir, 'combined.log');
-      fs.appendFileSync(combinedLogPath, jsonLine + '\n');
+      if (level === 'ERROR') this.appendToFile('error.log', jsonLine + '\n');
+      this.appendToFile('combined.log', jsonLine + '\n');
 
       if (this.lokiUrl) {
         this.lokiBuffer.push(entry);

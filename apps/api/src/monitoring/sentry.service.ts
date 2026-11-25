@@ -16,8 +16,11 @@ export class SentryService {
       console.warn('⚠️  SENTRY_DSN not configured. Error tracking disabled for production.');
     }
 
-    if (this.dsn && this.environment === 'production') {
-      console.log('✅ Sentry error tracking initialized for production environment');
+    // O SDK do Sentry não está instalado: não anunciar uma integração que não existe.
+    if (this.dsn) {
+      console.warn(
+        'SENTRY_DSN definido, mas o SDK do Sentry não está instalado: os erros vão apenas para o log.',
+      );
     }
   }
 

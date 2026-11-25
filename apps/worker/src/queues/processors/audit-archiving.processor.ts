@@ -1,4 +1,10 @@
-import { Inject, Injectable, Logger } from '@nestjs/common';
+import {
+  Inject,
+  Injectable,
+  Logger,
+  OnApplicationBootstrap,
+  OnModuleDestroy,
+} from '@nestjs/common';
 import { Worker, Job } from 'bullmq';
 import { PrismaService } from '../../prisma/prisma.service';
 import { QUEUE_AUDIT_ARCHIVING } from '../queue.constants';
@@ -9,11 +15,14 @@ const ARCHIVE_AFTER_DAYS = Number(process.env.AUDIT_ARCHIVE_AFTER_DAYS || 90);
 const BATCH_SIZE = 500;
 
 @Injectable()
-export class AuditArchivingProcessor {
+export class AuditArchivingProcessor implements OnApplicationBootstrap, OnModuleDestroy {
   private readonly logger = new Logger(AuditArchivingProcessor.name);
-  private worker: Worker;
+  private worker?: Worker;
 
-  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {
+  constructor(@Inject(PrismaService) private readonly prisma: PrismaService) {}
+
+  /** Só depois de todos os onModuleInit (Prisma, serviços), para o job não rodar antes. */
+  onApplicationBootstrap() {
     this.worker = new Worker(QUEUE_AUDIT_ARCHIVING, async (job: Job) => this.process(job), {
       connection: redisConnection,
       ...JOB_RETENTION,
@@ -26,6 +35,14 @@ export class AuditArchivingProcessor {
 
     this.worker.on('failed', (job, err) => {
       this.logger.error(`Audit archiving job ${job?.id} failed: ${err.message}`);
+    });
+
+    // Sem listener de 'error', uma queda do Redis vira exceção não tratada e derruba o processo.
+    this.worker.on('error', (err) => {
+      this.logger.error(`Worker error: ${err.message}`);
+    });
+    this.worker.on('stalled', (jobId) => {
+      this.logger.warn(`Job ${jobId} stalled; será reprocessado.`);
     });
   }
 
@@ -75,6 +92,6 @@ export class AuditArchivingProcessor {
   }
 
   async onModuleDestroy() {
-    await this.worker.close();
+    await this.worker?.close();
   }
 }

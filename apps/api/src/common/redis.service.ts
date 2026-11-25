@@ -22,6 +22,10 @@ export class RedisService {
   private inMemoryStore = new Map<string, { value: any; expiresAt: number }>();
   private readonly logger = new Logger(RedisService.name);
   private redisErrorLogged = false;
+  /** Depois da primeira conexão o cliente nunca desiste de reconectar. */
+  private hasConnected = false;
+  private shuttingDown = false;
+  private retryTimer: ReturnType<typeof setTimeout> | null = null;
   private errorMessage(error: unknown): string {
     return error instanceof Error ? error.message : String(error);
   }
@@ -31,6 +35,8 @@ export class RedisService {
   }
 
   async onModuleDestroy() {
+    this.shuttingDown = true;
+    if (this.retryTimer) clearTimeout(this.retryTimer);
     await this.disconnect();
   }
 
@@ -55,11 +61,18 @@ export class RedisService {
         socket: {
           connectTimeout:
             Number.isFinite(connectTimeoutMs) && connectTimeoutMs > 0 ? connectTimeoutMs : 1500,
+          // REDIS_MAX_RETRIES só limita a conexão inicial (para o dev subir sem Redis).
+          // Uma vez conectado, uma queda do Redis não pode deixar a API desconectada
+          // até um restart manual: reconecta indefinidamente com backoff.
           reconnectStrategy: (retries: number) => {
-            if (retries >= (Number.isFinite(maxRetries) && maxRetries >= 0 ? maxRetries : 1)) {
+            if (this.shuttingDown) return false;
+            if (
+              !this.hasConnected &&
+              retries >= (Number.isFinite(maxRetries) && maxRetries >= 0 ? maxRetries : 1)
+            ) {
               return false;
             }
-            return Math.min(250 * (retries + 1), 1500);
+            return Math.min(250 * (retries + 1), 5000);
           },
         },
       });
@@ -81,10 +94,12 @@ export class RedisService {
         }
         this.redisErrorLogged = false;
         this.isConnected = true;
+        this.hasConnected = true;
       });
 
       await this.client.connect();
       this.isConnected = true;
+      this.hasConnected = true;
       this.logger.log('Redis client initialized');
     } catch (error: unknown) {
       this.logger.warn(
@@ -96,6 +111,15 @@ export class RedisService {
       this.client = null;
       this.isConnected = false;
       this.redisErrorLogged = false;
+      // Em produção o fallback em memória não serve (vários processos, limites de login):
+      // continua tentando em segundo plano em vez de ficar sem Redis até um restart.
+      if (process.env.NODE_ENV === 'production' && !this.shuttingDown) {
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          void this.connect();
+        }, 5000);
+        this.retryTimer.unref?.();
+      }
     }
   }
 
@@ -122,6 +146,15 @@ export class RedisService {
       this.client = null;
       this.isConnected = false;
       this.redisErrorLogged = false;
+      // Em produção o fallback em memória não serve (vários processos, limites de login):
+      // continua tentando em segundo plano em vez de ficar sem Redis até um restart.
+      if (process.env.NODE_ENV === 'production' && !this.shuttingDown) {
+        this.retryTimer = setTimeout(() => {
+          this.retryTimer = null;
+          void this.connect();
+        }, 5000);
+        this.retryTimer.unref?.();
+      }
     }
   }
 

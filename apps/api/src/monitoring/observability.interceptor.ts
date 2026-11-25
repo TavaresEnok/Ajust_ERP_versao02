@@ -3,6 +3,7 @@ import {
   NestInterceptor,
   ExecutionContext,
   CallHandler,
+  Inject,
   Optional,
 } from '@nestjs/common';
 import { Observable } from 'rxjs';
@@ -33,8 +34,10 @@ export function normalizeMetricRoute(request: {
 @Injectable()
 export class ObservabilityInterceptor implements NestInterceptor {
   constructor(
-    @Optional() private readonly prometheusService?: PrometheusService,
-    @Optional() private readonly loggerService?: LoggerService,
+    // @Inject explícito: sem metadados de tipo (tsx/esbuild) o Nest injetava undefined e as
+    // métricas HTTP nunca eram registradas.
+    @Optional() @Inject(PrometheusService) private readonly prometheusService?: PrometheusService,
+    @Optional() @Inject(LoggerService) private readonly loggerService?: LoggerService,
   ) {}
 
   intercept(context: ExecutionContext, next: CallHandler): Observable<any> {

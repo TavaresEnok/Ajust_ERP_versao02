@@ -5,10 +5,10 @@ services:
     environment:
       DRAWIO_SERVER_URL: /drawio/
       JAVA_OPTS: -Xms64m -Xmx384m
-    expose: ["8080"]
+    expose: ['8080']
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8080/drawio/index.html"]
+      test: ['CMD', 'curl', '-fsS', 'http://127.0.0.1:8080/drawio/index.html']
       interval: 15s
       timeout: 5s
       retries: 3
@@ -18,9 +18,10 @@ services:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/web:${IMAGE_TAG:-latest}
     ports:
       # Só na máquina: o acesso público é pelo Caddy (HTTPS do staging).
-      - "127.0.0.1:${WEB_PORT:-8080}:3000"
-    env_file:
-      - ${STAGING_ENV_FILE:-.env.staging}
+      - '127.0.0.1:${WEB_PORT:-8080}:3000'
+    # Sem env_file: o web é exposto e não precisa dos segredos do backend.
+    security_opt:
+      - no-new-privileges:true
     environment:
       - NODE_ENV=production
       # O Next standalone escuta em $HOSTNAME; com o id do contêiner, o healthcheck em 127.0.0.1 falha.
@@ -29,6 +30,7 @@ services:
       - API_INTERNAL_URL=http://api:3001
       - API_BASE_URL=${API_BASE_URL}
       - WS_PUBLIC_URL=${API_BASE_URL}
+      - COOKIE_INSECURE=${COOKIE_INSECURE:-false}
     depends_on:
       drawio:
         condition: service_healthy
@@ -36,7 +38,7 @@ services:
         condition: service_healthy
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3000/ || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3000/ || exit 1']
       interval: 30s
       timeout: 10s
       retries: 3
@@ -45,14 +47,14 @@ services:
       resources:
         limits:
           memory: 512M
-          cpus: "0.75"
+          cpus: '0.75'
 
   # ── API (NestJS) ─────────────────────────────────────────
   api:
     image: ${REGISTRY:-ghcr.io}/${IMAGE_NAME:-tavaresenok/ajust-erp}/api:${IMAGE_TAG:-latest}
     ports:
       # Mesma porta usada pelo Caddy para o /socket.io.
-      - "127.0.0.1:${API_PORT:-8081}:3001"
+      - '127.0.0.1:${API_PORT:-8081}:3001'
     env_file:
       - ${STAGING_ENV_FILE:-.env.staging}
     environment:
@@ -96,7 +98,11 @@ services:
         condition: service_healthy
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3001/monitoring/ready | grep -q '\"ready\":true' || exit 1"]
+      test:
+        [
+          'CMD-SHELL',
+          'wget -qO- http://127.0.0.1:3001/monitoring/ready | grep -q ''"ready":true'' || exit 1',
+        ]
       interval: 20s
       timeout: 10s
       retries: 5
@@ -105,7 +111,7 @@ services:
       resources:
         limits:
           memory: 1G
-          cpus: "1.0"
+          cpus: '1.0'
 
   # ── Worker (Sync/Jobs) ───────────────────────────────────
   worker:
@@ -138,7 +144,7 @@ services:
         condition: service_healthy
     restart: always
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:3002/health | grep -q '\"status\"' || exit 1"]
+      test: ['CMD-SHELL', 'wget -qO- http://127.0.0.1:3002/health | grep -q ''"status"'' || exit 1']
       interval: 30s
       timeout: 10s
       retries: 5
@@ -147,7 +153,7 @@ services:
       resources:
         limits:
           memory: 512M
-          cpus: "0.5"
+          cpus: '0.5'
 
   # ── PostgreSQL ───────────────────────────────────────────
   postgres:
@@ -159,7 +165,7 @@ services:
     volumes:
       - postgres_staging_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ajust_staging -d ajust_staging"]
+      test: ['CMD-SHELL', 'pg_isready -U ajust_staging -d ajust_staging']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -169,7 +175,7 @@ services:
       resources:
         limits:
           memory: 1G
-          cpus: "1.0"
+          cpus: '1.0'
 
   # ── Redis (Pub/Sub + Sessions) ───────────────────────────
   redis:
@@ -179,7 +185,7 @@ services:
     command:
       - redis-server
       - --save
-      - "60 1"
+      - '60 1'
       - --loglevel
       - warning
       - --maxmemory
@@ -187,13 +193,13 @@ services:
       - --maxmemory-policy
       - noeviction
       - --appendonly
-      - "yes"
+      - 'yes'
       - --requirepass
       - ${REDIS_PASSWORD:?Defina REDIS_PASSWORD}
     volumes:
       - redis_staging_data:/data
     healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
+      test: ['CMD', 'redis-cli', 'ping']
       interval: 10s
       timeout: 5s
       retries: 5
@@ -202,7 +208,7 @@ services:
       resources:
         limits:
           memory: 300M
-          cpus: "0.25"
+          cpus: '0.25'
 
 volumes:
   postgres_staging_data:
