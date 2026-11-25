@@ -131,7 +131,15 @@ export class RedisService {
 
     try {
       if (this.client.isOpen) {
-        await this.client.quit();
+        // Com o Redis fora do ar o QUIT fica esperando uma reconexão que não vem e prende o
+        // desligamento: dá 2 s e depois corta a conexão.
+        let timer: ReturnType<typeof setTimeout> | undefined;
+        await Promise.race([
+          this.client.quit(),
+          new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new Error('QUIT sem resposta em 2 s')), 2000);
+          }),
+        ]).finally(() => clearTimeout(timer));
       }
       this.logger.log('Redis client disconnected');
     } catch (error: unknown) {
