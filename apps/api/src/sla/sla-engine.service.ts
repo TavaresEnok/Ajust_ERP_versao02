@@ -1,5 +1,5 @@
 import { BadRequestException, ConflictException, Inject, Injectable } from '@nestjs/common';
-import { Priority, ServiceOrderType } from '@prisma/client';
+import { BusinessCalendarException, Priority, ServiceOrderType } from '@prisma/client';
 import { fromZonedTime, toZonedTime } from 'date-fns-tz';
 import { PrismaService } from '../prisma/prisma.service';
 
@@ -131,6 +131,7 @@ export class SlaEngineService {
         data.endTime ?? dayConfig.endTime,
       );
     }
+    this.forgetCalendarExceptions(tenantId);
     try {
       return await this.prisma.businessCalendarException.create({
         data: {
@@ -164,6 +165,7 @@ export class SlaEngineService {
     await this.prisma.businessCalendarException.deleteMany({
       where: { id, tenantId },
     });
+    this.forgetCalendarExceptions(tenantId);
     return { success: true };
   }
 
@@ -375,14 +377,37 @@ export class SlaEngineService {
     }
   }
 
+  /**
+   * O cálculo de prazo percorre dia a dia e consultava o banco a cada dia (N+1). Guarda a
+   * resposta por (tenant, dia) por 60 s; cadastrar/remover exceção limpa o tenant.
+   */
+  private readonly exceptionCache = new Map<
+    string,
+    { expiresAt: number; value: Promise<BusinessCalendarException | null> }
+  >();
+
+  private forgetCalendarExceptions(tenantId: string) {
+    for (const key of this.exceptionCache.keys())
+      if (key.startsWith(`${tenantId}|`)) this.exceptionCache.delete(key);
+  }
+
   private getCalendarExceptionForWallDate(tenantId: string, wallDate: Date) {
     // Exceções são gravadas como "AAAA-MM-DDT00:00:00Z". A data de parede (fuso do tenant)
     // vem nos campos locais do objeto; montar a chave em UTC a partir deles não depende do
     // fuso do processo Node (C-026).
     const day = new Date(Date.UTC(wallDate.getFullYear(), wallDate.getMonth(), wallDate.getDate()));
-    return this.prisma.businessCalendarException.findUnique({
+    const key = `${tenantId}|${day.toISOString().slice(0, 10)}`;
+    const now = Date.now();
+    const cached = this.exceptionCache.get(key);
+    if (cached && cached.expiresAt > now) return cached.value;
+    if (this.exceptionCache.size > 5000) this.exceptionCache.clear();
+    const value = this.prisma.businessCalendarException.findUnique({
       where: { tenantId_date: { tenantId, date: day } },
     });
+    // Erro de banco não fica em cache.
+    value.catch(() => this.exceptionCache.delete(key));
+    this.exceptionCache.set(key, { expiresAt: now + 60_000, value });
+    return value;
   }
 
   private assertValidSchedule(startTime: string, endTime: string): void {
