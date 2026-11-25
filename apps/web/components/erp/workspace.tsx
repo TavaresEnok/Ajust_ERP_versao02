@@ -2,26 +2,7 @@
 import { Suspense } from 'react';
 import Link from 'next/link';
 import { AppShell } from './app-shell';
-import { Dashboard } from './dashboard';
-import { ShiftReportsPage } from './shift-reports';
-import { AnalystDashboard } from './analyst-dashboard';
-import { OrdersPage, OrderDetail } from './orders';
-import { OrderForm } from './order-form';
-import { TechniciansPage, TechnicianDetail } from './people-pages';
-import { CalendarPage, OccurrencesPage } from './calendar-pages';
-import { KnowledgePage } from './knowledge-pages';
-import { CredentialsPage, NotesPage } from './personal-pages';
-import { SlaPage, HealthPage } from './monitor-pages';
-import { ReportsPage } from './reports-page';
-import { OnCallPage, OrderTrailPage } from './operational-pages';
-import { CatalogPage } from './catalog-pages';
-import { ServiceTypesAnalyticsPage } from './service-types-analytics';
-import { TenantsPage } from './tenants-page';
-import { SettingsPage, NotificationsConfigPage } from './settings-pages';
-import { SecurityPage, IntegrationsPage } from './security-pages';
 import { AuthPage, SatisfactionPage } from './public-pages';
-import { CustomerPortal } from './customer-portal';
-import { SecurityWorkspace } from './security-workspace';
 import { PageHeading } from './primitives';
 import dynamic from 'next/dynamic';
 import { modules } from '@/lib/erp/modules';
@@ -30,6 +11,67 @@ import { canAccessSection } from '@/lib/erp/access';
 import { ModuleSurface } from './module-surface';
 import { detailTabLabels } from '@/lib/erp/routes';
 import { operationalSections } from './operational-router';
+// Cada tela carrega só quando é aberta: com imports estáticos, até o /login baixava o ERP
+// inteiro (gráficos, editor de fluxos, cofre).
+const Dashboard = dynamic(() => import('./dashboard').then((module) => module.Dashboard));
+const ShiftReportsPage = dynamic(() =>
+  import('./shift-reports').then((module) => module.ShiftReportsPage),
+);
+const AnalystDashboard = dynamic(() =>
+  import('./analyst-dashboard').then((module) => module.AnalystDashboard),
+);
+const OrdersPage = dynamic(() => import('./orders').then((module) => module.OrdersPage));
+const OrderDetail = dynamic(() => import('./orders').then((module) => module.OrderDetail));
+const OrderForm = dynamic(() => import('./order-form').then((module) => module.OrderForm));
+const TechniciansPage = dynamic(() =>
+  import('./people-pages').then((module) => module.TechniciansPage),
+);
+const TechnicianDetail = dynamic(() =>
+  import('./people-pages').then((module) => module.TechnicianDetail),
+);
+const CalendarPage = dynamic(() =>
+  import('./calendar-pages').then((module) => module.CalendarPage),
+);
+const OccurrencesPage = dynamic(() =>
+  import('./calendar-pages').then((module) => module.OccurrencesPage),
+);
+const KnowledgePage = dynamic(() =>
+  import('./knowledge-pages').then((module) => module.KnowledgePage),
+);
+const CredentialsPage = dynamic(() =>
+  import('./personal-pages').then((module) => module.CredentialsPage),
+);
+const NotesPage = dynamic(() => import('./personal-pages').then((module) => module.NotesPage));
+const SlaPage = dynamic(() => import('./monitor-pages').then((module) => module.SlaPage));
+const HealthPage = dynamic(() => import('./monitor-pages').then((module) => module.HealthPage));
+const ReportsPage = dynamic(() => import('./reports-page').then((module) => module.ReportsPage));
+const OnCallPage = dynamic(() => import('./operational-pages').then((module) => module.OnCallPage));
+const OrderTrailPage = dynamic(() =>
+  import('./operational-pages').then((module) => module.OrderTrailPage),
+);
+const CatalogPage = dynamic(() => import('./catalog-pages').then((module) => module.CatalogPage));
+const ServiceTypesAnalyticsPage = dynamic(() =>
+  import('./service-types-analytics').then((module) => module.ServiceTypesAnalyticsPage),
+);
+const TenantsPage = dynamic(() => import('./tenants-page').then((module) => module.TenantsPage));
+const SettingsPage = dynamic(() =>
+  import('./settings-pages').then((module) => module.SettingsPage),
+);
+const NotificationsConfigPage = dynamic(() =>
+  import('./settings-pages').then((module) => module.NotificationsConfigPage),
+);
+const SecurityPage = dynamic(() =>
+  import('./security-pages').then((module) => module.SecurityPage),
+);
+const IntegrationsPage = dynamic(() =>
+  import('./security-pages').then((module) => module.IntegrationsPage),
+);
+const CustomerPortal = dynamic(() =>
+  import('./customer-portal').then((module) => module.CustomerPortal),
+);
+const SecurityWorkspace = dynamic(() =>
+  import('./security-workspace').then((module) => module.SecurityWorkspace),
+);
 const AuditWorkspace = dynamic(() =>
   import('./audit-workspace').then((module) => module.AuditWorkspace),
 );

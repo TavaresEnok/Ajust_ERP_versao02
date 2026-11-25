@@ -18,7 +18,11 @@ export function ModuleSurface({ children }: { children: ReactNode }) {
     occurrences: 'incidents',
     calendar: 'events',
   };
-  const query = useVisualSource(visualKey[moduleKey] || moduleKey || '');
+  // Só a tela de detalhe precisa conferir se o registro existe. Nas listagens a própria página
+  // busca o que mostra; buscar aqui baixava a lista inteira do módulo (inclusive todas as O.S.
+  // e o cofre) a cada navegação.
+  const checksRecord = Boolean(id && moduleKey && !['nova', 'novo'].includes(id));
+  const query = useVisualSource(checksRecord ? visualKey[moduleKey] || moduleKey : '');
   const base = useRouteBase();
   const missing =
     id &&
@@ -46,7 +50,6 @@ export function ModuleSurface({ children }: { children: ReactNode }) {
   return (
     <>
       {!query.connected && <ConnectionNotice />}
-      <QueryState error={!id ? query.error : undefined} onRetry={() => void query.mutate()} />
       {children}
     </>
   );
