@@ -78,4 +78,27 @@ describe('service-order-operational (sem teto de 10.000 O.S.)', () => {
     expect(result.offset).toBe(40);
     expect(result.items.map((item) => item.id)).toEqual(['ord-2', 'ord-1']);
   });
+
+  it('busca trata %, _ e \\ digitados como texto, não como curingas', async () => {
+    const queryRaw = jest
+      .fn()
+      .mockResolvedValueOnce([{ total: 0n }])
+      .mockResolvedValueOnce([]);
+    const prisma = {
+      $queryRaw: queryRaw,
+      serviceOrder: { findMany: jest.fn().mockResolvedValue([]) },
+    } as unknown as PrismaService;
+
+    await getOperationalQueue(prisma, 'tenant-1', {
+      scope: 'operation',
+      focus: 'all',
+      limit: 20,
+      offset: 0,
+      role: 'gerente',
+      search: ' 100%_a\\b ',
+    });
+
+    const values = queryRaw.mock.calls[0][0].values as unknown[];
+    expect(values).toContain('%100\\%\\_a\\\\b%');
+  });
 });

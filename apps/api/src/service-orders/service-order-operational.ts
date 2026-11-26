@@ -437,7 +437,8 @@ export async function getOperationalQueue(
 
   const trimmedSearch = input.search?.trim();
   if (trimmedSearch) {
-    const pattern = `%${trimmedSearch}%`;
+    // `%`, `_` e `\` digitados são texto, não curingas do ILIKE (como faz o `contains` do Prisma).
+    const pattern = `%${trimmedSearch.replace(/[\\%_]/g, '\\$&')}%`;
     conditions.push(
       Prisma.sql`(
         so."protocol" ILIKE ${pattern}

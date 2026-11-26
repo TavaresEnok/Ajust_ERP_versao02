@@ -328,6 +328,13 @@ model Occurrence {
   @@index([tenantId, provider, createdAt(sort: Desc)])
   @@index([tenantId, status, createdAt(sort: Desc)])
   @@index([tenantId, customerId, status])
+  // Busca "contém" (ILIKE) usa estes índices de trigramas (pg_trgm).
+  @@index([number(ops: raw("gin_trgm_ops"))], type: Gin, map: "Occurrence_number_trgm_idx")
+  @@index([provider(ops: raw("gin_trgm_ops"))], type: Gin, map: "Occurrence_provider_trgm_idx")
+  @@index([type(ops: raw("gin_trgm_ops"))], type: Gin, map: "Occurrence_type_trgm_idx")
+  @@index([sector(ops: raw("gin_trgm_ops"))], type: Gin, map: "Occurrence_sector_trgm_idx")
+  @@index([origin(ops: raw("gin_trgm_ops"))], type: Gin, map: "Occurrence_origin_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "Occurrence_description_trgm_idx")
 }
 
 model Role {
@@ -478,6 +485,13 @@ model ServiceOrder {
   @@index([tenantId, createdAt])
   @@index([tenantId, assigneeUserId, status])
   @@index([tenantId, ownerUserId])
+  // Busca "contém" (ILIKE) usa estes índices de trigramas (pg_trgm).
+  @@index([protocol(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceOrder_protocol_trgm_idx")
+  @@index([externalProtocol(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceOrder_externalProtocol_trgm_idx")
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceOrder_title_trgm_idx")
+  @@index([description(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceOrder_description_trgm_idx")
+  @@index([requester(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceOrder_requester_trgm_idx")
+  @@index([analystName(ops: raw("gin_trgm_ops"))], type: Gin, map: "ServiceOrder_analystName_trgm_idx")
 }
 
 model ServiceOrderOccurrence {
@@ -789,6 +803,9 @@ model KnowledgeArticle {
 
   @@unique([tenantId, slug])
   @@index([tenantId, isPublished])
+  // Busca "contém" (ILIKE) usa estes índices de trigramas (pg_trgm).
+  @@index([title(ops: raw("gin_trgm_ops"))], type: Gin, map: "KnowledgeArticle_title_trgm_idx")
+  @@index([content(ops: raw("gin_trgm_ops"))], type: Gin, map: "KnowledgeArticle_content_trgm_idx")
 }
 
 model KnowledgeTag {
